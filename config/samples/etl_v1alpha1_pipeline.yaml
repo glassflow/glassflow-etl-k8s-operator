@@ -1,0 +1,8 @@
+apiVersion: etl.glassflow.io/v1alpha1
+kind: Pipeline
+metadata:
+  labels:
+    app.kubernetes.io/name: glassflow-etl-k8s-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: sample-pipeline
+spec: {} # TODO: Must be filled by user
