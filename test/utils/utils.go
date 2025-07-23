@@ -34,6 +34,8 @@ const (
 
 	certmanagerVersion = "v1.16.3"
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
+
+	natsHelmchartURL = "https://nats-io.github.io/k8s/helm/charts/"
 )
 
 func warnError(err error) {
@@ -58,6 +60,47 @@ func Run(cmd *exec.Cmd) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+func InstallNATS() error {
+	cmd := exec.Command("helm", "repo", "add", "nats", natsHelmchartURL)
+	_, err := Run(cmd)
+	if err != nil {
+		return fmt.Errorf("add nats repo: %w", err)
+	}
+
+	cmd = exec.Command(
+		"helm", "install", "nats", "nats/nats",
+		"--set", "config.jetstream.enabled=true",
+		"--set", "config.cluster.enabled=true",
+		"--set", "service.enabled=true",
+		"--set", "service.ports.nats.enabled=true",
+		"--set", "service.ports.monitor.enabled=false",
+	)
+	_, err = Run(cmd)
+	if err != nil {
+		return fmt.Errorf("install nats: %w", err)
+	}
+
+	return nil
+}
+
+func IsNATSInstalled() bool {
+	cmd := exec.Command("kubectl", "exec", "--it", "deployment/nats-box", "--", "nats pub test hi")
+	output, err := Run(cmd)
+	if err != nil {
+		return false
+	}
+
+	return strings.Contains(output, "Published 2 bytes to test")
+}
+
+func UninstallNATS() {
+	cmd := exec.Command("helm", "delete", "nats")
+	_, err := Run(cmd)
+	if err != nil {
+		warnError(fmt.Errorf("uninstall nats: %w", err))
+	}
 }
 
 // InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.

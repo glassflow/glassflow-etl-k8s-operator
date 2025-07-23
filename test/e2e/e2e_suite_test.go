@@ -40,6 +40,8 @@ var (
 	isPrometheusOperatorAlreadyInstalled = false
 	// isCertManagerAlreadyInstalled will be set true when CertManager CRDs be found on the cluster
 	isCertManagerAlreadyInstalled = false
+	// isNATSAlreadyInstalled will be set true when a msg be pulished on test JS
+	isNATSAlreadyInstalled = false
 
 	// projectImage is the name of the image which will be build and loaded
 	// with the code source changes to be tested.
@@ -95,6 +97,15 @@ var _ = BeforeSuite(func() {
 			_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: CertManager is already installed. Skipping installation...\n")
 		}
 	}
+
+	By("installing NATS")
+	isNATSAlreadyInstalled = utils.IsNATSInstalled()
+	if !isNATSAlreadyInstalled {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Installing NATS...\n")
+		Expect(utils.InstallNATS()).To(Succeed(), "Failed to install NATS")
+	} else {
+		_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: NATS is already installed. Skipping installation...\n")
+	}
 })
 
 var _ = AfterSuite(func() {
@@ -106,5 +117,10 @@ var _ = AfterSuite(func() {
 	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
 		utils.UninstallCertManager()
+	}
+
+	if !isCertManagerAlreadyInstalled {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling NATS...\n")
+		utils.UninstallNATS()
 	}
 })
