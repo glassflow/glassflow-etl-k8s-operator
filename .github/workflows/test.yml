@@ -9,6 +9,9 @@ jobs:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
     steps:
+      - name: Start NATS with Jetstream
+        run: docker run -d -p 4222:4222 -p 8222:8222 nats:latest -js -m 8222
+
       - name: Clone the code
         uses: actions/checkout@v4
 
@@ -16,6 +19,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Wait for NATS to be ready
+        run: |
+          while ! curl -fs localhost:8222/varz > /dev/null
+            do sleep 1
+          done
 
       - name: Running Tests
         run: |
