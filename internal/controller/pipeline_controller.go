@@ -47,6 +47,9 @@ type PipelineReconciler struct {
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -298,7 +301,7 @@ func (r *PipelineReconciler) setupIngestors(ctx context.Context, _ logr.Logger, 
 
 		container := newComponentContainerBuilder().
 			withName(resourceRef).
-			withImage("ghcr.io/glassflow/glassflow-etl-ingestor:3dc90c0d2adb513ba548bf766ef6303317caac6b").
+			withImage("ghcr.io/glassflow/glassflow-etl-ingestor:glassflow-cloud").
 			withVolumeMount(v1.VolumeMount{
 				Name:      "config",
 				ReadOnly:  true,
@@ -345,7 +348,7 @@ func (r *PipelineReconciler) setupJoin(ctx context.Context, ns v1.Namespace, lab
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-join:3dc90c0d2adb513ba548bf766ef6303317caac6b").
+		withImage("ghcr.io/glassflow/glassflow-etl-join:glassflow-cloud").
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
@@ -391,7 +394,7 @@ func (r *PipelineReconciler) setupSink(ctx context.Context, ns v1.Namespace, lab
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-sink:3dc90c0d2adb513ba548bf766ef6303317caac6b").
+		withImage("ghcr.io/glassflow/glassflow-etl-sink:glassflow-cloud").
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
