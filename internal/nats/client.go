@@ -33,11 +33,11 @@ func New(url string) (*NATSClient, error) {
 	}, nil
 }
 
-func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name, subject string, dedupWindow time.Duration) error {
+func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedupWindow time.Duration) error {
 	//nolint:exhaustruct // readability
 	sc := jetstream.StreamConfig{
 		Name:     name,
-		Subjects: []string{subject},
+		Subjects: []string{name + ".>"},
 		Storage:  jetstream.FileStorage,
 
 		Retention: jetstream.LimitsPolicy,

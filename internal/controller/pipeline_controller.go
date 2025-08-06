@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"strconv"
-	"strings"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -78,9 +76,6 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if !p.DeletionTimestamp.IsZero() {
-		fmt.Println("DELETION TIMESTAMP")
-		fmt.Println(p.GetDeletionTimestamp())
-
 		// TODO: sync delete logic
 		err := r.reconcileDeletion(ctx, log, p)
 		if err != nil {
@@ -98,131 +93,25 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&etlv1alpha1.Pipeline{}).
-		Named("pipeline").
-		Complete(r)
-}
-
-func ptrInt32(i int32) *int32 {
-	return &i
-}
-
-//nolint:unparam // will reuse the deployment in future
-func (r *PipelineReconciler) getOrCreateDeployment(ctx context.Context, deployment *appsv1.Deployment) (*appsv1.Deployment, error) {
-	err := r.Create(ctx, deployment, &client.CreateOptions{})
-	if err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return deployment, nil
-		}
-
-		return nil, fmt.Errorf("create deployment: %w", err)
-	}
-
-	return deployment, nil
-}
-
-func (r *PipelineReconciler) getOrCreateSecret(ctx context.Context, namespacedName types.NamespacedName, labels, secret map[string]string) (zero v1.Secret, _ error) {
-	s := v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      namespacedName.Name,
-			Namespace: namespacedName.Namespace,
-			Labels:    labels,
-		},
-		StringData: secret,
-		Type:       v1.SecretTypeOpaque,
-	}
-	err := r.Create(ctx, &s, &client.CreateOptions{})
-	if err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return s, nil
-		}
-		return zero, fmt.Errorf("create secret %s: %w", namespacedName, err)
-	}
-
-	return s, nil
-}
-
-const (
-	defaultStreamSubject = "input"
-	DLQSuffix            = "DLQ"
-	DLQSubject           = "failed"
-)
-
-type streamsConfig struct {
-	Sources map[string]string
-	Join    string
-	Sink    string
-}
-
-func (r *PipelineReconciler) setupNATSStreams(ctx context.Context, id string, join etlv1alpha1.JoinOperatorConfig, ingestorTopics []etlv1alpha1.KafkaTopicsConfig) (zero streamsConfig, _ error) {
-	var streamCfg streamsConfig
-	var sourceStreamsMap = make(map[string]string, len(ingestorTopics))
-
-	// create DLQ
-	DLQStream := fmt.Sprintf("%s-%s", id, DLQSuffix)
-	err := r.NATSClient.CreateOrUpdateStream(ctx, DLQStream, fmt.Sprintf("%s.%s", DLQStream, DLQSubject), 0)
-	if err != nil {
-		return zero, fmt.Errorf("create stream %s: %w", DLQStream, err)
-	}
-
-	// create join stream
-	if join.Enabled {
-		stream := fmt.Sprintf("%s-%s", id, "join")
-		err := r.NATSClient.CreateOrUpdateStream(ctx, stream, fmt.Sprintf("%s.%s", stream, defaultStreamSubject), 0)
-		if err != nil {
-			return zero, fmt.Errorf("create stream %s: %w", stream, err)
-		}
-
-		streamCfg.Join = stream
-		streamCfg.Sink = stream
-	}
-
-	// create source streams
-	for _, t := range ingestorTopics {
-		stream := fmt.Sprintf("%s-%s", id, t.Name)
-		err := r.NATSClient.CreateOrUpdateStream(ctx, stream, fmt.Sprintf("%s.%s", stream, defaultStreamSubject), t.Deduplication.Window)
-		if err != nil {
-			return zero, fmt.Errorf("create stream %s: %w", stream, err)
-		}
-
-		sourceStreamsMap[t.Name] = stream
-		streamCfg.Sink = stream
-	}
-	streamCfg.Sources = sourceStreamsMap
-
-	return streamCfg, nil
-}
-
-func (r *PipelineReconciler) reconcileDeletion(_ context.Context, _ logr.Logger, _ etlv1alpha1.Pipeline) error {
-	// TODO: reconcile deletion
-	// Add finalizer to the namespace or delete it in the end?
-	// Delete ingestor deployments and secrets
-	// Wait for NATS stream for join to be empty (i.e. 0 messages) if enabled
-	// Delete join deployment and secret
-	// Wait for NATS stream for sink to be empty (i.e. 0 messages) if enabled
-	// Delete sink deployment and secret
-	return nil
-}
-
 func (r *PipelineReconciler) reconcileCreation(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	ns, err := r.setupNamespace(ctx, p)
 	if err != nil {
 		return fmt.Errorf("setup namespace: %w", err)
 	}
 
-	// TODO: use these nats streams as evn vars for join / sink
-	// TODO: may be pass the whole pipeline?
-	_, err = r.setupNATSStreams(ctx, p.Spec.ID, p.Spec.Join, p.Spec.Ingestor.KafkaTopics)
+	err = r.setupNATSStreams(ctx, p)
 	if err != nil {
 		return fmt.Errorf("setup streams: %w", err)
 	}
 
 	labels := r.preparePipelineLabels(p)
 
-	err = r.setupIngestors(ctx, log, ns, labels, p)
+	secret, err := r.getOrCreateSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: p.Spec.ID}, labels, p)
+	if err != nil {
+		return fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
+	}
+
+	err = r.setupIngestors(ctx, log, ns, labels, secret, p)
 	if err != nil {
 		p.Status.IngestorOperatorStatus = etlv1alpha1.ComponentStatusStopped
 		return fmt.Errorf("setup ingestors: %w", err)
@@ -230,7 +119,7 @@ func (r *PipelineReconciler) reconcileCreation(ctx context.Context, log logr.Log
 	p.Status.IngestorOperatorStatus = etlv1alpha1.ComponentStatusStarted
 
 	if p.Spec.Join.Enabled {
-		err := r.setupJoin(ctx, log, ns, labels, p)
+		err := r.setupJoin(ctx, ns, labels, secret)
 		if err != nil {
 			p.Status.JoinOperatorStatus = etlv1alpha1.ComponentStatusStopped
 			return fmt.Errorf("setup join: %w", err)
@@ -240,7 +129,7 @@ func (r *PipelineReconciler) reconcileCreation(ctx context.Context, log logr.Log
 		p.Status.JoinOperatorStatus = etlv1alpha1.ComponentStatusNone
 	}
 
-	err = r.setupSink(ctx, log, ns, labels, p)
+	err = r.setupSink(ctx, ns, labels, secret)
 	if err != nil {
 		p.Status.SinkOperatorStatus = etlv1alpha1.ComponentStatusStopped
 		return fmt.Errorf("setup sink: %w", err)
@@ -284,6 +173,90 @@ func (r *PipelineReconciler) setupNamespace(ctx context.Context, p etlv1alpha1.P
 	return ns, nil
 }
 
+func (r *PipelineReconciler) setupNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	// create DLQ
+	err := r.NATSClient.CreateOrUpdateStream(ctx, p.Spec.DLQ, 0)
+	if err != nil {
+		return fmt.Errorf("create stream %s: %w", p.Spec.DLQ, err)
+	}
+
+	// create source streams
+	for _, s := range p.Spec.Ingestor.Streams {
+		err := r.NATSClient.CreateOrUpdateStream(ctx, s.OutputStream, s.DedupWindow)
+		if err != nil {
+			return fmt.Errorf("create stream %s: %w", s.OutputStream, err)
+		}
+	}
+
+	// create join stream
+	if p.Spec.Join.Enabled {
+		err := r.NATSClient.CreateOrUpdateStream(ctx, p.Spec.Join.OutputStream, 0)
+		if err != nil {
+			return fmt.Errorf("create stream %s: %w", p.Spec.Join.OutputStream, err)
+		}
+	}
+
+	return nil
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&etlv1alpha1.Pipeline{}).
+		Named("pipeline").
+		Complete(r)
+}
+
+//nolint:unparam // will reuse the deployment in future
+func (r *PipelineReconciler) createDeploymentIfNotExists(ctx context.Context, deployment *appsv1.Deployment) error {
+	err := r.Create(ctx, deployment, &client.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+
+		return fmt.Errorf("create deployment: %w", err)
+	}
+
+	return nil
+}
+
+func (r *PipelineReconciler) getOrCreateSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
+	s := v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      namespacedName.Name,
+			Namespace: namespacedName.Namespace,
+			Labels:    labels,
+		},
+		Immutable: ptrBool(true),
+		StringData: map[string]string{
+			"pipeline.json": p.Spec.Config,
+		},
+		Type: v1.SecretTypeOpaque,
+	}
+	err := r.Create(ctx, &s, &client.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return s, nil
+		}
+		return zero, fmt.Errorf("create secret %s: %w", namespacedName, err)
+	}
+
+	return s, nil
+}
+
+func (r *PipelineReconciler) reconcileDeletion(_ context.Context, _ logr.Logger, _ etlv1alpha1.Pipeline) error {
+	// TODO: reconcile deletion
+	// Add finalizer to the namespace or delete it in the end?
+	// Delete ingestor deployments
+	// Wait for NATS stream for join to be empty (i.e. 0 messages) if enabled
+	// Delete join deployment
+	// Wait for NATS stream for sink to be empty (i.e. 0 messages) if enabled
+	// Delete sink deployment
+	// Delete namespace - this should delete secret too
+	return nil
+}
+
 func (*PipelineReconciler) preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 	return map[string]string{"etl.glassflow.io/pipeline-id": p.Spec.ID}
 }
@@ -313,53 +286,48 @@ func (r *PipelineReconciler) getSinkLabels() map[string]string {
 	return labels
 }
 
-func (r *PipelineReconciler) setupIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) setupIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+	// TODO: incase of multiple ingestors, ensure type and relevant images
 	ing := p.Spec.Ingestor
 
-	for i, t := range ing.KafkaTopics {
+	for i, t := range ing.Streams {
 		resourceRef := fmt.Sprintf("ingestor-%d", i)
 
-		kafkaCfg := ing.KafkaConnectionParams
-
-		secret, err := r.getOrCreateSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: resourceRef}, labels, map[string]string{
-			"brokers":               strings.Join(kafkaCfg.Brokers, ","),
-			"skip_auth":             strconv.FormatBool(kafkaCfg.SkipAuth),
-			"protocol":              kafkaCfg.SASLProtocol,
-			"mechanism":             kafkaCfg.SASLMechanism,
-			"username":              kafkaCfg.SASLUsername,
-			"password":              kafkaCfg.SASLPassword,
-			"root_ca":               kafkaCfg.TLSRoot,
-			"tls_enabled":           strconv.FormatBool(kafkaCfg.SASLTLSEnable),
-			"topic":                 t.Name,
-			"initial_offset":        t.ConsumerGroupInitialOffset,
-			"deduplication_enabled": strconv.FormatBool(t.Deduplication.Enabled),
-			"deduplication_key":     t.Deduplication.ID,
-			"deduplication_type":    t.Deduplication.Type,
-			"deduplication_window":  t.Deduplication.Window.String(),
-		})
-		if err != nil {
-			return fmt.Errorf("create secret for topic %s: %w", t.Name, err)
-		}
-
-		maps.Copy(labels, r.getKafkaIngestorLabels(t.Name))
+		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
+		maps.Copy(ingestorLabels, labels)
 
 		container := newComponentContainerBuilder().
 			withName(resourceRef).
-			withImage("ghcr.io/glassflow/glassflow-etl-ingestor:glassflow-cloud").
+			withImage("ghcr.io/glassflow/glassflow-etl-ingestor:3dc90c0d2adb513ba548bf766ef6303317caac6b").
+			withVolumeMount(v1.VolumeMount{
+				Name:      "config",
+				ReadOnly:  true,
+				MountPath: "/config",
+			}).
 			withEnv([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
 			}).
-			withSecret(secret).
 			build()
 
 		deployment := newComponentDeploymentBuilder().
 			withNamespace(ns).
 			withResourceName(resourceRef).
-			withLabels(labels).
+			withLabels(ingestorLabels).
+			withVolume(v1.Volume{
+				Name: "config",
+				VolumeSource: v1.VolumeSource{
+					Secret: &v1.SecretVolumeSource{
+						SecretName:  secret.Name,
+						DefaultMode: ptrInt32(0o600),
+					},
+				},
+			}).
 			withContainer(*container).
 			build()
 
-		_, err = r.getOrCreateDeployment(ctx, deployment)
+		err := r.createDeploymentIfNotExists(ctx, deployment)
 		if err != nil {
 			return fmt.Errorf("create ingestor deployment: %w", err)
 		}
@@ -368,34 +336,46 @@ func (r *PipelineReconciler) setupIngestors(ctx context.Context, _ logr.Logger, 
 	return nil
 }
 
-func (r *PipelineReconciler) setupJoin(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, _ etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) setupJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret) error {
 	resourceRef := "join"
 
-	// TODO: fill secret values for join and may be use a configmap for this one?
-	secret, err := r.getOrCreateSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: resourceRef}, labels, map[string]string{})
-	if err != nil {
-		return fmt.Errorf("create secret for join: %w", err)
-	}
+	joinLabels := r.getJoinLabels()
 
-	maps.Copy(r.getJoinLabels(), labels)
+	maps.Copy(joinLabels, labels)
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-join:glassflow-cloud").
+		withImage("ghcr.io/glassflow/glassflow-etl-join:3dc90c0d2adb513ba548bf766ef6303317caac6b").
+		withVolumeMount(v1.VolumeMount{
+			Name:      "config",
+			ReadOnly:  true,
+			MountPath: "/config",
+		}).
 		withEnv([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 		}).
-		withSecret(secret).
 		build()
 
 	deployment := newComponentDeploymentBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
-		withLabels(labels).
+		withLabels(joinLabels).
+		withVolume(v1.Volume{
+			Name: "config",
+			VolumeSource: v1.VolumeSource{
+				Secret: &v1.SecretVolumeSource{
+					SecretName:  secret.Name,
+					DefaultMode: ptrInt32(0o600),
+				},
+			},
+		}).
 		withContainer(*container).
 		build()
 
-	_, err = r.getOrCreateDeployment(ctx, deployment)
+	fmt.Println(len(deployment.Spec.Template.Spec.Containers))
+
+	err := r.createDeploymentIfNotExists(ctx, deployment)
 	if err != nil {
 		return fmt.Errorf("create join deployment: %w", err)
 	}
@@ -403,37 +383,59 @@ func (r *PipelineReconciler) setupJoin(ctx context.Context, _ logr.Logger, ns v1
 	return nil
 }
 
-func (r *PipelineReconciler) setupSink(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, _ etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) setupSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret) error {
 	resourceRef := "sink"
 
-	// TODO: fill secret values for join
-	secret, err := r.getOrCreateSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: resourceRef}, labels, map[string]string{})
-	if err != nil {
-		return fmt.Errorf("create secret for sink: %w", err)
-	}
-
-	maps.Copy(r.getSinkLabels(), labels)
+	sinkLabels := r.getSinkLabels()
+	maps.Copy(sinkLabels, labels)
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-sink:glassflow-cloud").
+		withImage("ghcr.io/glassflow/glassflow-etl-sink:3dc90c0d2adb513ba548bf766ef6303317caac6b").
+		withVolumeMount(v1.VolumeMount{
+			Name:      "config",
+			ReadOnly:  true,
+			MountPath: "/config",
+		}).
 		withEnv([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 		}).
-		withSecret(secret).
 		build()
 
 	deployment := newComponentDeploymentBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
-		withLabels(labels).
+		withLabels(sinkLabels).
+		withVolume(v1.Volume{
+			Name: "config",
+			VolumeSource: v1.VolumeSource{
+				Secret: &v1.SecretVolumeSource{
+					SecretName:  secret.Name,
+					DefaultMode: ptrInt32(0o600),
+				},
+			},
+		}).
 		withContainer(*container).
 		build()
 
-	_, err = r.getOrCreateDeployment(ctx, deployment)
+	err := r.createDeploymentIfNotExists(ctx, deployment)
 	if err != nil {
 		return fmt.Errorf("create sink deployment: %w", err)
 	}
 
 	return nil
+}
+
+func ptrInt32(i int32) *int32 {
+	return &i
+}
+
+func ptrInt64(i int64) *int64 {
+	return &i
+}
+
+func ptrBool(v bool) *bool {
+	return &v
 }

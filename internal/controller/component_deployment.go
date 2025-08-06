@@ -10,8 +10,7 @@ import (
 type containerBuilder interface {
 	withName(name string) containerBuilder
 	withImage(image string) containerBuilder
-	withSecret(secret v1.Secret) containerBuilder
-	withConfigMap(configMap v1.ConfigMap) containerBuilder
+	withVolumeMount(mount v1.VolumeMount) containerBuilder
 	withEnv(env []v1.EnvVar) containerBuilder
 	build() *v1.Container
 }
@@ -28,20 +27,6 @@ func newComponentContainerBuilder() *componentContainer {
 
 var _ containerBuilder = (*componentContainer)(nil)
 
-// withConfigMap implements containerBuilder.
-func (c *componentContainer) withConfigMap(configMap v1.ConfigMap) containerBuilder {
-	c.con.EnvFrom = []v1.EnvFromSource{
-		{
-			ConfigMapRef: &v1.ConfigMapEnvSource{
-				LocalObjectReference: v1.LocalObjectReference{
-					Name: configMap.GetName(),
-				},
-			},
-		},
-	}
-	return c
-}
-
 // withEnv implements containerBuilder.
 func (c *componentContainer) withEnv(env []v1.EnvVar) containerBuilder {
 	c.con.Env = env
@@ -55,16 +40,8 @@ func (c *componentContainer) withImage(image string) containerBuilder {
 }
 
 // withSecret implements containerBuilder.
-func (c *componentContainer) withSecret(secret v1.Secret) containerBuilder {
-	c.con.EnvFrom = []v1.EnvFromSource{
-		{
-			SecretRef: &v1.SecretEnvSource{
-				LocalObjectReference: v1.LocalObjectReference{
-					Name: secret.GetName(),
-				},
-			},
-		},
-	}
+func (c *componentContainer) withVolumeMount(mount v1.VolumeMount) containerBuilder {
+	c.con.VolumeMounts = append(c.con.VolumeMounts, mount)
 	return c
 }
 
@@ -97,6 +74,7 @@ type deploymentBuilder interface {
 	withResourceName(name string) deploymentBuilder
 	withNamespace(namespace v1.Namespace) deploymentBuilder
 	withLabels(labels map[string]string) deploymentBuilder
+	withVolume(volume v1.Volume) deploymentBuilder
 	withContainer(container v1.Container) deploymentBuilder
 	build() *appsv1.Deployment
 }
@@ -128,6 +106,17 @@ func (c *componentDeployment) withResourceName(name string) deploymentBuilder {
 // withLabels implements deploymentBuilder.
 func (c *componentDeployment) withLabels(labels map[string]string) deploymentBuilder {
 	c.dep.SetLabels(labels)
+	return c
+}
+
+// withVolume implements deploymentBuilder.
+func (c *componentDeployment) withVolume(volume v1.Volume) deploymentBuilder {
+	c.dep.Spec.Template.Spec.Volumes = append(c.dep.Spec.Template.Spec.Volumes, volume)
+	c.dep.Spec.Template.Spec.SecurityContext = &v1.PodSecurityContext{
+		RunAsUser:  ptrInt64(1001),
+		RunAsGroup: ptrInt64(1001),
+		FSGroup:    ptrInt64(1001),
+	}
 	return c
 }
 
