@@ -39,124 +39,53 @@ spec:
           spec:
             description: PipelineSpec defines the desired state of Pipeline.
             properties:
+              config:
+                type: string
+              dlq:
+                type: string
               join:
                 properties:
                   enabled:
                     type: boolean
-                  sources:
-                    items:
-                      properties:
-                        join_key:
-                          minLength: 1
-                          type: string
-                        orientation:
-                          enum:
-                          - left
-                          - right
-                          type: string
-                        source_id:
-                          minLength: 1
-                          type: string
-                        time_window:
-                          description: |-
-                            A Duration represents the elapsed time between two instants
-                            as an int64 nanosecond count. The representation limits the
-                            largest representable duration to approximately 290 years.
-                          format: int64
-                          type: integer
-                      required:
-                      - join_key
-                      - orientation
-                      - source_id
-                      - time_window
-                      type: object
-                    maxItems: 2
-                    minItems: 2
-                    type: array
+                  stream:
+                    type: string
                   type:
                     enum:
                     - temporal
                     type: string
                 required:
                 - enabled
+                - stream
                 - type
                 type: object
-              kafka_topics:
+              pipeline_id:
+                minLength: 5
+                type: string
+              sink:
+                enum:
+                - clickhouse
+                type: string
+              sources:
                 properties:
-                  kafka_connection_params:
-                    properties:
-                      brokers:
-                        items:
-                          type: string
-                        minItems: 1
-                        type: array
-                      mechanism:
-                        enum:
-                        - SCRAM-SHA-256
-                        - SCRAM-SHA-512
-                        - PLAIN
-                        type: string
-                      password:
-                        type: string
-                      protocol:
-                        enum:
-                        - SASL_SSL
-                        - SSL
-                        - SASL_PLAINTEXT
-                        - PLAINTEXT
-                        type: string
-                      root_ca:
-                        type: string
-                      sasl_tls_enable:
-                        type: boolean
-                      skip_auth:
-                        type: boolean
-                      username:
-                        type: string
-                    required:
-                    - brokers
-                    - mechanism
-                    - password
-                    - protocol
-                    - root_ca
-                    - sasl_tls_enable
-                    - username
-                    type: object
                   topics:
                     items:
                       properties:
-                        consumer_group_initial_offset:
-                          enum:
-                          - earliest
-                          - latest
+                        dedup_window:
+                          description: |-
+                            A Duration represents the elapsed time between two instants
+                            as an int64 nanosecond count. The representation limits the
+                            largest representable duration to approximately 290 years.
+                          format: int64
+                          type: integer
+                        stream:
                           type: string
-                        deduplication:
-                          properties:
-                            enabled:
-                              type: boolean
-                            id_field:
-                              minLength: 1
-                              type: string
-                            id_field_type:
-                              minLength: 1
-                              type: string
-                            time_window:
-                              description: |-
-                                A Duration represents the elapsed time between two instants
-                                as an int64 nanosecond count. The representation limits the
-                                largest representable duration to approximately 290 years.
-                              format: int64
-                              type: integer
-                          required:
-                          - enabled
-                          type: object
-                        name:
+                        topic_name:
                           minLength: 1
                           type: string
                       required:
-                      - consumer_group_initial_offset
-                      - deduplication
-                      - name
+                      - dedup_window
+                      - stream
+                      - topic_name
                       type: object
                     maxItems: 2
                     minItems: 1
@@ -166,143 +95,16 @@ spec:
                     - kafka
                     type: string
                 required:
-                - kafka_connection_params
                 - topics
                 - type
                 type: object
-              mapper:
-                properties:
-                  sink_mapping:
-                    items:
-                      properties:
-                        column_name:
-                          minLength: 1
-                          type: string
-                        column_type:
-                          minLength: 1
-                          type: string
-                        field_name:
-                          minLength: 1
-                          type: string
-                        stream_name:
-                          minLength: 1
-                          type: string
-                      required:
-                      - column_name
-                      - column_type
-                      - field_name
-                      - stream_name
-                      type: object
-                    minItems: 1
-                    type: array
-                  streams:
-                    items:
-                      properties:
-                        name:
-                          type: string
-                        schema_config:
-                          properties:
-                            fields:
-                              items:
-                                properties:
-                                  field_name:
-                                    minLength: 1
-                                    type: string
-                                  field_type:
-                                    minLength: 1
-                                    type: string
-                                required:
-                                - field_name
-                                - field_type
-                                type: object
-                              type: array
-                            join_key_field:
-                              minLength: 1
-                              type: string
-                            join_orientation:
-                              enum:
-                              - left
-                              - right
-                              type: string
-                            join_window:
-                              description: |-
-                                A Duration represents the elapsed time between two instants
-                                as an int64 nanosecond count. The representation limits the
-                                largest representable duration to approximately 290 years.
-                              format: int64
-                              type: integer
-                          required:
-                          - fields
-                          type: object
-                      required:
-                      - name
-                      - schema_config
-                      type: object
-                    type: array
-                  type:
-                    default: jsonToClickhouse
-                    type: string
-                required:
-                - sink_mapping
-                - streams
-                - type
-                type: object
-              pipeline_id:
-                minLength: 5
-                type: string
-              sink:
-                properties:
-                  database:
-                    minLength: 1
-                    type: string
-                  host:
-                    minLength: 5
-                    type: string
-                  max_batch_size:
-                    type: integer
-                  max_delay_time:
-                    description: |-
-                      A Duration represents the elapsed time between two instants
-                      as an int64 nanosecond count. The representation limits the
-                      largest representable duration to approximately 290 years.
-                    format: int64
-                    type: integer
-                  password:
-                    type: string
-                  port:
-                    minLength: 4
-                    type: string
-                  secure:
-                    type: boolean
-                  skip_certificate_check:
-                    type: boolean
-                  table:
-                    minLength: 1
-                    type: string
-                  type:
-                    enum:
-                    - clickhouse
-                    type: string
-                  user:
-                    type: string
-                required:
-                - database
-                - host
-                - max_batch_size
-                - max_delay_time
-                - password
-                - port
-                - secure
-                - table
-                - type
-                - user
-                type: object
             required:
+            - config
+            - dlq
             - join
-            - kafka_topics
-            - mapper
             - pipeline_id
             - sink
+            - sources
             type: object
           status:
             description: PipelineStatus defines the observed state of Pipeline.
