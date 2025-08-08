@@ -4,6 +4,8 @@ controllerManager:
     - --metrics-bind-address=:8443
     - --leader-elect
     - --health-probe-bind-address=:8081
+    - --nats-addr=nats://nats.default.svc.cluster.local
+    - --nats-component-addr=nats://nats.default.svc.cluster.local
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
