@@ -257,6 +257,7 @@ func (r *PipelineReconciler) reconcileDeletion(_ context.Context, _ logr.Logger,
 	// Wait for NATS stream for sink to be empty (i.e. 0 messages) if enabled
 	// Delete sink deployment
 	// Delete namespace - this should delete secret too
+	// Delete natsStreams for this pipeline
 	return nil
 }
 
