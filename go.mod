@@ -1,4 +1,4 @@
-module glassflow.io/pipeline
+module github.com/glassflow/glassflow-etl-k8s-operator
 
 go 1.23.0
 

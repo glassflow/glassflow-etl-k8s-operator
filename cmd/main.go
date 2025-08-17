@@ -37,9 +37,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	etlv1alpha1 "glassflow.io/pipeline/api/v1alpha1"
-	"glassflow.io/pipeline/internal/controller"
-	"glassflow.io/pipeline/internal/nats"
+	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	// +kubebuilder:scaffold:imports
 )
 

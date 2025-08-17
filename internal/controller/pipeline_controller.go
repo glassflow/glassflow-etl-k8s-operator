@@ -32,8 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	etlv1alpha1 "glassflow.io/pipeline/api/v1alpha1"
-	"glassflow.io/pipeline/internal/nats"
+	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 )
 
 // PipelineReconciler reconciles a Pipeline object

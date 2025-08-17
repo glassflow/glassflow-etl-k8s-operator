@@ -6,7 +6,7 @@ domain: glassflow.io
 layout:
 - go.kubebuilder.io/v4
 projectName: glassflow-etl-k8s-operator
-repo: glassflow.io/pipeline
+repo: github.com/glassflow/glassflow-etl-k8s-operator
 resources:
 - api:
     crdVersion: v1
@@ -15,6 +15,6 @@ resources:
   domain: glassflow.io
   group: etl
   kind: Pipeline
-  path: glassflow.io/pipeline/api/v1alpha1
+  path: github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

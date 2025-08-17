@@ -25,7 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"glassflow.io/pipeline/test/utils"
+	"github.com/glassflow/glassflow-etl-k8s-operator/test/utils"
 )
 
 var (

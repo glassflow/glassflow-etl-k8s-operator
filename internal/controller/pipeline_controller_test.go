@@ -28,8 +28,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	etlv1alpha1 "glassflow.io/pipeline/api/v1alpha1"
-	"glassflow.io/pipeline/internal/nats"
+	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 )
 
 var _ = Describe("Pipeline Controller", func() {
