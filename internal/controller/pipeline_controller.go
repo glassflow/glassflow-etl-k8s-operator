@@ -98,12 +98,12 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// pipeline deletion flow
 	if !p.DeletionTimestamp.IsZero() {
-		return r.deletePipeline(ctx, err, p, log)
+		return r.deletePipeline(ctx, p)
 	}
 
 	// pipeline creation flow
 	if !containsFinalizer(p.Finalizers, PipelineFinalizerName) {
-		return r.createPipeline(ctx, p, log)
+		return r.createPipeline(ctx, p)
 	}
 
 	return ctrl.Result{}, nil
@@ -111,7 +111,8 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 // -------------------------------------------------------------------------------------------------------------------
 
-func (r *PipelineReconciler) createPipeline(ctx context.Context, p etlv1alpha1.Pipeline, log logr.Logger) (ctrl.Result, error) {
+func (r *PipelineReconciler) createPipeline(ctx context.Context, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
 	err := r.addFinalizer(ctx, &p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
@@ -126,8 +127,9 @@ func (r *PipelineReconciler) createPipeline(ctx context.Context, p etlv1alpha1.P
 	return ctrl.Result{Requeue: true}, nil
 }
 
-func (r *PipelineReconciler) deletePipeline(ctx context.Context, err error, p etlv1alpha1.Pipeline, log logr.Logger) (ctrl.Result, error) {
-	err = r.removeFinalizer(ctx, &p)
+func (r *PipelineReconciler) deletePipeline(ctx context.Context, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	err := r.removeFinalizer(ctx, &p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
 	}
@@ -139,7 +141,7 @@ func (r *PipelineReconciler) deletePipeline(ctx context.Context, err error, p et
 				log.Error(err, "unable to terminate Pipeline")
 				return ctrl.Result{}, err
 			}
-		} else if deletionType == PipelineDeletionTypeShutdown {
+		} else {
 			err = r.reconcileShutdown(ctx, log, p)
 			if err != nil {
 				log.Error(err, "unable to shutdown Pipeline")
@@ -204,7 +206,8 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	return nil
 }
 
-func (r *PipelineReconciler) reconcileShutdown(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+// nolint:unparam
+func (r *PipelineReconciler) reconcileShutdown(_ context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("reconciling pipeline deletion", "pipeline_id", p.Spec.ID)
 	// Delete ingestor deployments
 	// Wait for NATS stream for join to be empty (i.e. 0 messages) if enabled
@@ -326,6 +329,7 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 	return nil
 }
 
+// nolint:unused
 func (r *PipelineReconciler) deleteDeployments(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("deleting pipeline deployments", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
@@ -355,6 +359,7 @@ func (r *PipelineReconciler) deleteDeployments(ctx context.Context, log logr.Log
 	return nil
 }
 
+// nolint:unused
 func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("deleting pipeline secret", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
@@ -606,7 +611,7 @@ func (r *PipelineReconciler) cleanupNATSStreams(ctx context.Context, log logr.Lo
 
 	if r.NATSClient == nil {
 		log.Info("NATS client not available, skipping stream cleanup")
-		return nil
+		return fmt.Errorf("NATS client not available, skipping stream cleanup")
 	}
 
 	// Get all streams for this pipeline
