@@ -66,7 +66,7 @@ func (c *componentContainer) build() *v1.Container {
 		},
 	}
 	// TODO: Make it configurable may be?
-	c.con.ImagePullPolicy = v1.PullIfNotPresent
+	c.con.ImagePullPolicy = v1.PullAlways
 
 	return c.con
 }
