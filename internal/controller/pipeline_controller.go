@@ -203,6 +203,17 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return fmt.Errorf("update pipeline status: %w", err)
 	}
 
+	// Update NATS KV store status to "Running" after successful creation
+	if r.NATSClient != nil {
+		err = r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, nats.PipelineStatusRunning)
+		if err != nil {
+			log.Error(err, "failed to update pipeline status to Running in NATS KV store", "pipeline_id", p.Spec.ID)
+			// Don't fail the reconciliation if NATS update fails, just log the error
+		} else {
+			log.Info("successfully updated pipeline status to Running in NATS KV store", "pipeline_id", p.Spec.ID)
+		}
+	}
+
 	return nil
 }
 
@@ -222,7 +233,8 @@ func (r *PipelineReconciler) reconcileShutdown(_ context.Context, log logr.Logge
 func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("reconciling pipeline termination", "pipeline_id", p.Spec.ID)
 
-	err := r.cleanupNATSPipelineData(ctx, log, p)
+	// Clean up NATS streams but keep the pipeline configuration
+	err := r.cleanupNATSStreams(ctx, log, p)
 	if err != nil {
 		return fmt.Errorf("cleanup NATS streams: %w", err)
 	}
@@ -231,6 +243,17 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	err = r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		return fmt.Errorf("delete pipeline namespace: %w", err)
+	}
+
+	// Update NATS KV store status to "Terminated" instead of deleting
+	if r.NATSClient != nil {
+		err = r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, nats.PipelineStatusTerminated)
+		if err != nil {
+			log.Error(err, "failed to update pipeline status to Terminated in NATS KV store", "pipeline_id", p.Spec.ID)
+			// Don't fail the reconciliation if NATS update fails, just log the error
+		} else {
+			log.Info("successfully updated pipeline status to Terminated in NATS KV store", "pipeline_id", p.Spec.ID)
+		}
 	}
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
@@ -587,7 +610,7 @@ func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 }
 
 // -------------------------------------------------------------------------------------------------------------------
-
+// nolint:unused
 func (r *PipelineReconciler) cleanupNATSPipelineData(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("cleaning up NATS data", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
@@ -639,6 +662,7 @@ func (r *PipelineReconciler) cleanupNATSStreams(ctx context.Context, log logr.Lo
 	return nil
 }
 
+// nolint:unused
 func (r *PipelineReconciler) cleanupNATSPipelineKeyValueStore(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("cleaning up NATS key value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
