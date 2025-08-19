@@ -106,7 +106,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ${{ env.CHARTS_REPO }}
-          token: ${{ secrets.CHARTS_REPO_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           path: charts-repo
 
       - name: Generate and package chart
@@ -120,12 +120,18 @@ jobs:
           git checkout -b "update-${{ env.OPERATOR_CHART_NAME }}-v${{ steps.version.outputs.version }}"
 
           # Clean previous operator chart
-          rm -rf charts/${{ env.OPERATOR_CHART_NAME }}
+          rm -rf charts/${{ env.OPERATOR_CHART_NAME }}/*
 
           # Extract the operator chart from .tgz
           echo "📦 Extracting operator chart..."
-          tar -xzf ../chart/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
+          tar -xzf ../dist/charts/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
     
+      - name: Clean up
+        run: |
+          cd ..
+          rm -rf dist
+          rm -rf chart
+
       - name: Commit and push changes
         run: |
             cd charts-repo

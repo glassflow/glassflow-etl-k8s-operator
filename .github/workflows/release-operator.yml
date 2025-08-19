@@ -110,7 +110,7 @@ jobs:
         run: |
           echo "🐳 Building Docker image..."
           
-          # Build the image with version tag
+          # Build and push the image with version tag
           make docker-buildx IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.new-version.outputs.new-version }}
           
           # Tag with latest and commit hash
