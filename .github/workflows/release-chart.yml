@@ -119,6 +119,9 @@ jobs:
           # Create release branch
           git checkout -b "update-${{ env.OPERATOR_CHART_NAME }}-v${{ steps.version.outputs.version }}"
 
+          # Clean previous operator chart
+          rm -rf charts/${{ env.OPERATOR_CHART_NAME }}
+
           # Extract the operator chart from .tgz
           echo "📦 Extracting operator chart..."
           tar -xzf ../chart/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
