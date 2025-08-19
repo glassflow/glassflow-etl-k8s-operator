@@ -125,9 +125,6 @@ jobs:
           # Extract the operator chart from .tgz
           echo "📦 Extracting operator chart..."
           tar -xzf ../chart/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
-
-          # ⬆️ Update repository index
-          helm repo index . --url ${{ env.HELM_REGISTRY }}   
     
       - name: Commit and push changes
         run: |
@@ -138,7 +135,7 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             
             # Add changes
-            git add .
+            git add charts/${{ env.OPERATOR_CHART_NAME }}
 
             # Commit changes
             git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ steps.version.outputs.version }}
