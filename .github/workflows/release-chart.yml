@@ -1,0 +1,174 @@
+name: Release Operator Chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options: 
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+        CHARTS_REPO: glassflow/charts
+        CHARTS_BRANCH: main
+        HELM_REGISTRY: https://glassflow.github.io/charts/
+        OPERATOR_CHART_NAME: glassflow-operator
+
+    steps:
+      - name: Checkout operator repo
+        uses: actions/checkout@v5
+     
+      - name: Read helm chart version
+        id: helm-chart-version
+        run: |
+          if [ -f "VERSION_CHART" ]; then
+            HELM_CHART_VERSION=$(cat VERSION_CHART | tr -d ' \t\n\r')
+          else
+            HELM_CHART_VERSION="0.0.0"
+          fi
+          
+          echo "Helm chart version: $HELM_CHART_VERSION"
+          echo "helm-chart-version=$HELM_CHART_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Calculate new helm chart version
+        id: version
+        run: |
+          # Parse version components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${{ steps.helm-chart-version.outputs.helm-chart-version }}"
+          echo "Parsed version - Major: $MAJOR, Minor: $MINOR, Patch: $PATCH"
+          
+          # Calculate new version based on input
+          VERSION_TYPE="${{ github.event.inputs.version_type }}"
+          echo "Version bump type: $VERSION_TYPE"
+          
+          case "$VERSION_TYPE" in
+            "major")
+              NEW_MAJOR=$((MAJOR + 1))
+              NEW_VERSION="$NEW_MAJOR.0.0"
+              echo "Major version bump: $MAJOR → $NEW_MAJOR"
+              ;;
+            "minor")
+              NEW_MINOR=$((MINOR + 1))
+              NEW_VERSION="$MAJOR.$NEW_MINOR.0"
+              echo "Minor version bump: $MINOR → $NEW_MINOR"
+              ;;
+            "patch")
+              NEW_PATCH=$((PATCH + 1))
+              NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+              echo "Patch version bump: $PATCH → $NEW_PATCH"
+              ;;
+            *)
+              echo "❌ Invalid version type: $VERSION_TYPE"
+              exit 1
+              ;;
+          esac
+          
+          echo "✅ New version calculated: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+          
+          # Validate the new version
+          if [[ ! "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $NEW_VERSION"
+            exit 1
+          fi
+
+      - name: Update VERSION_CHART file
+        run: |
+          echo "${{ steps.version.outputs.version }}" > VERSION_CHART
+          echo "✅ VERSION_CHART file updated to: ${{ steps.version.outputs.version }}"
+          cat VERSION_CHART
+
+      - name: Read operator version
+        id: operator-version
+        run: |
+          if [ -f "VERSION" ]; then
+            OPERATOR_VERSION=$(cat VERSION | tr -d ' \t\n\r')
+          else
+            OPERATOR_VERSION="0.0.0"
+          fi
+          
+          echo "Operator version: $OPERATOR_VERSION"
+          echo "operator-version=$OPERATOR_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Checkout charts repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.CHARTS_REPO }}
+          token: ${{ secrets.CHARTS_REPO_TOKEN }}
+          path: charts-repo
+
+      - name: Generate and package chart
+        run: |
+          make package-chart VERSION=${{ steps.version.outputs.version }} APP_VERSION=${{ steps.operator-version.outputs.operator-version }}
+
+      - name: Update operator chart in charts repo
+        run: |
+          cd charts-repo
+          # Create release branch
+          git checkout -b "update-${{ env.OPERATOR_CHART_NAME }}-v${{ steps.version.outputs.version }}"
+
+          # Extract the operator chart from .tgz
+          echo "📦 Extracting operator chart..."
+          tar -xzf ../chart/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
+
+          # ⬆️ Update repository index
+          helm repo index . --url ${{ env.HELM_REGISTRY }}   
+    
+      - name: Commit and push changes
+        run: |
+            cd charts-repo
+
+            # Configure git
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            
+            # Add changes
+            git add .
+
+            # Commit changes
+            git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ steps.version.outputs.version }}
+
+            - Operator version: ${{ steps.version.outputs.version }}
+            - Operator commit: ${{ github.sha }}"
+            
+            # Push the branch
+            git push origin "update-${{ env.OPERATOR_CHART_NAME }}-v${{ steps.version.outputs.version }}"
+            
+      - name: Create PR to charts repo
+        run: |
+          cd charts-repo
+          gh pr create \
+            --title "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ steps.version.outputs.version }}" \
+            --body "Updates ${{ env.OPERATOR_CHART_NAME }} chart to version ${{ steps.version.outputs.version }}" \
+            --base main \
+            --head "update-${{ env.OPERATOR_CHART_NAME }}-v${{ steps.version.outputs.version }}"
+
+      - name: Commit version changes
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Add version changes
+          git add VERSION_CHART
+          
+          # Commit the version bump
+          git commit -m "chore: bump version to ${{ steps.version.outputs.version }}
+
+          - Helm chart version: ${{ steps.version.outputs.version }}
+          - VERSION_CHART file updated" || echo "No changes to commit"
+          
+          # Push the changes
+          git push origin ${{ github.ref }}
