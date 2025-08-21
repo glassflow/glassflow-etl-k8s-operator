@@ -1,0 +1,132 @@
+name: Release Operator Chart
+
+on:
+  workflow_call:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        type: string
+    outputs:
+      new_version:
+        description: 'New Helm chart version'
+        value: ${{ jobs.calculate-version.outputs.new_version }}
+
+jobs:
+  calculate-version:
+    uses: ./.github/workflows/calculate-version.yml
+    with:
+      version_file: VERSION_CHART
+      version_type: ${{ inputs.version_type }}
+
+  release:
+    needs: [calculate-version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+        CHARTS_REPO: glassflow/charts
+        CHARTS_BRANCH: glassflow-operator  # TODO: change to main after release
+        HELM_REGISTRY: https://glassflow.github.io/charts/
+        OPERATOR_CHART_NAME: glassflow-operator
+
+    steps:
+      - name: Checkout operator repo
+        uses: actions/checkout@v5
+
+      - name: Update VERSION_CHART file
+        run: |
+          echo "${{ needs.calculate-version.outputs.new_version }}" > VERSION_CHART
+          echo "✅ VERSION_CHART file updated to: ${{ needs.calculate-version.outputs.new_version }}"
+          cat VERSION_CHART
+
+      - name: Read operator version
+        id: operator-version
+        run: |
+          if [ -f "VERSION" ]; then
+            OPERATOR_VERSION=$(cat VERSION | tr -d ' \t\n\r')
+          else
+            OPERATOR_VERSION="0.0.0"
+          fi
+          
+          echo "Operator version: $OPERATOR_VERSION"
+          echo "operator-version=$OPERATOR_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Checkout charts repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.CHARTS_REPO }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: charts-repo
+
+      - name: Generate and package chart
+        run: |
+          make package-chart \
+            VERSION=${{ needs.calculate-version.outputs.new_version }} \
+            APP_VERSION=${{ steps.operator-version.outputs.operator-version }}
+
+      - name: Update operator chart in charts repo
+        run: |
+          cd charts-repo
+          # Create release branch
+          git checkout -b "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
+
+          # Clean previous operator chart
+          rm -rf charts/${{ env.OPERATOR_CHART_NAME }}/*
+
+          # Extract the operator chart from .tgz
+          echo "📦 Extracting operator chart..."
+          tar -xzf ../dist/charts/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
+    
+      - name: Clean up
+        run: |
+          cd ..
+          rm -rf dist chart
+
+      - name: Commit and push changes
+        run: |
+            cd charts-repo
+
+            # Configure git
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            
+            # Add changes
+            git add charts/${{ env.OPERATOR_CHART_NAME }}
+
+            # Commit changes
+            git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}
+
+            - Operator version: ${{ needs.calculate-version.outputs.new_version }}
+            - Operator commit: ${{ github.sha }}"
+            
+            # Push the branch
+            git push origin "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
+            
+      - name: Create PR to charts repo
+        run: |
+          cd charts-repo
+          gh pr create \
+            --title "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}" \
+            --body "Updates ${{ env.OPERATOR_CHART_NAME }} chart to version ${{ needs.calculate-version.outputs.new_version }}" \
+            --base ${{ env.CHARTS_BRANCH }} \
+            --head "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
+
+      - name: Commit version changes
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Add version changes
+          git add VERSION_CHART
+          
+          # Commit the version bump
+          git commit -m "chore: bump version to ${{ needs.calculate-version.outputs.new_version }}
+
+          - Helm chart version: ${{ needs.calculate-version.outputs.new_version }}
+          - VERSION_CHART file updated" || echo "No changes to commit"
+          
+          # Push the changes
+          git push origin ${{ github.ref }}

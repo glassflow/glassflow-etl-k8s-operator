@@ -124,7 +124,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name glassflow-etl-k8s-operator-builder
 	$(CONTAINER_TOOL) buildx use glassflow-etl-k8s-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) -t ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm glassflow-etl-k8s-operator-builder
 	rm Dockerfile.cross
 
@@ -234,5 +234,10 @@ helmify: $(HELMIFY) ## Download helmify locally if necessary.
 $(HELMIFY): $(LOCALBIN)
 	test -s $(LOCALBIN)/helmify || GOBIN=$(LOCALBIN) go install github.com/arttor/helmify/cmd/helmify@latest
 
+.PHONY: helm
 helm: manifests kustomize helmify
 	$(KUSTOMIZE) build config/default | $(HELMIFY)
+
+.PHONY: package-chart
+package-chart: helm
+	helm package chart -d dist/charts --version $(VERSION) --app-version $(APP_VERSION)
