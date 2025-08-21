@@ -1,0 +1,66 @@
+name: Notify Release
+
+on:
+  workflow_call:
+    inputs:
+      release_helm_chart:
+        description: 'Whether Helm chart was released'
+        required: false
+        default: 'false'
+        type: string
+      release_operator:
+        description: 'Whether operator was released'
+        required: false
+        default: 'false'
+        type: string
+      chart_new_version:
+        description: 'New Helm chart version (if released)'
+        required: false
+        type: string
+      operator_new_version:
+        description: 'New operator version (if released)'
+        required: false
+        type: string
+
+jobs:
+  send-release-notification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: New release notification
+        uses: slackapi/slack-github-action@v2.1.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "Release workflow completed"
+            blocks:
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: "*🚀 Release Workflow Completed*"
+              - type: "section"
+                fields:
+                  - type: "mrkdwn"
+                    text: "*Repository:*\n${{ github.repository }}"
+                  - type: "mrkdwn"
+                    text: "*Triggered By:*\n${{ github.actor }}"
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: "*📦 Release Summary:*"
+              - type: "section"
+                fields:
+                  - type: "mrkdwn"
+                    text: "*Helm Chart:*\n${{ inputs.release_helm_chart == 'true' && format('✅ Released v{0}', inputs.chart_new_version) || '⏭️ Skipped' }}"
+                  - type: "mrkdwn"
+                    text: "*Operator:*\n${{ inputs.release_operator == 'true' && format('✅ Released v{0}', inputs.operator_new_version) || '⏭️ Skipped' }}"
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: "*🔗 View Workflows:*\n<https://github.com/${{ github.repository }}/actions|GitHub Actions>"
+              - type: "divider"
+              - type: "context"
+                elements:
+                  - type: "mrkdwn"
+                    text: "Release completed at ${{ github.event.head_commit.timestamp || 'now' }}"
+

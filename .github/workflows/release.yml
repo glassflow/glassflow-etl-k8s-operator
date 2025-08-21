@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_helm_chart:
+        description: 'Release Helm chart'
+        required: true
+        default: false
+        type: boolean
+      release_operator:
+        description: 'Release Operator'
+        required: true
+        default: false
+        type: boolean
+      chart_version_bump_type:
+        description: 'Chart version bump type'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      operator_version_bump_type:
+        description: 'Operator version bump type'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release-chart:
+    if: ${{ github.event.inputs.release_helm_chart == 'true' }}
+    uses: ./.github/workflows/release-chart.yml
+    with:
+      version_type: ${{ github.event.inputs.chart_version_bump_type }}
+    secrets: inherit
+
+  release-operator:
+    if: ${{ github.event.inputs.release_operator == 'true' }}
+    uses: ./.github/workflows/release-operator.yml
+    with:
+      version_type: ${{ github.event.inputs.operator_version_bump_type }}
+    secrets: inherit
+
+  notify:
+    needs: [release-chart, release-operator]
+    if: always()
+    uses: ./.github/workflows/notify.yaml
+    with:
+      release_helm_chart: ${{ github.event.inputs.release_helm_chart }}
+      release_operator: ${{ github.event.inputs.release_operator }}
+      chart_new_version: ${{ needs.release-chart.outputs.new_version || '' }}
+      operator_new_version: ${{ needs.release-operator.outputs.new_version || '' }}
+    secrets: inherit
