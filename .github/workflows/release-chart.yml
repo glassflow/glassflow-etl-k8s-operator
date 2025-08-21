@@ -27,7 +27,7 @@ jobs:
       pull-requests: write
     env:
         CHARTS_REPO: glassflow/charts
-        CHARTS_BRANCH: main
+        CHARTS_BRANCH: glassflow-operator  # TODO: change to main after release
         HELM_REGISTRY: https://glassflow.github.io/charts/
         OPERATOR_CHART_NAME: glassflow-operator
 
@@ -62,7 +62,9 @@ jobs:
 
       - name: Generate and package chart
         run: |
-          make package-chart VERSION=${{ needs.calculate-version.outputs.new_version }} APP_VERSION=${{ steps.operator-version.outputs.operator-version }}
+          make package-chart \
+            VERSION=${{ needs.calculate-version.outputs.new_version }} \
+            APP_VERSION=${{ steps.operator-version.outputs.operator-version }}
 
       - name: Update operator chart in charts repo
         run: |
@@ -80,8 +82,7 @@ jobs:
       - name: Clean up
         run: |
           cd ..
-          rm -rf dist
-          rm -rf chart
+          rm -rf dist chart
 
       - name: Commit and push changes
         run: |
@@ -109,7 +110,7 @@ jobs:
           gh pr create \
             --title "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}" \
             --body "Updates ${{ env.OPERATOR_CHART_NAME }} chart to version ${{ needs.calculate-version.outputs.new_version }}" \
-            --base main \
+            --base ${{ env.CHARTS_BRANCH }} \
             --head "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
 
       - name: Commit version changes
