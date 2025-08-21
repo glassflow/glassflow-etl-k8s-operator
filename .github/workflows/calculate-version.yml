@@ -28,6 +28,11 @@ jobs:
       new_version: ${{ steps.calculate.outputs.new_version }}
       current_version: ${{ steps.read-version.outputs.version }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Read version file
         id: read-version
         run: |

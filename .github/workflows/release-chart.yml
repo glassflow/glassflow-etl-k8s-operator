@@ -59,6 +59,7 @@ jobs:
           repository: ${{ env.CHARTS_REPO }}
           token: ${{ secrets.GITHUB_TOKEN }}
           path: charts-repo
+          ref: ${{ env.CHARTS_BRANCH }}
 
       - name: Generate and package chart
         run: |
