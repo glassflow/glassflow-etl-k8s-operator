@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -233,16 +234,16 @@ func (r *PipelineReconciler) reconcileShutdown(_ context.Context, log logr.Logge
 func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("reconciling pipeline termination", "pipeline_id", p.Spec.ID)
 
-	// Clean up NATS streams but keep the pipeline configuration
-	err := r.cleanupNATSStreams(ctx, log, p)
-	if err != nil {
-		return fmt.Errorf("cleanup NATS streams: %w", err)
-	}
-
 	// Delete namespace for this pipeline
-	err = r.deleteNamespace(ctx, log, p)
+	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		return fmt.Errorf("delete pipeline namespace: %w", err)
+	}
+
+	// Clean up NATS streams but keep the pipeline configuration
+	err = r.cleanupNATSStreams(ctx, log, p)
+	if err != nil {
+		return fmt.Errorf("cleanup NATS streams: %w", err)
 	}
 
 	// Update NATS KV store status to "Terminated" instead of deleting
@@ -563,9 +564,10 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 
 	// create source streams
 	for _, s := range p.Spec.Ingestor.Streams {
-		err := r.NATSClient.CreateOrUpdateStream(ctx, s.OutputStream, s.DedupWindow)
+		ingestorOutputStreamName := prepareStreamName(p, s.OutputStream)
+		err := r.NATSClient.CreateOrUpdateStream(ctx, ingestorOutputStreamName, s.DedupWindow)
 		if err != nil {
-			return fmt.Errorf("create stream %s: %w", s.OutputStream, err)
+			return fmt.Errorf("create stream %s: %w", ingestorOutputStreamName, err)
 		}
 	}
 
@@ -607,6 +609,11 @@ func (r *PipelineReconciler) getSinkLabels() map[string]string {
 
 func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 	return map[string]string{"etl.glassflow.io/glassflow-etl-k8s-operator-id": p.Spec.ID}
+}
+
+func prepareStreamName(p etlv1alpha1.Pipeline, streamName string) string {
+	// Bind stream name to pipeline ID
+	return fmt.Sprintf("%s-%s", streamName, p.Spec.ID)
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -659,6 +666,17 @@ func (r *PipelineReconciler) cleanupNATSStreams(ctx context.Context, log logr.Lo
 		}
 	}
 
+	// delete the DLQ stream
+	if p.Spec.DLQ != "" {
+		log.Info("deleting NATS DLQ stream", "stream", p.Spec.DLQ)
+		err := js.DeleteStream(ctx, p.Spec.DLQ)
+		if err != nil {
+			log.Error(err, "failed to delete NATS DLQ stream", "stream", p.Spec.DLQ)
+			return fmt.Errorf("delete NATS DLQ stream: %w", err)
+		}
+		log.Info("NATS DLQ stream deleted successfully", "stream", p.Spec.DLQ)
+	}
+
 	return nil
 }
 
@@ -688,28 +706,8 @@ func (r *PipelineReconciler) cleanupNATSPipelineKeyValueStore(ctx context.Contex
 
 func isPipelineStream(streamName string, p etlv1alpha1.Pipeline) bool {
 	// Check if stream name contains pipeline ID
-	if streamName == p.Spec.ID {
-		return true
-	}
-
-	// Check if stream name matches any of the pipeline's topic streams
-	for _, stream := range p.Spec.Ingestor.Streams {
-		if streamName == stream.OutputStream {
-			return true
-		}
-	}
-
-	// Check if stream name matches join stream
-	if p.Spec.Join.Enabled && streamName == p.Spec.Join.OutputStream {
-		return true
-	}
-
-	// Check if stream name matches DLQ stream
-	if streamName == p.Spec.DLQ {
-		return true
-	}
-
-	return false
+	fmt.Println("DEBUG: Checking stream name: ", streamName, " for pipeline ID: ", p.Spec.ID)
+	return strings.HasSuffix(streamName, p.Spec.ID)
 }
 
 // -------------------------------------------------------------------------------------------------------------------
