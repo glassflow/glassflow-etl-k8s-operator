@@ -49,7 +49,7 @@ jobs:
 
   notify:
     needs: [release-chart, release-operator]
-    if: always()
+    if: ${{ always() && (needs.release-chart.result == 'success' || needs.release-operator.result == 'success') }}
     uses: ./.github/workflows/notify.yaml
     with:
       release_helm_chart: ${{ github.event.inputs.release_helm_chart }}
