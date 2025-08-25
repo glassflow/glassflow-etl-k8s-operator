@@ -28,6 +28,7 @@ jobs:
     env:
         REGISTRY: "ghcr.io/glassflow"
         IMAGE_NAME: "glassflow-etl-k8s-operator"
+        GH_TOKEN: ${{ github.token }}
       
     steps:
       - name: Checkout repository

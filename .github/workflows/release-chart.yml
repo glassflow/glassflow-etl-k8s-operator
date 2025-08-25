@@ -33,6 +33,7 @@ jobs:
         PROJECT_ID: glassflow-dataforge
         SERVICE_ACCOUNT: 'github-ci-cd@glassflow-dataforge.iam.gserviceaccount.com'
         WORKLOAD_IDENTITY_PROVIDER: 'projects/585858172927/locations/global/workloadIdentityPools/github/providers/github-repo-provider'
+        GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout operator repo
