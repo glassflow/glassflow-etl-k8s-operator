@@ -19,7 +19,7 @@ jobs:
       version_file: VERSION_CHART
       version_type: ${{ inputs.version_type }}
 
-  upload-chart:
+  release:
     needs: [calculate-version]
     runs-on: ubuntu-latest
     permissions:
@@ -28,16 +28,26 @@ jobs:
       id-token: write
     env:
         CHARTS_REPO: glassflow/charts
+        CHARTS_BRANCH: glassflow-operator  # TODO: change to main after release
+        HELM_REGISTRY: https://glassflow.github.io/charts/
         OPERATOR_CHART_NAME: glassflow-operator
-        GCS_BUCKET: operator-charts
-        PROJECT_ID: glassflow-dataforge
-        SERVICE_ACCOUNT: 'github-ci-cd@glassflow-dataforge.iam.gserviceaccount.com'
-        WORKLOAD_IDENTITY_PROVIDER: 'projects/585858172927/locations/global/workloadIdentityPools/github/providers/github-repo-provider'
-        GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout operator repo
         uses: actions/checkout@v5
+
+      - name: Create GitHub App token
+        uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+
+      - name: Update VERSION_CHART file
+        run: |
+          echo "${{ needs.calculate-version.outputs.new_version }}" > VERSION_CHART
+          echo "✅ VERSION_CHART file updated to: ${{ needs.calculate-version.outputs.new_version }}"
+          cat VERSION_CHART
 
       - name: Read operator version
         id: operator-version
@@ -51,67 +61,78 @@ jobs:
           echo "Operator version: $OPERATOR_VERSION"
           echo "operator-version=$OPERATOR_VERSION" >> $GITHUB_OUTPUT
 
+      - name: Checkout charts repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.CHARTS_REPO }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: charts-repo
+          ref: ${{ env.CHARTS_BRANCH }}
+
       - name: Generate and package chart
         run: |
           make package-chart \
             VERSION=${{ needs.calculate-version.outputs.new_version }} \
             APP_VERSION=${{ steps.operator-version.outputs.operator-version }}
-          
-          if [ ! -f dist/charts/*.tgz ]; then
-            echo "❌ Chart package not found"
-            exit 1
-          fi
-          echo "✅ Chart package generated successfully"
 
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.SERVICE_ACCOUNT }}
-      
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          version: '>= 363.0.0'
-          project_id: ${{ env.PROJECT_ID }}
-
-      - name: Upload chart to GCS
-        id: upload-chart
+      - name: Update operator chart in charts repo
         run: |
-          # Get the actual chart filename
-          CHART_FILE=$(basename dist/charts/*.tgz)
-          echo "chart_filename=$CHART_FILE" >> $GITHUB_OUTPUT
-          
-          # Upload with proper filename
-          gsutil cp dist/charts/*.tgz gs://${{ env.GCS_BUCKET }}/$CHART_FILE
+          cd charts-repo
+          # Create release branch
+          git checkout -b "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
 
-          echo "✅ Chart uploaded successfully: gs://${{ env.GCS_BUCKET }}/$CHART_FILE"
+          # Clean previous operator chart
+          rm -rf charts/${{ env.OPERATOR_CHART_NAME }}/*
+
+          # Extract the operator chart from .tgz
+          echo "📦 Extracting operator chart..."
+          tar -xzf ../dist/charts/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
     
       - name: Clean up
         run: |
+          cd ..
           rm -rf dist chart
-          echo "🧹 Local files cleaned up"
 
-      - name: Trigger charts repo workflow
+      - name: Commit and push changes
         run: |
-          echo "🚀 Triggering workflow in charts repository..."
-          gh api repos/${{ env.CHARTS_REPO }}/dispatches \
-            -f event_type="update-chart" \
-            -f client_payload='{
-              "chart_name": "${{ env.OPERATOR_CHART_NAME }}",
-              "chart_version": "${{ needs.calculate-version.outputs.new_version }}",
-              "operator_version": "${{ steps.operator-version.outputs.operator-version }}",
-              "gs_url": "gs://${{ env.GCS_BUCKET }}/${{ steps.upload-chart.outputs.chart_filename }}",
-              "source_repo": "${{ github.repository }}"
-            }'
+            cd charts-repo
 
-      - name: Update VERSION_CHART file
+            # Configure git
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            
+            # Configure git to use the GitHub App token for authentication
+            git remote set-url origin https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ env.CHARTS_REPO }}.git
+            
+            # Add changes
+            git add charts/${{ env.OPERATOR_CHART_NAME }}
+
+            # Commit changes
+            git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}
+
+            - Operator version: ${{ needs.calculate-version.outputs.new_version }}
+            # Add changes
+            git add charts/${{ env.OPERATOR_CHART_NAME }}
+
+            # Commit changes
+            git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}
+
+            - Operator version: ${{ needs.calculate-version.outputs.new_version }}
+            - Operator commit: ${{ github.sha }}"
+            
+            # Push the branch
+            git push origin "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
+            
+      - name: Create PR to charts repo
         run: |
-          echo "${{ needs.calculate-version.outputs.new_version }}" > VERSION_CHART
-          echo "✅ VERSION_CHART file updated to: ${{ needs.calculate-version.outputs.new_version }}"
-          cat VERSION_CHART
+          cd charts-repo
+          gh pr create \
+            --title "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}" \
+            --body "Updates ${{ env.OPERATOR_CHART_NAME }} chart to version ${{ needs.calculate-version.outputs.new_version }}" \
+            --base ${{ env.CHARTS_BRANCH }} \
+            --head "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - name: Commit version changes
         run: |
