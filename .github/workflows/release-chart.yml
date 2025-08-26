@@ -115,13 +115,6 @@ jobs:
             git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}
 
             - Operator version: ${{ needs.calculate-version.outputs.new_version }}
-            # Add changes
-            git add charts/${{ env.OPERATOR_CHART_NAME }}
-
-            # Commit changes
-            git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}
-
-            - Operator version: ${{ needs.calculate-version.outputs.new_version }}
             - Operator commit: ${{ github.sha }}"
             
             # Push the branch
