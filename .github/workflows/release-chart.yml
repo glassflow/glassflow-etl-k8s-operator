@@ -43,8 +43,8 @@ jobs:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           repositories: |
-            glassflow/charts
-            glassflow/glassflow-etl-k8s-operator
+            charts
+            glassflow-etl-k8s-operator
 
       - name: Update VERSION_CHART file
         run: |
