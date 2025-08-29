@@ -14,6 +14,11 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 
+# NATS port configuration variable
+NATS_PORT ?= 4222
+# Kind cluster name configuration variable
+KIND_CLUSTER_NAME ?= kind
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -72,8 +77,8 @@ test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated 
 		echo "Kind is not installed. Please install Kind manually."; \
 		exit 1; \
 	}
-	@kind get clusters | grep -q 'kind' || { \
-		echo "No Kind cluster is running. Please start a Kind cluster before running the e2e tests."; \
+	@kind get clusters | grep -q '$(KIND_CLUSTER_NAME)' || { \
+		echo "No Kind cluster with name '$(KIND_CLUSTER_NAME)' is running. Please start a Kind cluster before running the e2e tests."; \
 		exit 1; \
 	}
 	go test ./test/e2e/ -v -ginkgo.v
@@ -98,7 +103,7 @@ build: manifests generate fmt vet ## Build manager binary.
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go --nats-addr localhost:4223
+	go run ./cmd/main.go --nats-addr localhost:$(NATS_PORT)
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
