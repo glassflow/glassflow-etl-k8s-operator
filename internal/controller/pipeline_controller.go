@@ -669,7 +669,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineJoinKeyValueStore(ctx context.Co
 
 	if r.NATSClient == nil {
 		log.Info("NATS client not available, skipping key value store cleanup")
-		return nil
+		return fmt.Errorf("NATS client not available, skipping NATS cleanup")
 	}
 
 	// since join key value names are same as stream names in CH-ETL
@@ -677,7 +677,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineJoinKeyValueStore(ctx context.Co
 		err := r.NATSClient.JetStream().DeleteKeyValue(ctx, stream.OutputStream)
 		if err != nil {
 			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-			return nil
+			return fmt.Errorf("failed to delete NATS KV Store: %w", err)
 		}
 	}
 
