@@ -1,6 +1,11 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 
+# Component image configurations
+INGESTOR_IMAGE ?= ghcr.io/glassflow/glassflow-etl-ingestor:glassflow-cloud
+JOIN_IMAGE ?= ghcr.io/glassflow/glassflow-etl-join:glassflow-cloud
+SINK_IMAGE ?= ghcr.io/glassflow/glassflow-etl-sink:glassflow-cloud
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -103,7 +108,7 @@ build: manifests generate fmt vet ## Build manager binary.
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go --nats-addr localhost:$(NATS_PORT)
+	go run ./cmd/main.go --nats-addr localhost:$(NATS_PORT) --ingestor-image $(INGESTOR_IMAGE) --join-image $(JOIN_IMAGE) --sink-image $(SINK_IMAGE)
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.

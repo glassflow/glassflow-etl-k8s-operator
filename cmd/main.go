@@ -43,6 +43,14 @@ import (
 	// +kubebuilder:scaffold:imports
 )
 
+// getEnvOrDefault returns the value of the environment variable if set, otherwise returns the default value
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -91,6 +99,15 @@ func main() {
 		"NATS server address for operator")
 	flag.StringVar(&natsComponentAddr, "nats-component-addr", "nats://nats.default.svc.cluster.local:4222",
 		"NATS server address for components")
+
+	// Component image configuration
+	var ingestorImage, joinImage, sinkImage string
+	flag.StringVar(&ingestorImage, "ingestor-image", getEnvOrDefault("INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:latest"),
+		"Image for the ingestor component")
+	flag.StringVar(&joinImage, "join-image", getEnvOrDefault("JOIN_IMAGE", "ghcr.io/glassflow/glassflow-etl-join:latest"),
+		"Image for the join component")
+	flag.StringVar(&sinkImage, "sink-image", getEnvOrDefault("SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:latest"),
+		"Image for the sink component")
 
 	opts := zap.Options{
 		Development: true,
@@ -224,6 +241,9 @@ func main() {
 		Scheme:            mgr.GetScheme(),
 		NATSClient:        natsClient,
 		ComponentNATSAddr: natsComponentAddr,
+		IngestorImage:     ingestorImage,
+		JoinImage:         joinImage,
+		SinkImage:         sinkImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)

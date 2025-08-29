@@ -57,6 +57,10 @@ type PipelineReconciler struct {
 	Scheme            *runtime.Scheme
 	NATSClient        *nats.NATSClient
 	ComponentNATSAddr string
+	// Component image configurations
+	IngestorImage string
+	JoinImage     string
+	SinkImage     string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -424,7 +428,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 
 		container := newComponentContainerBuilder().
 			withName(resourceRef).
-			withImage("ghcr.io/glassflow/glassflow-etl-ingestor:glassflow-cloud").
+			withImage(r.IngestorImage).
 			withVolumeMount(v1.VolumeMount{
 				Name:      "config",
 				ReadOnly:  true,
@@ -471,7 +475,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-join:glassflow-cloud").
+		withImage(r.JoinImage).
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
@@ -517,7 +521,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-sink:glassflow-cloud").
+		withImage(r.SinkImage).
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
