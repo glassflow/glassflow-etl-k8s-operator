@@ -233,16 +233,16 @@ func (r *PipelineReconciler) reconcileShutdown(_ context.Context, log logr.Logge
 func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("reconciling pipeline termination", "pipeline_id", p.Spec.ID)
 
-	// Clean up NATS streams but keep the pipeline configuration
-	err := r.cleanupNATSStreams(ctx, log, p)
-	if err != nil {
-		return fmt.Errorf("cleanup NATS streams: %w", err)
-	}
-
 	// Delete namespace for this pipeline
-	err = r.deleteNamespace(ctx, log, p)
+	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		return fmt.Errorf("delete pipeline namespace: %w", err)
+	}
+
+	// Clean up NATS streams but keep the pipeline configuration
+	err = r.cleanupNATSPipelineStreams(ctx, log, p)
+	if err != nil {
+		return fmt.Errorf("cleanup NATS streams: %w", err)
 	}
 
 	// Update NATS KV store status to "Terminated" instead of deleting
@@ -526,7 +526,6 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		withEnv([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 		}).
 		build()
 
@@ -610,26 +609,8 @@ func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 }
 
 // -------------------------------------------------------------------------------------------------------------------
-// nolint:unused
-func (r *PipelineReconciler) cleanupNATSPipelineData(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("cleaning up NATS data", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
-	// Delete all streams associated with the pipeline
-	err := r.cleanupNATSStreams(ctx, log, p)
-	if err != nil {
-		return fmt.Errorf("cleanup NATS streams: %w", err)
-	}
-
-	// Delete the key value store associated with the pipeline
-	err = r.cleanupNATSPipelineKeyValueStore(ctx, log, p)
-	if err != nil {
-		return fmt.Errorf("cleanup NATS key value store: %w", err)
-	}
-
-	return nil
-}
-
-func (r *PipelineReconciler) cleanupNATSStreams(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) cleanupNATSPipelineStreams(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("cleaning up NATS streams", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
 	if r.NATSClient == nil {
@@ -637,79 +618,87 @@ func (r *PipelineReconciler) cleanupNATSStreams(ctx context.Context, log logr.Lo
 		return fmt.Errorf("NATS client not available, skipping stream cleanup")
 	}
 
-	// Get all streams for this pipeline
-	js := r.NATSClient.JetStream()
-	streams := js.ListStreams(ctx)
+	// delete the DLQ stream
+	if p.Spec.DLQ != "" {
+		log.Info("deleting NATS DLQ stream", "stream", p.Spec.DLQ)
+		err := r.deleteNATSStream(ctx, log, p.Spec.DLQ)
+		if err != nil {
+			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", p.Spec.DLQ)
+			return fmt.Errorf("failed to cleanup NATS DLQ stream: %w", err)
+		}
+		log.Info("NATS DLQ stream deleted successfully", "stream", p.Spec.DLQ)
+	}
 
-	// Find and delete streams associated with this pipeline
-	for stream := range streams.Info() {
-		streamName := stream.Config.Name
-
-		// Check if this stream is associated with our pipeline
-		// Streams are typically named with the pipeline ID or topic names
-		if isPipelineStream(streamName, p) {
-			log.Info("deleting NATS stream", "stream", streamName)
-			err := js.DeleteStream(ctx, streamName)
+	// delete Ingestor Streams
+	for _, stream := range p.Spec.Ingestor.Streams {
+		if stream.OutputStream != "" {
+			log.Info("deleting NATS ingestor output stream", "stream", stream.OutputStream)
+			err := r.deleteNATSStream(ctx, log, stream.OutputStream)
 			if err != nil {
-				log.Error(err, "failed to delete NATS stream", "stream", streamName)
-				// Continue with other streams even if one fails
-				continue
+				log.Error(err, "failed to cleanup NATS Ingestor Output Stream", "stream", stream)
+				return fmt.Errorf("cleanup NATS Ingestor Output Stream: %w", err)
 			}
-			log.Info("NATS stream deleted successfully", "stream", streamName)
+			log.Info("NATS ingestor output stream deleted successfully", "stream", stream.OutputStream)
+		}
+	}
+
+	// delete Join Streams and key value stores
+	if p.Spec.Join.Enabled {
+		if p.Spec.Join.OutputStream != "" {
+			log.Info("deleting NATS join output stream", "stream", p.Spec.Join.OutputStream)
+			err := r.deleteNATSStream(ctx, log, p.Spec.Join.OutputStream)
+			if err != nil {
+				log.Error(err, "failed to cleanup join output stream", "stream", p.Spec.Join.OutputStream)
+				return fmt.Errorf("cleanup join output stream: %w", err)
+			}
+			log.Info("NATS join output stream deleted successfully", "stream", p.Spec.Join.OutputStream)
+		}
+
+		err := r.cleanupNATSPipelineJoinKeyValueStore(ctx, log, p)
+		if err != nil {
+			log.Error(err, "failed to cleanup NATS join KV store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+			return fmt.Errorf("failed cleanup NATS join KV store: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// nolint:unused
-func (r *PipelineReconciler) cleanupNATSPipelineKeyValueStore(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("cleaning up NATS key value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+func (r *PipelineReconciler) cleanupNATSPipelineJoinKeyValueStore(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	log.Info("cleaning up NATS join key value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
 	if r.NATSClient == nil {
 		log.Info("NATS client not available, skipping key value store cleanup")
-		return nil
+		return fmt.Errorf("NATS client not available, skipping NATS cleanup")
 	}
 
-	kv, err := r.NATSClient.JetStream().KeyValue(ctx, "glassflow-pipelines")
-	if err != nil {
-		log.Error(err, "failed to list glassflow pipelines key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-		return nil
-	}
-
-	err = kv.Delete(ctx, p.Spec.ID)
-	if err != nil {
-		return fmt.Errorf("check if key exists: %w", err)
-	}
-
-	log.Info("NATS key value store deleted successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-	return nil
-}
-
-func isPipelineStream(streamName string, p etlv1alpha1.Pipeline) bool {
-	// Check if stream name contains pipeline ID
-	if streamName == p.Spec.ID {
-		return true
-	}
-
-	// Check if stream name matches any of the pipeline's topic streams
+	// since join key value names are same as stream names in CH-ETL
 	for _, stream := range p.Spec.Ingestor.Streams {
-		if streamName == stream.OutputStream {
-			return true
+		err := r.NATSClient.JetStream().DeleteKeyValue(ctx, stream.OutputStream)
+		if err != nil {
+			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+			return fmt.Errorf("failed to delete NATS KV Store: %w", err)
 		}
 	}
 
-	// Check if stream name matches join stream
-	if p.Spec.Join.Enabled && streamName == p.Spec.Join.OutputStream {
-		return true
+	log.Info("NATS join key value store deleted successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	return nil
+}
+
+func (r *PipelineReconciler) deleteNATSStream(ctx context.Context, log logr.Logger, streamName string) error {
+
+	if r.NATSClient == nil {
+		log.Info("NATS client not available, skipping key value store cleanup")
+		return fmt.Errorf("NATS client not available, skipping NATS cleanup")
 	}
 
-	// Check if stream name matches DLQ stream
-	if streamName == p.Spec.DLQ {
-		return true
+	err := r.NATSClient.JetStream().DeleteStream(ctx, streamName)
+	if err != nil {
+		log.Error(err, "failed to delete NATS output stream", "stream", streamName)
+		return fmt.Errorf("failed to delete NATS output stream: %w", err)
 	}
 
-	return false
+	return nil
 }
 
 // -------------------------------------------------------------------------------------------------------------------
