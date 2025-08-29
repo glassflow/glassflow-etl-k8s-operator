@@ -102,11 +102,14 @@ func main() {
 
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage string
-	flag.StringVar(&ingestorImage, "ingestor-image", getEnvOrDefault("INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:latest"),
+	flag.StringVar(&ingestorImage, "ingestor-image", getEnvOrDefault(
+		"INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:latest"),
 		"Image for the ingestor component")
-	flag.StringVar(&joinImage, "join-image", getEnvOrDefault("JOIN_IMAGE", "ghcr.io/glassflow/glassflow-etl-join:latest"),
+	flag.StringVar(&joinImage, "join-image", getEnvOrDefault(
+		"JOIN_IMAGE", "ghcr.io/glassflow/glassflow-etl-join:latest"),
 		"Image for the join component")
-	flag.StringVar(&sinkImage, "sink-image", getEnvOrDefault("SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:latest"),
+	flag.StringVar(&sinkImage, "sink-image", getEnvOrDefault(
+		"SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:latest"),
 		"Image for the sink component")
 
 	opts := zap.Options{
