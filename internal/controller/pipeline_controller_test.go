@@ -102,6 +102,9 @@ var _ = Describe("Pipeline Controller", func() {
 				Scheme:            k8sClient.Scheme(),
 				NATSClient:        nc,
 				ComponentNATSAddr: "nats://nats.default.svc.cluster.local:4222",
+				IngestorImage:     "ghcr.io/glassflow/glassflow-etl-ingestor:latest",
+				JoinImage:         "ghcr.io/glassflow/glassflow-etl-join:latest",
+				SinkImage:         "ghcr.io/glassflow/glassflow-etl-sink:latest",
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
