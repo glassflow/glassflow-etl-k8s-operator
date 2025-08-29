@@ -59,7 +59,6 @@ type SourceStream struct {
 }
 
 type Join struct {
-	// +kubebuilder:validation:Enum=temporal
 	Type         string `json:"type"`
 	OutputStream string `json:"stream"`
 	Enabled      bool   `json:"enabled"`
