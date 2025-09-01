@@ -424,7 +424,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 
 		container := newComponentContainerBuilder().
 			withName(resourceRef).
-			withImage("ghcr.io/glassflow/glassflow-etl-ingestor:glassflow-cloud").
+			withImage("ghcr.io/glassflow/glassflow-etl-ingestor:stable").
 			withVolumeMount(v1.VolumeMount{
 				Name:      "config",
 				ReadOnly:  true,
@@ -471,7 +471,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-join:glassflow-cloud").
+		withImage("ghcr.io/glassflow/glassflow-etl-join:stable").
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
@@ -517,7 +517,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage("ghcr.io/glassflow/glassflow-etl-sink:glassflow-cloud").
+		withImage("ghcr.io/glassflow/glassflow-etl-sink:stable").
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
