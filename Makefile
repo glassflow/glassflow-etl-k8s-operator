@@ -2,9 +2,9 @@
 IMG ?= controller:latest
 
 # Component image configurations
-INGESTOR_IMAGE ?= ghcr.io/glassflow/glassflow-etl-ingestor:glassflow-cloud
-JOIN_IMAGE ?= ghcr.io/glassflow/glassflow-etl-join:glassflow-cloud
-SINK_IMAGE ?= ghcr.io/glassflow/glassflow-etl-sink:glassflow-cloud
+INGESTOR_IMAGE ?= ghcr.io/glassflow/glassflow-etl-ingestor:stable
+JOIN_IMAGE ?= ghcr.io/glassflow/glassflow-etl-join:stable
+SINK_IMAGE ?= ghcr.io/glassflow/glassflow-etl-sink:stable
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
