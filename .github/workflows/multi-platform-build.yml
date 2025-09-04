@@ -52,13 +52,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      - name: Generate platform tag
+        id: platform-tag
+        run: |
+          # Convert platform to valid Docker tag
+          case "${{ matrix.platform }}" in
+            "linux/amd64") echo "tag=amd64-test" >> $GITHUB_OUTPUT ;;
+            "linux/arm64") echo "tag=arm64-test" >> $GITHUB_OUTPUT ;;
+            "linux/ppc64le") echo "tag=ppc64le-test" >> $GITHUB_OUTPUT ;;
+            "linux/s390x") echo "tag=s390x-test" >> $GITHUB_OUTPUT ;;
+            *) echo "tag=unknown-test" >> $GITHUB_OUTPUT ;;
+          esac
+          echo "✅ Generated tag: ${{ steps.platform-tag.outputs.tag }}"
+
       - name: Build and push single platform
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.platform }}-test
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.platform-tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -67,7 +80,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           # Tag with main for main branch
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.platform }}-test ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.platform-tag.outputs.tag }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
           
           # Push main tag
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
@@ -75,10 +88,10 @@ jobs:
       - name: Test binary compatibility
         run: |
           # Pull the built image
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.platform }}-test
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.platform-tag.outputs.tag }}
           
           # Test that the binary runs
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.platform }}-test --help || true
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.platform-tag.outputs.tag }} --help || true
           
           echo "✅ Platform ${{ matrix.platform }} build and test completed"
 
