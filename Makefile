@@ -251,3 +251,116 @@ helm: manifests kustomize helmify
 .PHONY: package-chart
 package-chart: helm
 	helm package chart -d dist/charts --version $(VERSION) --app-version $(APP_VERSION)
+
+##@ Workflow Testing
+
+.PHONY: workflow-test
+workflow-test: ## Run complete workflow testing locally (equivalent to GitHub Actions)
+	@echo "🚀 Starting complete workflow testing..."
+	@echo "=========================================="
+	
+	@echo "📋 Step 1: Installing required tools..."
+	@$(MAKE) golangci-lint
+	@$(MAKE) kustomize
+	@$(MAKE) controller-gen
+	
+	@echo "🔍 Step 2: Running linting..."
+	@$(MAKE) lint
+	
+	@echo "🧪 Step 3: Running tests..."
+	@$(MAKE) test
+	
+	@echo "🐳 Step 4: Building Docker image..."
+	@$(MAKE) docker-buildx IMG=workflow-test:latest
+	
+	@echo "🔒 Step 5: Security scanning..."
+	@$(MAKE) security-scan
+	
+	@echo "📦 Step 6: Validating manifests..."
+	@$(MAKE) validate-manifests
+	
+	@echo "🏗️ Step 7: Testing cross-compilation..."
+	@$(MAKE) test-cross-compilation
+	
+	@echo "📋 Step 8: Dependency checks..."
+	@$(MAKE) dependency-check
+	
+	@echo "✅ All workflow tests completed successfully!"
+	@echo "🎉 Your code is ready to push to GitHub!"
+
+.PHONY: security-scan
+security-scan: ## Run security scanning locally
+	@echo "🔒 Running security scan..."
+	@if command -v trivy >/dev/null 2>&1; then \
+		echo "Scanning filesystem for vulnerabilities..."; \
+		trivy fs --severity HIGH,CRITICAL . || echo "⚠️  Trivy found vulnerabilities - check output above"; \
+		echo "Scanning Go dependencies..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+		govulncheck ./... || echo "⚠️  govulncheck found vulnerabilities - check output above"; \
+	else \
+		echo "⚠️  Trivy not installed. Install with: brew install trivy (macOS) or see https://aquasecurity.github.io/trivy/"; \
+		echo "Running Go vulnerability check only..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+		govulncheck ./... || echo "⚠️  govulncheck found vulnerabilities - check output above"; \
+	fi
+
+.PHONY: validate-manifests
+validate-manifests: ## Validate Kubernetes manifests
+	@echo "📦 Validating Kubernetes manifests..."
+	@$(MAKE) kustomize
+	@echo "Validating CRDs..."
+	@$(KUSTOMIZE) build config/crd > /dev/null || { echo "❌ CRD validation failed"; exit 1; }
+	@echo "Validating default config..."
+	@$(KUSTOMIZE) build config/default > /dev/null || { echo "❌ Default config validation failed"; exit 1; }
+	@echo "✅ All manifests validated successfully"
+
+.PHONY: test-cross-compilation
+test-cross-compilation: ## Test cross-compilation for different platforms
+	@echo "🏗️ Testing cross-compilation..."
+	@echo "Building for AMD64..."
+	@GOOS=linux GOARCH=amd64 go build -o bin/manager-amd64 cmd/main.go || { echo "❌ AMD64 build failed"; exit 1; }
+	@echo "Building for ARM64..."
+	@GOOS=linux GOARCH=arm64 go build -o bin/manager-arm64 cmd/main.go || { echo "❌ ARM64 build failed"; exit 1; }
+	@echo "Building for PPC64LE..."
+	@GOOS=linux GOARCH=ppc64le go build -o bin/manager-ppc64le cmd/main.go || { echo "❌ PPC64LE build failed"; exit 1; }
+	@echo "Building for S390X..."
+	@GOOS=linux GOARCH=s390x go build -o bin/manager-s390x cmd/main.go || { echo "❌ S390X build failed"; exit 1; }
+	@echo "✅ All cross-compilation tests passed"
+	@echo "Cleaning up build artifacts..."
+	@rm -f bin/manager-*
+
+.PHONY: dependency-check
+dependency-check: ## Check Go dependencies for vulnerabilities and updates
+	@echo "📋 Checking Go dependencies..."
+	@echo "Checking for outdated dependencies..."
+	@go list -u -m all | grep -E '\[.*\]' || echo "✅ All dependencies are up to date"
+	@echo "Verifying dependencies..."
+	@go mod verify || { echo "❌ Dependency verification failed"; exit 1; }
+	@echo "✅ Dependency check completed"
+
+.PHONY: quick-test
+quick-test: ## Quick test for common issues (faster than full workflow)
+	@echo "⚡ Running quick test..."
+	@echo "🔍 Linting..."
+	@$(MAKE) lint
+	@echo "🧪 Unit tests..."
+	@$(MAKE) test
+	@echo "📦 Manifest validation..."
+	@$(MAKE) validate-manifests
+	@echo "✅ Quick test completed successfully!"
+
+.PHONY: install-tools
+install-tools: ## Install all required tools for workflow testing
+	@echo "🛠️ Installing required tools..."
+	@$(MAKE) golangci-lint
+	@$(MAKE) kustomize
+	@$(MAKE) controller-gen
+	@echo "Installing Trivy for security scanning..."
+	@if command -v brew >/dev/null 2>&1; then \
+		brew install trivy; \
+	elif command -v curl >/dev/null 2>&1; then \
+		curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin; \
+	else \
+		echo "⚠️  Please install Trivy manually: https://aquasecurity.github.io/trivy/"; \
+	fi
+	@echo "✅ All tools installed successfully"

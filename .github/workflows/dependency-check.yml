@@ -1,0 +1,99 @@
+name: Dependency Check
+
+on:
+  schedule:
+    # Run every Tuesday at 10 AM UTC
+    - cron: '0 10 * * 2'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Check for outdated dependencies
+        run: |
+          echo "Checking for outdated Go dependencies..."
+          go list -u -m all | grep -E '\[.*\]' || echo "All dependencies are up to date"
+
+      - name: Check for known vulnerabilities
+        run: |
+          echo "Checking for known vulnerabilities in dependencies..."
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./... || echo "Vulnerability check completed"
+
+      - name: Audit dependencies
+        run: |
+          echo "Auditing Go dependencies..."
+          go mod verify
+          echo "✅ All dependencies verified successfully"
+
+  update-dependencies:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Update dependencies
+        run: |
+          echo "Updating Go dependencies..."
+          go get -u ./...
+          go mod tidy
+          echo "✅ Dependencies updated"
+
+      - name: Check if there are changes
+        id: check-changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "has-changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.check-changes.outputs.has-changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update dependencies'
+          title: 'chore: update Go dependencies'
+          body: |
+            This PR updates Go dependencies to their latest versions.
+            
+            ## Changes
+            - Updated Go module dependencies
+            - Ran `go mod tidy` to clean up go.mod and go.sum
+            
+            ## Testing
+            - [ ] All tests pass
+            - [ ] No breaking changes introduced
+            
+            Please review the changes and ensure compatibility.
+          branch: update-dependencies
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
