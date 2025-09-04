@@ -586,7 +586,7 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 func (r *PipelineReconciler) getKafkaIngestorLabels(topic string) map[string]string {
 	labels := map[string]string{
 		"etl.glassflow.io/component": "ingestor",
-		"elt.glassflow.io/topic":     topic,
+		"etl.glassflow.io/topic":     topic,
 	}
 
 	return labels
