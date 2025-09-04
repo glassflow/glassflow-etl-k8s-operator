@@ -66,11 +66,11 @@ jobs:
           echo "✅ Generated tag: ${{ steps.platform-tag.outputs.tag }}"
 
       - name: Build and push single platform
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          push: true
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.platform-tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
