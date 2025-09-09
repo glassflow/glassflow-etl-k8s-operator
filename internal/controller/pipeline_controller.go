@@ -806,7 +806,3 @@ func ptrInt32(i int32) *int32 {
 func ptrInt64(i int64) *int64 {
 	return &i
 }
-
-func ptrBool(v bool) *bool {
-	return &v
-}
