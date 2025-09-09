@@ -71,7 +71,7 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 	//nolint:exhaustruct // readability
 	sc := jetstream.StreamConfig{
 		Name:     name,
-		Subjects: []string{name + ".>"},
+		Subjects: []string{name + ".*"},
 		Storage:  jetstream.FileStorage,
 
 		Retention: jetstream.LimitsPolicy,

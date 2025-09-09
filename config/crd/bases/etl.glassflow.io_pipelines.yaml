@@ -47,12 +47,16 @@ spec:
                 properties:
                   enabled:
                     type: boolean
+                  replicas:
+                    minimum: 1
+                    type: integer
                   stream:
                     type: string
                   type:
                     type: string
                 required:
                 - enabled
+                - replicas
                 - stream
                 - type
                 type: object
@@ -60,9 +64,18 @@ spec:
                 minLength: 5
                 type: string
               sink:
-                enum:
-                - clickhouse
-                type: string
+                properties:
+                  replicas:
+                    minimum: 1
+                    type: integer
+                  type:
+                    enum:
+                    - clickhouse
+                    type: string
+                required:
+                - replicas
+                - type
+                type: object
               sources:
                 properties:
                   topics:
@@ -75,6 +88,9 @@ spec:
                             largest representable duration to approximately 290 years.
                           format: int64
                           type: integer
+                        replicas:
+                          minimum: 1
+                          type: integer
                         stream:
                           type: string
                         topic_name:
@@ -82,6 +98,7 @@ spec:
                           type: string
                       required:
                       - dedup_window
+                      - replicas
                       - stream
                       - topic_name
                       type: object
