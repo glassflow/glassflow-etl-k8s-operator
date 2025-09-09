@@ -1,0 +1,144 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: pipelines.etl.glassflow.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  labels:
+  {{- include "glassflow-operator.labels" . | nindent 4 }}
+spec:
+  group: etl.glassflow.io
+  names:
+    kind: Pipeline
+    listKind: PipelineList
+    plural: pipelines
+    singular: pipeline
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Pipeline is the Schema for the pipelines API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PipelineSpec defines the desired state of Pipeline.
+            properties:
+              config:
+                type: string
+              dlq:
+                type: string
+              join:
+                properties:
+                  enabled:
+                    type: boolean
+                  stream:
+                    type: string
+                  type:
+                    type: string
+                required:
+                - enabled
+                - stream
+                - type
+                type: object
+              pipeline_id:
+                minLength: 5
+                type: string
+              sink:
+                enum:
+                - clickhouse
+                type: string
+              sources:
+                properties:
+                  topics:
+                    items:
+                      properties:
+                        dedup_window:
+                          description: |-
+                            A Duration represents the elapsed time between two instants
+                            as an int64 nanosecond count. The representation limits the
+                            largest representable duration to approximately 290 years.
+                          format: int64
+                          type: integer
+                        stream:
+                          type: string
+                        topic_name:
+                          minLength: 1
+                          type: string
+                      required:
+                      - dedup_window
+                      - stream
+                      - topic_name
+                      type: object
+                    maxItems: 2
+                    minItems: 1
+                    type: array
+                  type:
+                    enum:
+                    - kafka
+                    type: string
+                required:
+                - topics
+                - type
+                type: object
+            required:
+            - config
+            - dlq
+            - join
+            - pipeline_id
+            - sink
+            - sources
+            type: object
+          status:
+            description: PipelineStatus defines the observed state of Pipeline.
+            properties:
+              ingestor_operator_status:
+                enum:
+                - none
+                - started
+                - stopped
+                type: string
+              join_operator_status:
+                enum:
+                - none
+                - started
+                - stopped
+                type: string
+              sink_operator_status:
+                enum:
+                - none
+                - started
+                - stopped
+                type: string
+            required:
+            - ingestor_operator_status
+            - join_operator_status
+            - sink_operator_status
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
