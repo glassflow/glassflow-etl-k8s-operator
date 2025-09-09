@@ -1,150 +1,45 @@
-name: Release Operator Chart
+name: Chart Release
 
 on:
-  workflow_call:
-    inputs:
-      version_type:
-        description: 'Version bump type'
-        required: true
-        type: string
-    outputs:
-      new_version:
-        description: 'New Helm chart version'
-        value: ${{ jobs.calculate-version.outputs.new_version }}
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+    paths:
+      - 'charts/**'
+
+permissions:
+  contents: write
 
 jobs:
-  calculate-version:
-    uses: ./.github/workflows/calculate-version.yml
-    with:
-      version_file: VERSION_CHART
-      version_type: ${{ inputs.version_type }}
-
   release:
-    needs: [calculate-version]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
-    env:
-        CHARTS_REPO: glassflow/charts
-        CHARTS_BRANCH: glassflow-operator  # TODO: change to main after release
-        HELM_REGISTRY: https://glassflow.github.io/charts/
-        OPERATOR_CHART_NAME: glassflow-operator
-
+    if: |
+      github.event.pull_request.merged == true &&
+      (contains(github.event.pull_request.labels.*.name, 'bump:major') ||
+       contains(github.event.pull_request.labels.*.name, 'bump:minor') ||
+       contains(github.event.pull_request.labels.*.name, 'bump:patch'))
     steps:
-      - name: Checkout operator repo
+      - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Create GitHub App token
-        uses: actions/create-github-app-token@v2
-        id: app-token
+      - name: Configure Git for pushing
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
         with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: |
-            charts
-            glassflow-etl-k8s-operator
+          version: v3.13.3
 
-      - name: Update VERSION_CHART file
-        run: |
-          echo "${{ needs.calculate-version.outputs.new_version }}" > VERSION_CHART
-          echo "✅ VERSION_CHART file updated to: ${{ needs.calculate-version.outputs.new_version }}"
-          cat VERSION_CHART
+      - name: Update Helm dependencies
+        run: helm dependency update charts/glassflow-operator
 
-      - name: Read operator version
-        id: operator-version
-        run: |
-          if [ -f "VERSION" ]; then
-            OPERATOR_VERSION=$(cat VERSION | tr -d ' \t\n\r')
-          else
-            OPERATOR_VERSION="0.0.0"
-          fi
-          
-          echo "Operator version: $OPERATOR_VERSION"
-          echo "operator-version=$OPERATOR_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Checkout charts repo
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ env.CHARTS_REPO }}
-          token: ${{ steps.app-token.outputs.token }}
-          path: charts-repo
-          ref: ${{ env.CHARTS_BRANCH }}
-
-      - name: Generate and package chart
-        run: |
-          make package-chart \
-            VERSION=${{ needs.calculate-version.outputs.new_version }} \
-            APP_VERSION=${{ steps.operator-version.outputs.operator-version }}
-
-      - name: Update operator chart in charts repo
-        run: |
-          cd charts-repo
-          # Create release branch
-          git checkout -b "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
-
-          # Clean previous operator chart
-          rm -rf charts/${{ env.OPERATOR_CHART_NAME }}/*
-
-          # Extract the operator chart from .tgz
-          echo "📦 Extracting operator chart..."
-          tar -xzf ../dist/charts/*.tgz -C charts/${{ env.OPERATOR_CHART_NAME }}/ --strip-components=1
-    
-      - name: Clean up
-        run: |
-          cd ..
-          rm -rf dist chart
-
-      - name: Commit and push changes
-        run: |
-            cd charts-repo
-
-            # Configure git
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            
-            # Configure git to use the GitHub App token for authentication
-            git remote set-url origin https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ env.CHARTS_REPO }}.git
-            
-            # Add changes
-            git add charts/${{ env.OPERATOR_CHART_NAME }}
-
-            # Commit changes
-            git commit -m "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}
-
-            - Operator version: ${{ needs.calculate-version.outputs.new_version }}
-            - Operator commit: ${{ github.sha }}"
-            
-            # Push the branch
-            git push origin "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
-            
-      - name: Create PR to charts repo
-        run: |
-          cd charts-repo
-          gh pr create \
-            --title "feat: update ${{ env.OPERATOR_CHART_NAME }} to v${{ needs.calculate-version.outputs.new_version }}" \
-            --body "Updates ${{ env.OPERATOR_CHART_NAME }} chart to version ${{ needs.calculate-version.outputs.new_version }}" \
-            --base ${{ env.CHARTS_BRANCH }} \
-            --head "update-${{ env.OPERATOR_CHART_NAME }}-v${{ needs.calculate-version.outputs.new_version }}"
+      - name: Run chart releaser
+        uses: helm/chart-releaser-action@v1.5.0
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-
-      - name: Commit version changes
-        run: |
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Add version changes
-          git add VERSION_CHART
-          
-          # Commit the version bump
-          git commit -m "chore: bump version to ${{ needs.calculate-version.outputs.new_version }}
-
-          - Helm chart version: ${{ needs.calculate-version.outputs.new_version }}
-          - VERSION_CHART file updated" || echo "No changes to commit"
-          
-          # Push the changes
-          git push origin ${{ github.ref }}
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CR_SKIP_EXISTING: true           # Skip if release already exists
+          CR_GENERATE_RELEASE_NOTES: true  # Auto generate GitHub release notes

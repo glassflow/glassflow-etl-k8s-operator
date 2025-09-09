@@ -1,0 +1,90 @@
+name: Chart Version Bump
+
+on:
+  pull_request:
+    types: [labeled]
+    branches:
+      - main
+
+jobs:
+  determine-bump:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'bump:major') ||
+      contains(github.event.pull_request.labels.*.name, 'bump:minor') ||
+      contains(github.event.pull_request.labels.*.name, 'bump:patch')
+    outputs:
+      bump_type: ${{ steps.bump_type.outputs.bump_type }}
+    steps:
+      - name: Determine highest bump type
+        id: bump_type
+        run: |
+          LABEL="${{ github.event.label.name }}"
+          BUMP_TYPE="patch"  # Default to lowest impact
+          
+          if [[ "$LABEL" == "bump:major" ]]; then
+            BUMP_TYPE="major"
+          elif [[ "$LABEL" == "bump:minor" ]]; then
+            BUMP_TYPE="minor"
+          fi
+          
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "Using $BUMP_TYPE version bump (highest impact label found)"
+
+  bump-version:
+    needs: determine-bump
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'bump:major') ||
+      contains(github.event.pull_request.labels.*.name, 'bump:minor') ||
+      contains(github.event.pull_request.labels.*.name, 'bump:patch')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Get current chart version
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(cat charts/glassflow-operator/Chart.yaml | grep "version:" | awk '{print $2}')
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Calculate new chart version
+        id: new_version
+        run: |
+          CURRENT=${{ steps.current_version.outputs.current_version }}
+          BUMP_TYPE=${{ needs.determine-bump.outputs.bump_type }}
+          
+          # Split version into parts
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          
+          # Bump version based on type
+          case "$BUMP_TYPE" in
+            "major")
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            "minor")
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            "patch")
+              patch=$((patch + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="${major}.${minor}.${patch}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update chart version in Chart.yaml
+        run: |
+          echo "version: ${{ steps.new_version.outputs.new_version }}" > charts/glassflow-operator/Chart.yaml
+          cat charts/glassflow-operator/Chart.yaml
+
+      - name: Commit and push version changes
+        uses: actions-js/push@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.head_ref }}
+          message: "chore: bump chart version to ${{ steps.new_version.outputs.new_version }}" 

@@ -6,6 +6,11 @@ INGESTOR_IMAGE ?= ghcr.io/glassflow/glassflow-etl-ingestor:stable
 JOIN_IMAGE ?= ghcr.io/glassflow/glassflow-etl-join:stable
 SINK_IMAGE ?= ghcr.io/glassflow/glassflow-etl-sink:stable
 
+# Chart configuration
+CHART_NAME ?= glassflow-operator
+GENERATED_DIR ?= generated/$(CHART_NAME)
+CURATED_DIR ?= charts/$(CHART_NAME)
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -246,8 +251,27 @@ $(HELMIFY): $(LOCALBIN)
 
 .PHONY: helm
 helm: manifests kustomize helmify
-	$(KUSTOMIZE) build config/default | $(HELMIFY)
+	@echo ">>> Generating Helm chart with helmify into $(GENERATED_DIR)"
+	$(KUSTOMIZE) build config/default | $(HELMIFY) --crd-dir $(GENERATED_DIR)
 
-.PHONY: package-chart
-package-chart: helm
-	helm package chart -d dist/charts --version $(VERSION) --app-version $(APP_VERSION)
+.PHONY: generate-chart
+generate-chart: clean-generated
+	@echo ">>> Refreshing Helm chart with helmify into $(GENERATED_DIR)"
+	@$(MAKE) helm
+
+.PHONY: diff-chart
+diff-chart:
+	@echo ">>> Diffing Helm chart with helmify into $(GENERATED_DIR)"
+	@if [ -d $(CURATED_DIR) ]; then \
+		colordiff -ruN $(CURATED_DIR) $(GENERATED_DIR) || true; \
+	else \
+		echo "No curated chart at $(CURATED_DIR), skipping diff."; \
+	fi
+
+.PHONY: clean-generated
+clean-generated:
+	@if [ -d $(GENERATED_DIR) ]; then \
+		rm -rf $(GENERATED_DIR) || true; \
+	else \
+		echo "No generated chart at $(GENERATED_DIR), skipping clean."; \
+	fi
