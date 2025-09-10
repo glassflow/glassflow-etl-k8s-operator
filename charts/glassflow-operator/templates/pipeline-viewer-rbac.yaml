@@ -1,0 +1,21 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-pipeline-viewer-role
+  labels:
+  {{- include "glassflow-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - etl.glassflow.io
+  resources:
+  - pipelines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - etl.glassflow.io
+  resources:
+  - pipelines/status
+  verbs:
+  - get
