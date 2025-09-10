@@ -81,7 +81,8 @@ jobs:
 
       - name: Update chart version in Chart.yaml
         run: |
-          echo "version: ${{ steps.new_version.outputs.new_version }}" > charts/glassflow-operator/Chart.yaml
+          sed -i "s/^version: .*/version: ${{ steps.new_version.outputs.new_version }}/" charts/glassflow-operator/Chart.yaml
+          echo "Updated Chart.yaml:"
           cat charts/glassflow-operator/Chart.yaml
 
       - name: Commit and push version changes
