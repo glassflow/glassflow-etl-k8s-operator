@@ -77,6 +77,7 @@ type deploymentBuilder interface {
 	withLabels(labels map[string]string) deploymentBuilder
 	withVolume(volume v1.Volume) deploymentBuilder
 	withContainer(container v1.Container) deploymentBuilder
+	withReplicas(replicas int) deploymentBuilder
 	build() *appsv1.Deployment
 }
 
@@ -127,9 +128,19 @@ func (c *componentDeployment) withContainer(container v1.Container) deploymentBu
 	return c
 }
 
+// withReplicas implements deploymentBuilder.
+func (c *componentDeployment) withReplicas(replicas int) deploymentBuilder {
+	if replicas > 0 {
+		c.dep.Spec.Replicas = ptrInt32(int32(replicas))
+	}
+	return c
+}
+
 // build implements deploymentBuilder.
 func (c *componentDeployment) build() *appsv1.Deployment {
-	c.dep.Spec.Replicas = ptrInt32(1)
+	if c.dep.Spec.Replicas == nil {
+		c.dep.Spec.Replicas = ptrInt32(1)
+	}
 	c.dep.Spec.Selector = &metav1.LabelSelector{
 		MatchLabels: c.dep.GetLabels(),
 	}

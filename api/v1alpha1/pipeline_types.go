@@ -38,9 +38,8 @@ type PipelineSpec struct {
 	DLQ      string  `json:"dlq"`
 	Ingestor Sources `json:"sources"`
 	Join     Join    `json:"join"`
-	// +kubebuilder:validation:Enum=clickhouse
-	Sink   string `json:"sink"`
-	Config string `json:"config"`
+	Sink     Sink    `json:"sink"`
+	Config   string  `json:"config"`
 }
 
 type Sources struct {
@@ -56,12 +55,23 @@ type SourceStream struct {
 	TopicName    string        `json:"topic_name"`
 	OutputStream string        `json:"stream"`
 	DedupWindow  time.Duration `json:"dedup_window"`
+	// +kubebuilder:validation:Minimum=1
+	Replicas int `json:"replicas"`
 }
 
 type Join struct {
 	Type         string `json:"type"`
 	OutputStream string `json:"stream"`
-	Enabled      bool   `json:"enabled"`
+	// +kubebuilder:validation:Minimum=1
+	Replicas int  `json:"replicas"`
+	Enabled  bool `json:"enabled"`
+}
+
+type Sink struct {
+	// +kubebuilder:validation:Enum=clickhouse
+	Type string `json:"type"`
+	// +kubebuilder:validation:Minimum=1
+	Replicas int `json:"replicas"`
 }
 
 // PipelineStatus defines the observed state of Pipeline.
