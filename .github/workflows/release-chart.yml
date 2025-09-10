@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Configure Git for pushing
         run: |
@@ -38,7 +40,7 @@ jobs:
         run: helm dependency update charts/glassflow-operator
 
       - name: Run chart releaser
-        uses: helm/chart-releaser-action@v1.5.0
+        uses: helm/chart-releaser-action@v1.7.0
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CR_SKIP_EXISTING: true           # Skip if release already exists
