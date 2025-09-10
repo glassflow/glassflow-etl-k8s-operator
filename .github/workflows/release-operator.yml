@@ -2,14 +2,13 @@ name: Release Operator
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       contents: write
       packages: write
@@ -21,6 +20,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Extract version from tag
         id: version
