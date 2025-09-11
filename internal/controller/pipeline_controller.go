@@ -212,15 +212,6 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		}
 	}
 
-	// Update the Kubernetes secret with the initial "Running" status
-	err = r.updateSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: p.Spec.ID}, p, "Running")
-	if err != nil {
-		log.Error(err, "failed to update pipeline secret with initial Running status", "pipeline_id", p.Spec.ID)
-		// Don't fail the reconciliation if secret update fails, just log the error
-	} else {
-		log.Info("successfully updated pipeline secret with initial Running status", "pipeline_id", p.Spec.ID)
-	}
-
 	return nil
 }
 
@@ -318,6 +309,7 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 			Namespace: namespacedName.Namespace,
 			Labels:    labels,
 		},
+		Immutable: ptrBool(true),
 		StringData: map[string]string{
 			"pipeline.json": p.Spec.Config,
 		},
@@ -332,56 +324,6 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 	}
 
 	return s, nil
-}
-
-func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName types.NamespacedName, p etlv1alpha1.Pipeline, status string) error {
-	// Get the existing secret
-	secretName := namespacedName
-
-	var secret v1.Secret
-	err := r.Get(ctx, secretName, &secret)
-	if err != nil {
-		return fmt.Errorf("failed to get pipeline secret %s: %w", secretName, err)
-	}
-
-	// Parse the existing pipeline.json
-	var pipelineConfig map[string]interface{}
-	err = json.Unmarshal(secret.Data["pipeline.json"], &pipelineConfig)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal existing pipeline config: %w", err)
-	}
-
-	// Update the status in the pipeline configuration
-	if statusData, exists := pipelineConfig["status"]; exists {
-		if statusMap, ok := statusData.(map[string]interface{}); ok {
-			statusMap["overall_status"] = status
-			statusMap["updated_at"] = time.Now().UTC().Format(time.RFC3339)
-		}
-	} else {
-		// If status doesn't exist, create it
-		pipelineConfig["status"] = map[string]interface{}{
-			"pipeline_id":    p.Spec.ID,
-			"pipeline_name":  p.Name,
-			"overall_status": status,
-			"created_at":     time.Now().UTC().Format(time.RFC3339),
-			"updated_at":     time.Now().UTC().Format(time.RFC3339),
-		}
-	}
-
-	// Marshal the updated configuration
-	updatedConfig, err := json.Marshal(pipelineConfig)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated pipeline config: %w", err)
-	}
-
-	// Update the secret
-	secret.Data["pipeline.json"] = updatedConfig
-	err = r.Update(ctx, &secret)
-	if err != nil {
-		return fmt.Errorf("failed to update pipeline secret: %w", err)
-	}
-
-	return nil
 }
 
 func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
@@ -469,6 +411,7 @@ func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, 
 // -------------------------------------------------------------------------------------------------------------------
 
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+	// TODO: incase of multiple ingestors, ensure type and relevant images
 	ing := p.Spec.Ingestor
 
 	for i, t := range ing.Streams {
@@ -805,4 +748,8 @@ func ptrInt32(i int32) *int32 {
 
 func ptrInt64(i int64) *int64 {
 	return &i
+}
+
+func ptrBool(v bool) *bool {
+	return &v
 }
