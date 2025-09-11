@@ -1,13 +1,7 @@
 name: Chart Release
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
-
-    paths:
-      - 'charts/**'
+  workflow_call:
 
 permissions:
   contents: write
@@ -15,11 +9,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: |
-      github.event.pull_request.merged == true &&
-      (contains(github.event.pull_request.labels.*.name, 'bump:major') ||
-       contains(github.event.pull_request.labels.*.name, 'bump:minor') ||
-       contains(github.event.pull_request.labels.*.name, 'bump:patch'))
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

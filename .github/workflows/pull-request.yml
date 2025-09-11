@@ -1,0 +1,39 @@
+name: Pull Request Creation
+on:
+  - pull_request
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    if: github.event.pull_request.merged == true
+    name: Get Changes
+    runs-on: ubuntu-latest
+    outputs:
+      charts: ${{ steps.filter.outputs.changes.charts }}
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: main
+          filters: |
+            charts:
+              - 'charts/**'
+
+  test-operator:
+    uses: ./.github/workflows/test-operator.yml
+  build-operator-image:
+    needs: [test-operator]
+    uses: ./.github/workflows/build-image.yml
+    with:
+      push: true
+    secrets: inherit
+
+  test-chart:
+    needs: [changes]
+    if: needs.changes.outputs.charts != 'true'
+    uses: ./.github/workflows/test-chart.yml

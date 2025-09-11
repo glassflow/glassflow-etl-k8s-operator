@@ -1,19 +1,15 @@
 name: Test Chart
 
 on:
-  pull_request:
-    paths:
-      - 'charts/**'
-  push:
-    paths:
-      - 'charts/**'
+  workflow_call:
 
 jobs:
-  lint:
+  test-chart:
+    name: Test Chart
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
