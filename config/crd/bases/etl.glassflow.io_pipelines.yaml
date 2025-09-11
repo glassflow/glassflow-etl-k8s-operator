@@ -123,30 +123,7 @@ spec:
             type: object
           status:
             description: PipelineStatus defines the observed state of Pipeline.
-            properties:
-              ingestor_operator_status:
-                enum:
-                - none
-                - started
-                - stopped
-                type: string
-              join_operator_status:
-                enum:
-                - none
-                - started
-                - stopped
-                type: string
-              sink_operator_status:
-                enum:
-                - none
-                - started
-                - stopped
-                type: string
-            required:
-            - ingestor_operator_status
-            - join_operator_status
-            - sink_operator_status
-            type: object
+            type: string
         type: object
     served: true
     storage: true

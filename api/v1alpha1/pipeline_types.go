@@ -75,20 +75,7 @@ type Sink struct {
 }
 
 // PipelineStatus defines the observed state of Pipeline.
-type PipelineStatus struct {
-	IngestorOperatorStatus ComponentStatus `json:"ingestor_operator_status"`
-	JoinOperatorStatus     ComponentStatus `json:"join_operator_status"`
-	SinkOperatorStatus     ComponentStatus `json:"sink_operator_status"`
-}
-
-// +kubebuilder:validation:Enum=none;started;stopped
-type ComponentStatus string
-
-const (
-	ComponentStatusNone    ComponentStatus = "none"
-	ComponentStatusStarted ComponentStatus = "started"
-	ComponentStatusStopped ComponentStatus = "stopped"
-)
+type PipelineStatus string
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced

@@ -179,28 +179,20 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 
 	err = r.createIngestors(ctx, log, ns, labels, secret, p)
 	if err != nil {
-		p.Status.IngestorOperatorStatus = etlv1alpha1.ComponentStatusStopped
 		return fmt.Errorf("setup ingestors: %w", err)
 	}
-	p.Status.IngestorOperatorStatus = etlv1alpha1.ComponentStatusStarted
 
 	if p.Spec.Join.Enabled {
 		err := r.createJoin(ctx, ns, labels, secret)
 		if err != nil {
-			p.Status.JoinOperatorStatus = etlv1alpha1.ComponentStatusStopped
 			return fmt.Errorf("setup join: %w", err)
 		}
-		p.Status.JoinOperatorStatus = etlv1alpha1.ComponentStatusStarted
-	} else {
-		p.Status.JoinOperatorStatus = etlv1alpha1.ComponentStatusNone
 	}
 
 	err = r.createSink(ctx, ns, labels, secret)
 	if err != nil {
-		p.Status.SinkOperatorStatus = etlv1alpha1.ComponentStatusStopped
 		return fmt.Errorf("setup sink: %w", err)
 	}
-	p.Status.SinkOperatorStatus = etlv1alpha1.ComponentStatusStarted
 
 	err = r.Status().Update(ctx, &p, &client.SubResourceUpdateOptions{})
 	if err != nil {
