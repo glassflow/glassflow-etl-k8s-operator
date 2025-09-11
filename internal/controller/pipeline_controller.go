@@ -18,10 +18,8 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
-	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
