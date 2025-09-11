@@ -66,20 +66,26 @@ var _ = Describe("Pipeline Controller", func() {
 									TopicName:    "test_topic1",
 									OutputStream: "test_topic1",
 									DedupWindow:  2 * time.Hour,
+									Replicas:     1,
 								},
 								{
 									TopicName:    "test_topic2",
 									OutputStream: "test_topic2",
 									DedupWindow:  5 * time.Minute,
+									Replicas:     1,
 								},
 							},
 						},
 						Join: etlv1alpha1.Join{
 							Type:         "temporal",
 							OutputStream: "gf-stream-joined",
+							Replicas:     1,
 							Enabled:      true,
 						},
-						Sink: "clickhouse",
+						Sink: etlv1alpha1.Sink{
+							Type:     "clickhouse",
+							Replicas: 1,
+						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())

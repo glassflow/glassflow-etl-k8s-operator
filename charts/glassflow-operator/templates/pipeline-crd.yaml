@@ -1,10 +1,11 @@
----
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
+  name: pipelines.etl.glassflow.io
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.1
-  name: pipelines.etl.glassflow.io
+  labels:
+  {{- include "glassflow-operator.labels" . | nindent 4 }}
 spec:
   group: etl.glassflow.io
   names:
@@ -47,16 +48,12 @@ spec:
                 properties:
                   enabled:
                     type: boolean
-                  replicas:
-                    minimum: 1
-                    type: integer
                   stream:
                     type: string
                   type:
                     type: string
                 required:
                 - enabled
-                - replicas
                 - stream
                 - type
                 type: object
@@ -64,18 +61,9 @@ spec:
                 minLength: 5
                 type: string
               sink:
-                properties:
-                  replicas:
-                    minimum: 1
-                    type: integer
-                  type:
-                    enum:
-                    - clickhouse
-                    type: string
-                required:
-                - replicas
-                - type
-                type: object
+                enum:
+                - clickhouse
+                type: string
               sources:
                 properties:
                   topics:
@@ -88,9 +76,6 @@ spec:
                             largest representable duration to approximately 290 years.
                           format: int64
                           type: integer
-                        replicas:
-                          minimum: 1
-                          type: integer
                         stream:
                           type: string
                         topic_name:
@@ -98,7 +83,6 @@ spec:
                           type: string
                       required:
                       - dedup_window
-                      - replicas
                       - stream
                       - topic_name
                       type: object
@@ -123,9 +107,38 @@ spec:
             type: object
           status:
             description: PipelineStatus defines the observed state of Pipeline.
-            type: string
+            properties:
+              ingestor_operator_status:
+                enum:
+                - none
+                - started
+                - stopped
+                type: string
+              join_operator_status:
+                enum:
+                - none
+                - started
+                - stopped
+                type: string
+              sink_operator_status:
+                enum:
+                - none
+                - started
+                - stopped
+                type: string
+            required:
+            - ingestor_operator_status
+            - join_operator_status
+            - sink_operator_status
+            type: object
         type: object
     served: true
     storage: true
     subresources:
       status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

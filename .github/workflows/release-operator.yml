@@ -1,27 +1,14 @@
 name: Release Operator
 
 on:
-  workflow_call:
-    inputs:
-      version_type:
-        description: 'Version bump type'
-        required: true
-        type: string
-    outputs:
-      new_version:
-        description: 'New operator version'
-        value: ${{ jobs.calculate-version.outputs.new_version }}
+  push:
+    tags:
+      - 'v*'
 
 jobs:
-  calculate-version:
-    uses: ./.github/workflows/calculate-version.yml
-    with:
-      version_file: VERSION
-      version_type: ${{ inputs.version_type }}
-
   release:
-    needs: [calculate-version]
     runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       contents: write
       packages: write
@@ -35,6 +22,18 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "✅ Version extracted from tag: $VERSION"
+          else
+            echo "❌ This workflow should only run on tag pushes"
+            exit 1
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v4
@@ -53,50 +52,56 @@ jobs:
 
       - name: Update VERSION file
         run: |
-          echo "${{ needs.calculate-version.outputs.new_version }}" > VERSION
-          echo "✅ VERSION file updated to: ${{ needs.calculate-version.outputs.new_version }}"
+          echo "${{ steps.version.outputs.version }}" > VERSION
+          echo "✅ VERSION file updated to: ${{ steps.version.outputs.version }}"
           cat VERSION
+
+      - name: Update operator version in Chart.yaml
+        run: |
+          echo "Updating operator version in Chart.yaml to ${{ steps.version.outputs.version }}"
+          sed -i "s/^appVersion: .*/appVersion: ${{ steps.version.outputs.version }}/" charts/glassflow-operator/Chart.yaml
+          cat charts/glassflow-operator/Chart.yaml
 
       - name: Build Docker image
         run: |
           echo "🐳 Building Docker image..."
           
           # Build and push the image with version tag
-          make docker-buildx IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }}
+          make docker-buildx IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
           
           # Tag with latest and commit hash
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }}-${{ github.sha }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-${{ github.sha }}
           
           # Push all tags
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }}-${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-${{ github.sha }}
           
           echo "✅ Docker image built and tagged successfully"
 
       - name: Create GitHub release
         run: |
           # Create release
-          gh release create "v${{ needs.calculate-version.outputs.new_version }}" \
-            --title "Release v${{ needs.calculate-version.outputs.new_version }}" \
-            --notes "## 🚀 Operator Release v${{ needs.calculate-version.outputs.new_version }}
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "Release v${{ steps.version.outputs.version }}" \
+            --notes "## 🚀 Operator Release v${{ steps.version.outputs.version }}
 
           ### 📦 Docker Images
-          - **Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }}\`
+          - **Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\`
           - **Latest**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`
-          - **Commit**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }}-${{ github.sha }}\`
+          - **Commit**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-${{ github.sha }}\`
 
           ### 📋 Installation
           ```bash
           # Pull the image
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.calculate-version.outputs.new_version }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
           
           # Or use latest
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           ```
 
           ### 📝 Changes
-          - Version bumped to \`${{ needs.calculate-version.outputs.new_version }}\`
+          - Version: \`${{ steps.version.outputs.version }}\`
           - Docker images built and pushed with three tags: version, latest, and commit hash
           - VERSION file updated" \
             --latest
@@ -109,13 +114,15 @@ jobs:
           
           # Add version changes
           git add VERSION
+          git add charts/glassflow-operator/Chart.yaml
           
           # Commit the version bump
-          git commit -m "chore: bump version to ${{ needs.calculate-version.outputs.new_version }}
+          git commit -m "chore: bump version to ${{ steps.version.outputs.version }}
 
-          - Version: ${{ needs.calculate-version.outputs.new_version }}
+          - Version: ${{ steps.version.outputs.version }}
           - VERSION file updated
-          - Release: v${{ needs.calculate-version.outputs.new_version }}" || echo "No changes to commit"
+          - Operator version in Chart.yaml updated
+          - Release: v${{ steps.version.outputs.version }}" || echo "No changes to commit"
           
           # Push the changes
           git push origin ${{ github.ref }}

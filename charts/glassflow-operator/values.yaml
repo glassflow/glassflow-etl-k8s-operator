@@ -1,0 +1,51 @@
+controllerManager:
+  manager:
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+    image:
+      repository: ghcr.io/glassflow/glassflow-etl-k8s-operator
+      tag: main
+      pullPolicy: Always
+    resources:
+      limits:
+        cpu: 500m
+        memory: 128Mi
+      requests:
+        cpu: 10m
+        memory: 64Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  replicas: 1
+  serviceAccount:
+    annotations: {}
+kubernetesClusterDomain: cluster.local
+
+# Component image configurations
+componentImages:
+  ingestor:
+    repository: ghcr.io/glassflow/glassflow-etl-ingestor
+    tag: stable
+  join:
+    repository: ghcr.io/glassflow/glassflow-etl-join
+    tag: stable
+  sink:
+    repository: ghcr.io/glassflow/glassflow-etl-sink
+    tag: stable
+
+
+metricsService:
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  type: ClusterIP
+
+nats:
+  address: ""
+  componentAddress: ""
