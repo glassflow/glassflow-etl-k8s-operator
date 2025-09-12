@@ -102,9 +102,9 @@ graph LR
     OP --> JOIN
     OP --> SINK
     
-    ING --> NATS_JETSTREAM
-    JOIN --> NATS_JETSTREAM
-    SINK --> NATS_JETSTREAM
+    ING <--> NATS_JETSTREAM
+    JOIN <--> NATS_JETSTREAM
+    SINK <--> NATS_JETSTREAM
     
     KAFKA --> ING
     SINK --> CH
