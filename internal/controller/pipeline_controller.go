@@ -650,6 +650,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 					},
 				},
 			}).
+			withReplicas(t.Replicas).
 			withContainer(*container).
 			build()
 
