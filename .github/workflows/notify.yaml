@@ -18,7 +18,7 @@ jobs:
               - type: "section"
                 text:
                   type: "mrkdwn"
-                  text: "*${{ github.ref_name }} released*"
+                  text: "*${{ github.repository }} ${{ github.ref_name }} released*"
               - type: "section"
                 text:
                   type: "mrkdwn"
