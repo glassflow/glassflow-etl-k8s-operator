@@ -1,0 +1,39 @@
+name: Chart Version Bump
+
+on:
+  workflow_call:
+
+jobs:
+  bump-app-version:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "✅ Version extracted from tag: $VERSION"
+          else
+            echo "❌ This workflow should only run on tag pushes"
+            exit 1
+          fi
+
+      - name: Update operator version in Chart.yaml
+        run: |
+          echo "Updating operator version in Chart.yaml to ${{ steps.version.outputs.version }}"
+          sed -i "s/^appVersion: .*/appVersion: ${{ steps.version.outputs.version }}/" charts/glassflow-operator/Chart.yaml
+          cat charts/glassflow-operator/Chart.yaml
+
+      - name: Commit and push version changes
+        uses: actions-js/push@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.head_ref }}
+          message: "chore: bump chart app version to ${{ steps.version.outputs.version }}" 

@@ -1,0 +1,26 @@
+name: On Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  test-operator:
+    uses: ./.github/workflows/test-operator.yml
+
+  build-operator-image:
+    needs: [test-operator]
+    uses: ./.github/workflows/build-image.yml
+    with:
+      push: true
+    secrets: inherit
+
+  chart-app-version-bump:
+    needs: [build-operator-image]
+    uses: ./.github/workflows/chart-app-version-bump.yml
+
+  notify:
+    needs: [build-operator-image]
+    uses: ./.github/workflows/notify.yaml
+    secrets: inherit
