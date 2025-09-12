@@ -269,7 +269,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
 		deploymentName := fmt.Sprintf("ingestor-%d", i)
-		deleted, err := r.isDeploymentDeleted(ctx, namespace, deploymentName)
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
 		}
@@ -294,7 +294,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 
 	// Step 2: Stop Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		deleted, err := r.isDeploymentDeleted(ctx, namespace, "join")
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
@@ -318,7 +318,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 	}
 
 	// Step 3: Stop Sink deployment
-	deleted, err := r.isDeploymentDeleted(ctx, namespace, "sink")
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
@@ -902,8 +902,8 @@ func (r *PipelineReconciler) deleteNATSStream(ctx context.Context, log logr.Logg
 	return nil
 }
 
-// isDeploymentDeleted checks if a deployment is fully deleted
-func (r *PipelineReconciler) isDeploymentDeleted(ctx context.Context, namespace, name string) (bool, error) {
+// isDeploymentAbsent checks if a deployment is fully deleted
+func (r *PipelineReconciler) isDeploymentAbsent(ctx context.Context, namespace, name string) (bool, error) {
 	var deployment appsv1.Deployment
 	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &deployment)
 	if err != nil {
