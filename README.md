@@ -1,24 +1,51 @@
-# GlassFlow ETL Kubernetes Operator
+<p align="center">
+  <h1>GlassFlow ETL Kubernetes Operator</h1>
+</p>
 
-<div align="center">
+<p align="center">
+  <img src="docs/public/assets/glassfow-operator-banner.png" alt="GlassFlow Operator Banner" />
+</p>
 
-![GlassFlow Operator Banner](docs/public/assets/glassfow-operator-banner.png)
+<p align="center">
+  <a href="https://github.com/glassflow/glassflow-etl-k8s-operator/actions">
+    <img src="https://github.com/glassflow/glassflow-etl-k8s-operator/workflows/Tests/badge.svg" alt="Build Status" />
+  </a>
+  <a href="https://github.com/glassflow/glassflow-etl-k8s-operator/releases">
+    <img src="https://img.shields.io/github/v/release/glassflow/glassflow-etl-k8s-operator?style=flat-square" alt="Release" />
+  </a>
+  <a href="https://github.com/glassflow/clickhouse-etl/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square" alt="License" />
+  </a>
+  <a href="https://golang.org/">
+    <img src="https://img.shields.io/badge/go-1.23+-00ADD8?style=flat-square&logo=go" alt="Go Version" />
+  </a>
+  <a href="https://kubernetes.io/">
+    <img src="https://img.shields.io/badge/kubernetes-1.19+-326CE5?style=flat-square&logo=kubernetes" alt="Kubernetes" />
+  </a>
+</p>
 
-[![Build Status](https://github.com/glassflow/glassflow-etl-k8s-operator/workflows/Tests/badge.svg)](https://github.com/glassflow/glassflow-etl-k8s-operator/actions)
-[![Release](https://img.shields.io/github/v/release/glassflow/glassflow-etl-k8s-operator?style=flat-square)](https://github.com/glassflow/glassflow-etl-k8s-operator/releases)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
-[![Kubernetes](https://img.shields.io/badge/kubernetes-1.19+-326CE5?style=flat-square&logo=kubernetes)](https://kubernetes.io/)
+<p align="center">
+  <a href="mailto:help@glassflow.dev">
+    <img src="https://img.shields.io/badge/email-help@glassflow.dev-blue?style=flat-square&logo=gmail" alt="Email" />
+  </a>
+  <a href="https://join.slack.com/t/glassflowhub/shared_invite/zt-349m7lenp-IFeKSGfQwpJfIiQ7oyFFKg">
+    <img src="https://img.shields.io/badge/slack-glassflow%20hub-purple?style=flat-square&logo=slack" alt="GlassFlow Hub" />
+  </a>
+  <a href="https://calendly.com/glassflow">
+    <img src="https://img.shields.io/badge/schedule-meeting-green?style=flat-square&logo=calendar" alt="Schedule Meeting" />
+  </a>
+</p>
 
-[![Email](https://img.shields.io/badge/email-help@glassflow.dev-blue?style=flat-square&logo=gmail)](mailto:help@glassflow.dev)
-[![GlassFlow Hub](https://img.shields.io/badge/slack-glassflow%20hub-purple?style=flat-square&logo=slack)](https://join.slack.com/t/glassflowhub/shared_invite/zt-349m7lenp-IFeKSGfQwpJfIiQ7oyFFKg)
-[![Schedule Meeting](https://img.shields.io/badge/schedule-meeting-green?style=flat-square&logo=calendar)](https://calendly.com/glassflow)
+<p align="center">
+  <strong>Enterprise-grade ETL pipeline orchestration for Kubernetes with seamless deduplication and joins</strong>
+</p>
 
-**Enterprise-grade ETL pipeline orchestration for Kubernetes with seamless deduplication and joins**
-
-[🚀 Quick Start](#-quick-start) • [📖 Documentation](#-documentation) • [🏗️ Architecture](#️-architecture) • [🤝 Contributing](#-contributing)
-
-</div>
+<p align="center">
+  <a href="#-quick-start">🚀 Quick Start</a> • 
+  <a href="#-documentation">📖 Documentation</a> • 
+  <a href="#️-architecture">🏗️ Architecture</a> • 
+  <a href="#-contributing">🤝 Contributing</a>
+</p>
 
 ---
 
@@ -51,8 +78,8 @@ graph LR
             
             subgraph "Data Pipeline"
                 ING[Ingestor Pods]
-                JOIN[Join Pods]
-                SINK[Sink Pods]
+                JOIN[Join Pod]
+                SINK[Sink Pod]
             end
             
             subgraph NATS_JETSTREAM["NATS JetStream"]
@@ -98,7 +125,7 @@ graph LR
 
 ### Option 1: Helm Chart (Recommended)
 
-Deploy using the complete GlassFlow ETL stack:
+Deploy using the complete GlassFlow ETL stack from the [GlassFlow Charts repository](https://github.com/glassflow/charts):
 
 ```bash
 # Add GlassFlow Helm repository
@@ -136,7 +163,7 @@ make deploy IMG=ghcr.io/glassflow/glassflow-etl-k8s-operator:latest
 
 ### Pipeline Management
 
-Create pipelines using the GlassFlow ClickHouse ETL backend API. The operator will automatically create the corresponding Pipeline CRDs:
+Create pipelines using the GlassFlow ClickHouse ETL backend API. The operator will automatically create the corresponding Pipeline CRDs. Here's an example of what the generated CRD will look like:
 
 ```yaml
 apiVersion: etl.glassflow.io/v1alpha1
@@ -145,21 +172,19 @@ metadata:
   name: user-events-pipeline
 spec:
   pipeline_id: "user-events-v1"
+  config: "pipeline-config"
+  dlq: "dead-letter-queue"
   sources:
     type: kafka
     topics:
       - topic_name: "user-events"
         stream: "users"
-        dedup_window: "1m"
-        replicas: 2
+        dedup_window: 60000000000  # 1 minute in nanoseconds
   join:
     type: "temporal"
     stream: "joined-users"
     enabled: true
-    replicas: 1
-  sink:
-    type: clickhouse
-    replicas: 2
+  sink: "clickhouse"
 ```
 
 ### Current Capabilities
@@ -172,7 +197,7 @@ spec:
 | **Pipeline Resuming** | ✅ | Resume paused pipelines |
 | **Deduplication** | ✅ | Configurable time-window deduplication |
 | **Stream Joins** | ✅ | Multi-stream data joining |
-| **Auto-scaling** | ✅ | Horizontal pod autoscaling support |
+| **Auto-scaling** | ✅ | Horizontal pod autoscaling / ingestor replicas support |
 | **Monitoring** | ✅ | Prometheus metrics integration |
 
 ## 🛠️ Development Setup
@@ -280,7 +305,7 @@ The **glassflow-etl** chart includes the complete platform with web UI, backend 
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions!
 
 ### Development Workflow
 
@@ -293,7 +318,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## 📄 License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [clickhouse-etl LICENSE](https://github.com/glassflow/clickhouse-etl/blob/main/LICENSE) file for details.
 
 ## 🆘 Support
 
@@ -305,10 +330,12 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ---
 
-<div align="center">
+<p align="center">
+  <strong>Built by GlassFlow Team</strong>
+</p>
 
-**Built with ❤️ by the GlassFlow Team**
-
-[Website](https://glassflow.dev) • [Documentation](https://docs.glassflow.dev) • [GitHub](https://github.com/glassflow)
-
-</div>
+<p align="center">
+  <a href="https://glassflow.dev">Website</a> • 
+  <a href="https://docs.glassflow.dev">Documentation</a> • 
+  <a href="https://github.com/glassflow">GitHub</a>
+</p>
