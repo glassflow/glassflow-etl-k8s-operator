@@ -49,7 +49,7 @@ jobs:
             ghcr.io/glassflow/glassflow-etl-k8s-operator
       - name: Generate output
         id: gen-output
-        run: echo "glassflow-etl-k8s-operator-${ARCH}=$DIGEST" >> "$GITHUB_OUTPUT"
+        run: echo "glassflow-operator-${ARCH}=$DIGEST" >> "$GITHUB_OUTPUT"
         env:
           ARCH: ${{ matrix.platform.arch }}
           DIGEST: ${{ steps.build-arch-image.outputs.digest }}
@@ -59,12 +59,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
-    strategy:
-      matrix:
-        component:
-          - amd64_digest: ${{ needs.build-docker-image.outputs.glassflow-operator-amd64 }}
-            arm64_digest: ${{ needs.build-docker-image.outputs.glassflow-operator-arm64 }}
-            repository: glassflow-etl-k8s-operator
     if: ${{ inputs.push }}
     needs: build-docker-image
     steps:
@@ -91,7 +85,7 @@ jobs:
             docker manifest push "$REPOSITORY:$TAG"
           done
         env:
-          AMD64_DIGEST: ${{ matrix.component.amd64_digest }}
-          ARM64_DIGEST: ${{ matrix.component.arm64_digest }}
+          AMD64_DIGEST: ${{ needs.build-docker-image.outputs.glassflow-operator-amd64 }}
+          ARM64_DIGEST: ${{ needs.build-docker-image.outputs.glassflow-operator-arm64 }}
           TAGS: ${{ steps.meta.outputs.tags }}
           REPOSITORY: ghcr.io/glassflow/glassflow-etl-k8s-operator
