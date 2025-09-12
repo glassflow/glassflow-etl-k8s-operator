@@ -1,135 +1,314 @@
-# glassflow-etl-k8s-operator
-// TODO(user): Add simple overview of use/purpose
+# GlassFlow ETL Kubernetes Operator
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+<div align="center">
 
-## Getting Started
+![GlassFlow Operator Banner](docs/public/assets/glassfow-operator-banner.png)
+
+[![Build Status](https://github.com/glassflow/glassflow-etl-k8s-operator/workflows/Tests/badge.svg)](https://github.com/glassflow/glassflow-etl-k8s-operator/actions)
+[![Release](https://img.shields.io/github/v/release/glassflow/glassflow-etl-k8s-operator?style=flat-square)](https://github.com/glassflow/glassflow-etl-k8s-operator/releases)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square)](LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
+[![Kubernetes](https://img.shields.io/badge/kubernetes-1.19+-326CE5?style=flat-square&logo=kubernetes)](https://kubernetes.io/)
+
+[![Email](https://img.shields.io/badge/email-help@glassflow.dev-blue?style=flat-square&logo=gmail)](mailto:help@glassflow.dev)
+[![GlassFlow Hub](https://img.shields.io/badge/slack-glassflow%20hub-purple?style=flat-square&logo=slack)](https://join.slack.com/t/glassflowhub/shared_invite/zt-349m7lenp-IFeKSGfQwpJfIiQ7oyFFKg)
+[![Schedule Meeting](https://img.shields.io/badge/schedule-meeting-green?style=flat-square&logo=calendar)](https://calendly.com/glassflow)
+
+**Enterprise-grade ETL pipeline orchestration for Kubernetes with seamless deduplication and joins**
+
+[🚀 Quick Start](#-quick-start) • [📖 Documentation](#-documentation) • [🏗️ Architecture](#️-architecture) • [🤝 Contributing](#-contributing)
+
+</div>
+
+---
+
+## 🎯 Overview
+
+The **GlassFlow ETL Kubernetes Operator** is a production-ready Kubernetes operator that enables scalable, cloud-native data pipeline deployments. Built as a companion to the [GlassFlow ClickHouse ETL](https://github.com/glassflow/clickhouse-etl) project, it provides enterprise-grade data processing capabilities with advanced features like deduplication, temporal joins, and seamless pause/resume functionality.
+
+### ✨ Key Features
+
+- 🔄 **Pipeline Lifecycle Management** - Create, pause, resume, and terminate data pipelines
+- 🎯 **Advanced Deduplication** - Built-in deduplication with configurable time windows
+- 🔗 **Stream Joins** - Seamless joining of multiple data streams
+- ⚡ **Kubernetes Native** - Full CRD-based pipeline management
+- 🛡️ **Production Ready** - Enterprise-grade reliability and monitoring
+- 📊 **Scalable Ingestor** - Efficiently reads from multiple Kafka partitions with horizontal scaling
+- 🔧 **Helm Charts** - Easy deployment and configuration management
+
+## 🏗️ Architecture
+
+```mermaid
+graph LR
+    KAFKA[Kafka Cluster]
+    
+    subgraph "Kubernetes Cluster"
+        subgraph "GlassFlow ETL"
+            subgraph "Operator"
+                OP[Operator Controller]
+                CRD[Pipeline CRD]
+            end
+            
+            subgraph "Data Pipeline"
+                ING[Ingestor Pods]
+                JOIN[Join Pods]
+                SINK[Sink Pods]
+            end
+            
+            subgraph NATS_JETSTREAM["NATS JetStream"]
+                NATS[NATS]
+                DLQ[DLQ]
+            end
+        end
+    end
+    
+    CH[ClickHouse]
+    
+    subgraph "External"
+        API[GlassFlow API]
+        UI[Web UI]
+    end
+    
+    API --> CRD
+    CRD --> OP
+    OP --> ING
+    OP --> JOIN
+    OP --> SINK
+    
+    ING --> NATS_JETSTREAM
+    JOIN --> NATS_JETSTREAM
+    SINK --> NATS_JETSTREAM
+    
+    KAFKA --> ING
+    SINK --> CH
+    
+    UI --> API
+    
+```
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- go version v1.23.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+- **Kubernetes** 1.19+ cluster
+- **Helm** 3.2.0+
+- **kubectl** configured for your cluster
+- **Kafka** (optional - can use external setup for development)
+- **ClickHouse** (optional - can use external setup for development)
 
-```sh
-make docker-build docker-push IMG=<some-registry>/glassflow-etl-k8s-operator:tag
+### Option 1: Helm Chart (Recommended)
+
+Deploy using the complete GlassFlow ETL stack:
+
+```bash
+# Add GlassFlow Helm repository
+helm repo add glassflow https://glassflow.github.io/charts
+helm repo update
+
+# Install complete GlassFlow ETL stack
+helm install glassflow-etl glassflow/glassflow-etl
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+### Option 2: Operator Only
 
-**Install the CRDs into the cluster:**
+Deploy just the operator as a dependency:
 
-```sh
+```bash
+# Install operator chart
+helm install glassflow-operator glassflow/glassflow-operator
+```
+
+### Option 3: Manual Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/glassflow/glassflow-etl-k8s-operator.git
+cd glassflow-etl-k8s-operator
+
+# Install CRDs
 make install
+
+# Deploy operator
+make deploy IMG=ghcr.io/glassflow/glassflow-etl-k8s-operator:latest
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+## 📖 Documentation
 
-```sh
-make deploy IMG=<some-registry>/glassflow-etl-k8s-operator:tag
+### Pipeline Management
+
+Create pipelines using the GlassFlow ClickHouse ETL backend API. The operator will automatically create the corresponding Pipeline CRDs:
+
+```yaml
+apiVersion: etl.glassflow.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: user-events-pipeline
+spec:
+  pipeline_id: "user-events-v1"
+  sources:
+    type: kafka
+    topics:
+      - topic_name: "user-events"
+        stream: "users"
+        dedup_window: "1m"
+        replicas: 2
+  join:
+    type: "temporal"
+    stream: "joined-users"
+    enabled: true
+    replicas: 1
+  sink:
+    type: clickhouse
+    replicas: 2
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+### Current Capabilities
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Pipeline Creation** | ✅ | Deploy new ETL pipelines via CRD |
+| **Pipeline Termination** | ✅ | Graceful shutdown and cleanup |
+| **Pipeline Pausing** | ✅ | Temporarily halt data processing |
+| **Pipeline Resuming** | ✅ | Resume paused pipelines |
+| **Deduplication** | ✅ | Configurable time-window deduplication |
+| **Stream Joins** | ✅ | Multi-stream data joining |
+| **Auto-scaling** | ✅ | Horizontal pod autoscaling support |
+| **Monitoring** | ✅ | Prometheus metrics integration |
 
-```sh
-kubectl apply -k config/samples/
+## 🛠️ Development Setup
+
+### Prerequisites
+
+- **Go** 1.23+
+- **Docker** 17.03+
+- **kubectl** v1.11.3+
+- **Kind** (for local testing)
+- **NATS** (for messaging)
+
+### Local Development
+
+1. **Clone and setup**:
+   ```bash
+   git clone https://github.com/glassflow/glassflow-etl-k8s-operator.git
+   cd glassflow-etl-k8s-operator
+   make help  # See all available targets
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   # Install development tools
+   make controller-gen
+   make kustomize
+   make golangci-lint
+   ```
+
+3. **Start local infrastructure**:
+   ```bash
+   # Start NATS with JetStream (must run inside the cluster)
+   helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+   helm install nats nats/nats --set nats.jetstream.enabled=true
+   
+   # Start Kafka (using Helm)
+   helm repo add bitnami https://charts.bitnami.com/bitnami
+   helm install kafka bitnami/kafka
+   
+   # Start ClickHouse (using Helm)
+   helm install clickhouse bitnami/clickhouse
+   
+   # Or use external Kafka/ClickHouse for development
+   ```
+
+4. **Run the operator**:
+   ```bash
+   # Run locally (requires NATS running inside the cluster)
+   make run
+   ```
+
+### Project Structure
+
+This project was built using **Kubebuilder v4** and follows Kubernetes operator best practices:
+
+```
+├── api/v1alpha1/          # CRD definitions
+├── internal/controller/    # Operator controller logic
+├── internal/nats/         # NATS client integration
+├── charts/                # Helm charts
+├── config/                # Kustomize configurations
+└── test/                  # Unit and e2e tests
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+### Development Tools
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+- **Kubebuilder** - Operator framework and scaffolding
+- **Kustomize** - Kubernetes configuration management
+- **Helmify** - Automatic Helm chart generation
+- **GolangCI-Lint** - Code quality and linting
 
-```sh
-kubectl delete -k config/samples/
+### Testing
+
+```bash
+# Run e2e tests (requires Kind cluster) - Primary testing method
+make test-e2e
+
+# Run unit tests (coverage being improved)
+make test
+
+# Run linter
+make lint
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
+## 📊 Chart Comparison
 
-```sh
-make uninstall
-```
+| Chart | Purpose | Components | Use Case |
+|-------|---------|------------|----------|
+| **glassflow-etl** | Complete ETL Platform | UI, API, Operator, NATS | Full-featured deployment |
+| **glassflow-operator** | Operator Only | Operator, CRDs | Dependency for custom setups |
 
-**UnDeploy the controller from the cluster:**
+The **glassflow-etl** chart includes the complete platform with web UI, backend API, NATS, and the operator as dependencies. The **glassflow-operator** chart is designed as a dependency for the main chart or custom deployments.
 
-```sh
-make undeploy
-```
+## 🔗 Related Projects
 
-## Project Distribution
+- **[GlassFlow ClickHouse ETL](https://github.com/glassflow/clickhouse-etl)** - Core ETL engine and API
+- **[GlassFlow Charts](https://github.com/glassflow/charts)** - Helm charts repository
+- **[GlassFlow Documentation](https://docs.glassflow.dev)** - Complete documentation
 
-Following the options to release and provide this solution to the users.
+## 🎥 Demo & Resources
 
-### By providing a bundle with all YAML files
+- **Demo Video**: Coming soon
+- **Live Demo**: [demo.glassflow.dev](https://demo.glassflow.dev)
+- **Documentation**: [docs.glassflow.dev](https://docs.glassflow.dev)
 
-1. Build the installer for the image built and published in the registry:
+## 🤝 Contributing
 
-```sh
-make build-installer IMG=<some-registry>/glassflow-etl-k8s-operator:tag
-```
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
+### Development Workflow
 
-2. Using the installer
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `make test`
+5. Run linter: `make lint`
+6. Submit a pull request
 
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
+## 📄 License
 
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/glassflow-etl-k8s-operator/<tag or branch>/dist/install.yaml
-```
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-### By providing a Helm Chart
+## 🆘 Support
 
-1. Build the chart using the optional helm plugin
+- **Slack Community**: [GlassFlow Hub](https://join.slack.com/t/glassflowhub/shared_invite/zt-349m7lenp-IFeKSGfQwpJfIiQ7oyFFKg)
+- **Documentation**: [docs.glassflow.dev](https://docs.glassflow.dev)
+- **Issues**: [GitHub Issues](https://github.com/glassflow/glassflow-etl-k8s-operator/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/glassflow/glassflow-etl-k8s-operator/discussions)
+- **Email**: help@glassflow.dev
 
-```sh
-kubebuilder edit --plugins=helm/v1-alpha
-```
+---
 
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
+<div align="center">
 
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
+**Built with ❤️ by the GlassFlow Team**
 
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+[Website](https://glassflow.dev) • [Documentation](https://docs.glassflow.dev) • [GitHub](https://github.com/glassflow)
 
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
-
-## License
-
-Copyright 2025.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+</div>
