@@ -63,8 +63,10 @@ type Join struct {
 	Type         string `json:"type"`
 	OutputStream string `json:"stream"`
 	// +kubebuilder:validation:Minimum=1
-	Replicas int  `json:"replicas"`
-	Enabled  bool `json:"enabled"`
+	Replicas       int           `json:"replicas"`
+	Enabled        bool          `json:"enabled"`
+	LeftBufferTTL  time.Duration `json:"left_buffer_ttl"`
+	RightBufferTTL time.Duration `json:"right_buffer_ttl"`
 }
 
 type Sink struct {

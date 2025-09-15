@@ -92,6 +92,23 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 	return nil
 }
 
+// CreateOrUpdateJoinKeyValueStore creates or updates a NATS KeyValue store
+func (n *NATSClient) CreateOrUpdateJoinKeyValueStore(ctx context.Context, storeName string, ttl time.Duration) error {
+	//nolint:exhaustruct // optional config
+	cfg := jetstream.KeyValueConfig{
+		Bucket:      storeName,
+		TTL:         ttl,
+		Description: "Store for Join component KV",
+	}
+
+	_, err := n.JetStream().CreateOrUpdateKeyValue(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("cannot create nats key value store %s: %w", storeName, err)
+	}
+
+	return nil
+}
+
 func (n *NATSClient) JetStream() jetstream.JetStream {
 	return n.js
 }

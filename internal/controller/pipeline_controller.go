@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -774,6 +775,23 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 		err := r.NATSClient.CreateOrUpdateStream(ctx, p.Spec.Join.OutputStream, 0)
 		if err != nil {
 			return fmt.Errorf("create stream %s: %w", p.Spec.Join.OutputStream, err)
+		}
+
+		// create join KV stores for each source stream
+		// The join KV store names are the same as the stream names
+		for _, stream := range p.Spec.Ingestor.Streams {
+			// Use LeftBufferTTL for the first stream, RightBufferTTL for the second
+			var ttl time.Duration
+			if stream.OutputStream == p.Spec.Ingestor.Streams[0].OutputStream {
+				ttl = p.Spec.Join.LeftBufferTTL
+			} else {
+				ttl = p.Spec.Join.RightBufferTTL
+			}
+
+			err := r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, stream.OutputStream, ttl)
+			if err != nil {
+				return fmt.Errorf("create join KV store %s: %w", stream.OutputStream, err)
+			}
 		}
 	}
 
