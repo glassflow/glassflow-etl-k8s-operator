@@ -33,6 +33,7 @@ jobs:
           echo "✅ Chart version extracted from Chart.yaml: $CHART_VERSION"
 
       - name: Update chart version in Chart.yaml
+        id: update_chart
         run: |
           # Split version into parts
           IFS='.' read -r major minor patch <<< "$CHART_VERSION"
@@ -44,6 +45,7 @@ jobs:
           echo "Updating chart version in Chart.yaml to $NEW_VERSION"
           sed -i "s/^version: .*/version: $NEW_VERSION/" charts/glassflow-operator/Chart.yaml
           cat charts/glassflow-operator/Chart.yaml
+          echo "new_chart_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Update operator version in Chart.yaml
         run: |
@@ -51,9 +53,25 @@ jobs:
           sed -i "s/^appVersion: .*/appVersion: ${{ steps.version.outputs.version }}/" charts/glassflow-operator/Chart.yaml
           cat charts/glassflow-operator/Chart.yaml
 
-      - name: Commit and push version changes
-        uses: actions-js/push@master
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: 'main'
-          message: "chore: bump chart app version to ${{ steps.version.outputs.version }}" 
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: bump chart version to ${{ steps.update_chart.outputs.new_chart_version }} and app version to ${{ steps.version.outputs.version }}"
+          title: "chore: bump chart version to ${{ steps.update_chart.outputs.new_chart_version }} and app version to ${{ steps.version.outputs.version }}"
+          body: |
+            ## Chart Version Bump
+            
+            This PR automatically updates the chart and app versions following the release of ${{ github.ref_name }}.
+            
+            **Changes:**
+            - Chart version: ${{ steps.chart_version.outputs.chart_version }} → ${{ steps.update_chart.outputs.new_chart_version }}
+            - App version: ${{ steps.version.outputs.version }}
+            
+            **Files modified:**
+            - `charts/glassflow-operator/Chart.yaml`
+            
+            This PR was created automatically by the chart-app-version-bump workflow.
+          branch: "chore/bump-chart-version-${{ steps.version.outputs.version }}"
+          base: main
+          delete-branch: true 
