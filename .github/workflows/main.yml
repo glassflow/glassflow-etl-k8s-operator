@@ -1,31 +1,12 @@
 name: Merge to Main
 
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches:
       - main
 
 jobs:
-  changes:
-    if: github.event.pull_request.merged == true
-    name: Get Changes
-    runs-on: ubuntu-latest
-    outputs:
-      charts: ${{ steps.filter.outputs.changes.charts }}
-    permissions:
-      pull-requests: read
-    steps:
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          base: main
-          filters: |
-            charts:
-              - 'charts/**'
-
   test-operator:
-    if: github.event.pull_request.merged == true
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
@@ -33,24 +14,4 @@ jobs:
     uses: ./.github/workflows/build-image.yml
     with:
       push: true
-    secrets: inherit
-
-  test-chart:
-    needs: [changes]
-    if: needs.changes.outputs.charts != 'true'
-    uses: ./.github/workflows/test-chart.yml
-
-  release-chart:
-    needs: [changes, test-chart]
-    if: |
-        needs.changes.outputs.charts != 'true' && 
-        (contains(github.event.pull_request.labels.*.name, 'bump:major') ||
-         contains(github.event.pull_request.labels.*.name, 'bump:minor') ||
-         contains(github.event.pull_request.labels.*.name, 'bump:patch'))
-    uses: ./.github/workflows/release-chart.yml
-    secrets: inherit
-
-  notify:
-    needs: [release-chart]
-    uses: ./.github/workflows/notify.yaml
     secrets: inherit

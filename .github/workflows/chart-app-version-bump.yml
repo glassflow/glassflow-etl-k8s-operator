@@ -24,6 +24,26 @@ jobs:
             echo "❌ This workflow should only run on tag pushes"
             exit 1
           fi
+      
+      - name: Extract chart version
+        id: chart_version
+        run: |
+          CHART_VERSION=$(cat charts/glassflow-operator/Chart.yaml | grep "version:" | awk '{print $2}')
+          echo "chart_version=$CHART_VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Chart version extracted from Chart.yaml: $CHART_VERSION"
+
+      - name: Update chart version in Chart.yaml
+        run: |
+          # Split version into parts
+          IFS='.' read -r major minor patch <<< "$CHART_VERSION"
+
+          # Bump patch version
+          patch=$((patch + 1))
+          NEW_VERSION="${major}.${minor}.${patch}"
+
+          echo "Updating chart version in Chart.yaml to $NEW_VERSION"
+          sed -i "s/^version: .*/version: $NEW_VERSION/" charts/glassflow-operator/Chart.yaml
+          cat charts/glassflow-operator/Chart.yaml
 
       - name: Update operator version in Chart.yaml
         run: |
