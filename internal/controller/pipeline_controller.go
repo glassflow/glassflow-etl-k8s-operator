@@ -160,6 +160,12 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, nil
 	}
 
+	// Set status to Created first
+	err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusCreated)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to created: %w", err)
+	}
+
 	ns, err := r.createNamespace(ctx, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("setup namespace: %w", err)
@@ -177,24 +183,59 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
 	}
 
-	err = r.createIngestors(ctx, log, ns, labels, secret, p)
+	namespace := "pipeline-" + p.Spec.ID
+
+	// Step 1: Create Sink deployment
+	ready, err := r.isDeploymentReady(ctx, namespace, "sink")
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("setup ingestors: %w", err)
+		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+	}
+	if !ready {
+		log.Info("creating sink deployment", "namespace", namespace)
+		err = r.createSink(ctx, ns, labels, secret)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
+		}
+		// Requeue to wait for deployment to be ready
+		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Step 2: Create Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		err := r.createJoin(ctx, ns, labels, secret)
+		ready, err := r.isDeploymentReady(ctx, namespace, "join")
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("setup join: %w", err)
+			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
+		}
+		if !ready {
+			log.Info("creating join deployment", "namespace", namespace)
+			err := r.createJoin(ctx, ns, labels, secret)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
+			}
+			// Requeue to wait for deployment to be ready
+			return ctrl.Result{Requeue: true}, nil
 		}
 	}
 
-	err = r.createSink(ctx, ns, labels, secret)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("setup sink: %w", err)
+	// Step 3: Create Ingestor deployments
+	for i := range p.Spec.Ingestor.Streams {
+		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+		}
+		if !ready {
+			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			err = r.createIngestors(ctx, log, ns, labels, secret, p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
+			}
+			// Requeue to wait for deployment to be ready
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
-	// Update pipeline status to "Running" after successful creation
+	// All deployments are ready, update status to Running
 	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusRunning)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
@@ -721,64 +762,6 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 	}
 
 	log.Info("namespace deleted successfully", "namespace", namespaceName.Name)
-	return nil
-}
-
-// nolint:unused
-func (r *PipelineReconciler) deleteDeployments(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("deleting pipeline deployments", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-
-	// List all deployments in the pipeline namespace
-	var deployments appsv1.DeploymentList
-	labels := preparePipelineLabels(p)
-
-	err := r.List(ctx, &deployments, client.InNamespace("pipeline-"+p.Spec.ID), client.MatchingLabels(labels))
-	if err != nil {
-		return fmt.Errorf("list deployments: %w", err)
-	}
-
-	// Delete each deployment
-	for _, deployment := range deployments.Items {
-		log.Info("deleting deployment", "deployment", deployment.Name, "namespace", deployment.Namespace)
-		err := r.Delete(ctx, &deployment, &client.DeleteOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				log.Info("deployment already deleted", "deployment", deployment.Name)
-				continue
-			}
-			return fmt.Errorf("delete deployment %s: %w", deployment.Name, err)
-		}
-		log.Info("deployment deleted successfully", "deployment", deployment.Name)
-	}
-
-	return nil
-}
-
-// nolint:unused
-func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("deleting pipeline secret", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-
-	secretName := types.NamespacedName{
-		Namespace: "pipeline-" + p.Spec.ID,
-		Name:      p.Spec.ID,
-	}
-
-	var secret v1.Secret
-	err := r.Get(ctx, secretName, &secret)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("secret already deleted", "secret", secretName.String())
-			return nil
-		}
-		return fmt.Errorf("get secret %s: %w", secretName.String(), err)
-	}
-
-	err = r.Delete(ctx, &secret, &client.DeleteOptions{})
-	if err != nil {
-		return fmt.Errorf("delete secret %s: %w", secretName.String(), err)
-	}
-
-	log.Info("secret deleted successfully", "secret", secretName.String())
 	return nil
 }
 
