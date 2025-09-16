@@ -160,12 +160,6 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, nil
 	}
 
-	// Set status to Created first
-	err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusCreated)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("update pipeline status to created: %w", err)
-	}
-
 	ns, err := r.createNamespace(ctx, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("setup namespace: %w", err)
@@ -265,6 +259,18 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 		if err != nil {
 			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
 		}
+	}
+
+	// Remove finalizer
+	err = r.removeFinalizer(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+
+	// Delete the pipeline CRD
+	err = r.Delete(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
@@ -371,6 +377,18 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 		if err != nil {
 			log.Error(err, "failed to remove pause annotation", "pipeline_id", p.Spec.ID)
 		}
+	}
+
+	// Remove finalizer
+	err = r.removeFinalizer(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+
+	// Delete the pipeline CRD
+	err = r.Delete(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
 	log.Info("pipeline pause completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
@@ -575,6 +593,12 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		// Just log the error and continue
 	}
 
+	// Delete namespace for this pipeline
+	err = r.deleteNamespace(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline namespace: %w", err)
+	}
+
 	// Update status to Stopped
 	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopped)
 	if err != nil {
@@ -590,6 +614,18 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		if err != nil {
 			log.Error(err, "failed to remove stop annotation", "pipeline_id", p.Spec.ID)
 		}
+	}
+
+	// Remove finalizer
+	err = r.removeFinalizer(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+
+	// Delete the pipeline CRD
+	err = r.Delete(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
 	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
