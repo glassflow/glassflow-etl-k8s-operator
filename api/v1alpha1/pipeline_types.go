@@ -65,8 +65,8 @@ type Join struct {
 	// +kubebuilder:validation:Minimum=1
 	Replicas       int           `json:"replicas"`
 	Enabled        bool          `json:"enabled"`
-	LeftBufferTTL  time.Duration `json:"left_buffer_ttl"`
-	RightBufferTTL time.Duration `json:"right_buffer_ttl"`
+	LeftBufferTTL  time.Duration `json:"left_buffer_ttl,omitempty"`
+	RightBufferTTL time.Duration `json:"right_buffer_ttl,omitempty"`
 }
 
 type Sink struct {

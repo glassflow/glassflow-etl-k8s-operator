@@ -70,9 +70,7 @@ spec:
                     type: string
                 required:
                 - enabled
-                - left_buffer_ttl
                 - replicas
-                - right_buffer_ttl
                 - stream
                 - type
                 type: object
