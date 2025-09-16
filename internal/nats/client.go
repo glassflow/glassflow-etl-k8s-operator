@@ -23,6 +23,8 @@ const (
 	PipelineStatusTerminating PipelineStatus = "Terminating"
 	PipelineStatusTerminated  PipelineStatus = "Terminated"
 	PipelineStatusFailed      PipelineStatus = "Failed"
+	PipelineStatusStopping    PipelineStatus = "Stopping"
+	PipelineStatusStopped     PipelineStatus = "Stopped"
 )
 
 // PipelineHealth represents the health status of a pipeline and its components

@@ -45,6 +45,7 @@ const (
 	PipelineDeletionTypeAnnotation = "pipeline.etl.glassflow.io/deletion-type"
 	PipelinePauseAnnotation        = "pipeline.etl.glassflow.io/pause"
 	PipelineResumeAnnotation       = "pipeline.etl.glassflow.io/resume"
+	PipelineStopAnnotation         = "pipeline.etl.glassflow.io/stop"
 )
 
 const (
@@ -113,7 +114,7 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.createPipeline(ctx, p)
 	}
 
-	// pipeline pause/resume flow
+	// pipeline pause/resume/stop flow
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		if _, hasPause := annotations[PipelinePauseAnnotation]; hasPause {
@@ -121,6 +122,9 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		if _, hasResume := annotations[PipelineResumeAnnotation]; hasResume {
 			return r.reconcileResume(ctx, log, p)
+		}
+		if _, hasStop := annotations[PipelineStopAnnotation]; hasStop {
+			return r.reconcileStop(ctx, log, p)
 		}
 	}
 
@@ -458,6 +462,118 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	log.Info("pipeline resume completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log.Info("reconciling pipeline stop", "pipeline_id", p.Spec.ID)
+
+	namespace := "pipeline-" + p.Spec.ID
+
+	// Check if pipeline is already stopped
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped) {
+		log.Info("pipeline already stopped", "pipeline_id", p.Spec.ID)
+		return ctrl.Result{}, nil
+	}
+
+	// Set status to Stopping first
+	err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopping)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
+	}
+
+	// Step 1: Stop Ingestor deployments
+	for i := range p.Spec.Ingestor.Streams {
+		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+		}
+		if !deleted {
+			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			var deployment appsv1.Deployment
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: deploymentName}, &deployment)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
+				}
+			} else {
+				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
+				}
+			}
+			// Requeue to wait for deployment to be fully deleted
+			return ctrl.Result{Requeue: true}, nil
+		}
+	}
+
+	// Step 2: Stop Join deployment (if enabled)
+	if p.Spec.Join.Enabled {
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
+		}
+		if !deleted {
+			log.Info("deleting join deployment", "namespace", namespace)
+			var deployment appsv1.Deployment
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "join"}, &deployment)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
+				}
+			} else {
+				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
+				}
+			}
+			// Requeue to wait for deployment to be fully deleted
+			return ctrl.Result{Requeue: true}, nil
+		}
+	}
+
+	// Step 3: Stop Sink deployment
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+	}
+	if !deleted {
+		log.Info("deleting sink deployment", "namespace", namespace)
+		var deployment appsv1.Deployment
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "sink"}, &deployment)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
+			}
+		} else {
+			err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
+			}
+		}
+		// Requeue to wait for deployment to be fully deleted
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// All deployments are deleted, update status to Stopped
+	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopped)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
+	}
+
+	// Remove stop annotation
+	annotations := p.GetAnnotations()
+	if annotations != nil {
+		delete(annotations, PipelineStopAnnotation)
+		p.SetAnnotations(annotations)
+		err = r.Update(ctx, &p)
+		if err != nil {
+			log.Error(err, "failed to remove stop annotation", "pipeline_id", p.Spec.ID)
+		}
+	}
+
+	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
