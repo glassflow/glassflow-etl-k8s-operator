@@ -419,18 +419,6 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 		}
 	}
 
-	// Remove finalizer
-	err = r.removeFinalizer(ctx, &p)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
-	}
-
-	// Delete the pipeline CRD
-	err = r.Delete(ctx, &p)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
-	}
-
 	log.Info("pipeline pause completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
