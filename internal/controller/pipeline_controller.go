@@ -41,13 +41,12 @@ import (
 
 const (
 	// PipelineFinalizerName is the name of the finalizer added to Pipeline resources
-	PipelineFinalizerName          = "pipeline.etl.glassflow.io/finalizer"
-	PipelineDeletionTypeAnnotation = "pipeline.etl.glassflow.io/deletion-type"
-	PipelineCreateAnnotation       = "pipeline.etl.glassflow.io/create"
-	PipelinePauseAnnotation        = "pipeline.etl.glassflow.io/pause"
-	PipelineResumeAnnotation       = "pipeline.etl.glassflow.io/resume"
-	PipelineStopAnnotation         = "pipeline.etl.glassflow.io/stop"
-	PipelineTerminateAnnotation    = "pipeline.etl.glassflow.io/terminate"
+	PipelineFinalizerName       = "pipeline.etl.glassflow.io/finalizer"
+	PipelineCreateAnnotation    = "pipeline.etl.glassflow.io/create"
+	PipelinePauseAnnotation     = "pipeline.etl.glassflow.io/pause"
+	PipelineResumeAnnotation    = "pipeline.etl.glassflow.io/resume"
+	PipelineStopAnnotation      = "pipeline.etl.glassflow.io/stop"
+	PipelineTerminateAnnotation = "pipeline.etl.glassflow.io/terminate"
 )
 
 // -------------------------------------------------------------------------------------------------------------------
