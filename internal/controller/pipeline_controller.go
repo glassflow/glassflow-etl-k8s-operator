@@ -556,7 +556,15 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// All deployments are deleted, update status to Stopped
+	// All deployments are deleted, clean up NATS resources
+	err = r.cleanupNATSPipelineStreams(ctx, log, p)
+	if err != nil {
+		log.Error(err, "failed to cleanup NATS resources during stop", "pipeline_id", p.Spec.ID)
+		// Don't return error here as deployments are already deleted
+		// Just log the error and continue
+	}
+
+	// Update status to Stopped
 	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopped)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
