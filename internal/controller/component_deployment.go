@@ -57,12 +57,12 @@ func (c *componentContainer) build() *v1.Container {
 	// TODO: see what other common params must be set
 	c.con.Resources = v1.ResourceRequirements{
 		Limits: v1.ResourceList{
-			v1.ResourceCPU:    *resource.NewMilliQuantity(125, resource.DecimalSI),
-			v1.ResourceMemory: *resource.NewQuantity(100*1024*1024, resource.BinarySI),
+			v1.ResourceCPU:    *resource.NewMilliQuantity(1500, resource.DecimalSI),
+			v1.ResourceMemory: *resource.NewQuantity(1536*1024*1024, resource.BinarySI), // 1.5 GB
 		},
 		Requests: v1.ResourceList{
-			v1.ResourceCPU:    *resource.NewMilliQuantity(125, resource.DecimalSI),
-			v1.ResourceMemory: *resource.NewQuantity(100*1024*1024, resource.BinarySI),
+			v1.ResourceCPU:    *resource.NewMilliQuantity(1000, resource.DecimalSI),
+			v1.ResourceMemory: *resource.NewQuantity(1024*1024*1024, resource.BinarySI), // 1 GB
 		},
 	}
 	// TODO: Make it configurable may be?
