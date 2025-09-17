@@ -112,6 +112,53 @@ func main() {
 		"SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:latest"),
 		"Image for the sink component")
 
+	// Component resource configuration
+	var ingestorCPURequest, ingestorCPULimit, ingestorMemoryRequest, ingestorMemoryLimit string
+	var joinCPURequest, joinCPULimit, joinMemoryRequest, joinMemoryLimit string
+	var sinkCPURequest, sinkCPULimit, sinkMemoryRequest, sinkMemoryLimit string
+
+	// Ingestor resources
+	flag.StringVar(&ingestorCPURequest, "ingestor-cpu-request", getEnvOrDefault(
+		"INGESTOR_CPU_REQUEST", "100m"),
+		"CPU request for ingestor component")
+	flag.StringVar(&ingestorCPULimit, "ingestor-cpu-limit", getEnvOrDefault(
+		"INGESTOR_CPU_LIMIT", "150m"),
+		"CPU limit for ingestor component")
+	flag.StringVar(&ingestorMemoryRequest, "ingestor-memory-request", getEnvOrDefault(
+		"INGESTOR_MEMORY_REQUEST", "128Mi"),
+		"Memory request for ingestor component")
+	flag.StringVar(&ingestorMemoryLimit, "ingestor-memory-limit", getEnvOrDefault(
+		"INGESTOR_MEMORY_LIMIT", "512Mi"),
+		"Memory limit for ingestor component")
+
+	// Join resources
+	flag.StringVar(&joinCPURequest, "join-cpu-request", getEnvOrDefault(
+		"JOIN_CPU_REQUEST", "100m"),
+		"CPU request for join component")
+	flag.StringVar(&joinCPULimit, "join-cpu-limit", getEnvOrDefault(
+		"JOIN_CPU_LIMIT", "150m"),
+		"CPU limit for join component")
+	flag.StringVar(&joinMemoryRequest, "join-memory-request", getEnvOrDefault(
+		"JOIN_MEMORY_REQUEST", "128Mi"),
+		"Memory request for join component")
+	flag.StringVar(&joinMemoryLimit, "join-memory-limit", getEnvOrDefault(
+		"JOIN_MEMORY_LIMIT", "512Mi"),
+		"Memory limit for join component")
+
+	// Sink resources
+	flag.StringVar(&sinkCPURequest, "sink-cpu-request", getEnvOrDefault(
+		"SINK_CPU_REQUEST", "100m"),
+		"CPU request for sink component")
+	flag.StringVar(&sinkCPULimit, "sink-cpu-limit", getEnvOrDefault(
+		"SINK_CPU_LIMIT", "150m"),
+		"CPU limit for sink component")
+	flag.StringVar(&sinkMemoryRequest, "sink-memory-request", getEnvOrDefault(
+		"SINK_MEMORY_REQUEST", "512Mi"),
+		"Memory request for sink component")
+	flag.StringVar(&sinkMemoryLimit, "sink-memory-limit", getEnvOrDefault(
+		"SINK_MEMORY_LIMIT", "1Gi"),
+		"Memory limit for sink component")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -240,13 +287,25 @@ func main() {
 	}
 
 	if err = (&controller.PipelineReconciler{
-		Client:            mgr.GetClient(),
-		Scheme:            mgr.GetScheme(),
-		NATSClient:        natsClient,
-		ComponentNATSAddr: natsComponentAddr,
-		IngestorImage:     ingestorImage,
-		JoinImage:         joinImage,
-		SinkImage:         sinkImage,
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		NATSClient:            natsClient,
+		ComponentNATSAddr:     natsComponentAddr,
+		IngestorImage:         ingestorImage,
+		JoinImage:             joinImage,
+		SinkImage:             sinkImage,
+		IngestorCPURequest:    ingestorCPURequest,
+		IngestorCPULimit:      ingestorCPULimit,
+		IngestorMemoryRequest: ingestorMemoryRequest,
+		IngestorMemoryLimit:   ingestorMemoryLimit,
+		JoinCPURequest:        joinCPURequest,
+		JoinCPULimit:          joinCPULimit,
+		JoinMemoryRequest:     joinMemoryRequest,
+		JoinMemoryLimit:       joinMemoryLimit,
+		SinkCPURequest:        sinkCPURequest,
+		SinkCPULimit:          sinkCPULimit,
+		SinkMemoryRequest:     sinkMemoryRequest,
+		SinkMemoryLimit:       sinkMemoryLimit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)

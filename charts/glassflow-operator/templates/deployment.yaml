@@ -43,6 +43,30 @@ spec:
           value: {{ .Values.componentImages.join.repository }}:{{ .Values.componentImages.join.tag }}
         - name: SINK_IMAGE
           value: {{ .Values.componentImages.sink.repository }}:{{ .Values.componentImages.sink.tag }}
+        - name: INGESTOR_CPU_REQUEST
+          value: {{ .Values.componentResources.ingestor.requests.cpu | quote }}
+        - name: INGESTOR_CPU_LIMIT
+          value: {{ .Values.componentResources.ingestor.limits.cpu | quote }}
+        - name: INGESTOR_MEMORY_REQUEST
+          value: {{ .Values.componentResources.ingestor.requests.memory | quote }}
+        - name: INGESTOR_MEMORY_LIMIT
+          value: {{ .Values.componentResources.ingestor.limits.memory | quote }}
+        - name: JOIN_CPU_REQUEST
+          value: {{ .Values.componentResources.join.requests.cpu | quote }}
+        - name: JOIN_CPU_LIMIT
+          value: {{ .Values.componentResources.join.limits.cpu | quote }}
+        - name: JOIN_MEMORY_REQUEST
+          value: {{ .Values.componentResources.join.requests.memory | quote }}
+        - name: JOIN_MEMORY_LIMIT
+          value: {{ .Values.componentResources.join.limits.memory | quote }}
+        - name: SINK_CPU_REQUEST
+          value: {{ .Values.componentResources.sink.requests.cpu | quote }}
+        - name: SINK_CPU_LIMIT
+          value: {{ .Values.componentResources.sink.limits.cpu | quote }}
+        - name: SINK_MEMORY_REQUEST
+          value: {{ .Values.componentResources.sink.requests.memory | quote }}
+        - name: SINK_MEMORY_LIMIT
+          value: {{ .Values.componentResources.sink.limits.memory | quote }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:

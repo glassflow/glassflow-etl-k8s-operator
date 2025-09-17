@@ -63,6 +63,19 @@ type PipelineReconciler struct {
 	IngestorImage string
 	JoinImage     string
 	SinkImage     string
+	// Component resource configurations
+	IngestorCPURequest    string
+	IngestorCPULimit      string
+	IngestorMemoryRequest string
+	IngestorMemoryLimit   string
+	JoinCPURequest        string
+	JoinCPULimit          string
+	JoinMemoryRequest     string
+	JoinMemoryLimit       string
+	SinkCPURequest        string
+	SinkCPULimit          string
+	SinkMemoryRequest     string
+	SinkMemoryLimit       string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -635,6 +648,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
 			}).
+			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit).
 			build()
 
 		deployment := newComponentDeploymentBuilder().
@@ -682,6 +696,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 		}).
+		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit).
 		build()
 
 	deployment := newComponentDeploymentBuilder().
@@ -728,6 +743,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 		}).
+		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
 		build()
 
 	deployment := newComponentDeploymentBuilder().
