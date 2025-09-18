@@ -15,16 +15,18 @@ const StreamMaxAge = 30 * 24 * time.Hour // 30 days
 // PipelineStatus represents the overall status of a pipeline
 type PipelineStatus string
 
-// TODO - defined in clickhouse-etl models, reuse it after merging
+// Pipeline status constants - must match the main API constants
 const (
 	PipelineStatusCreated     PipelineStatus = "Created"
 	PipelineStatusRunning     PipelineStatus = "Running"
+	PipelineStatusPausing     PipelineStatus = "Pausing"
 	PipelineStatusPaused      PipelineStatus = "Paused"
+	PipelineStatusResuming    PipelineStatus = "Resuming"
+	PipelineStatusStopping    PipelineStatus = "Stopping"
+	PipelineStatusStopped     PipelineStatus = "Stopped"
 	PipelineStatusTerminating PipelineStatus = "Terminating"
 	PipelineStatusTerminated  PipelineStatus = "Terminated"
 	PipelineStatusFailed      PipelineStatus = "Failed"
-	PipelineStatusStopping    PipelineStatus = "Stopping"
-	PipelineStatusStopped     PipelineStatus = "Stopped"
 )
 
 // PipelineHealth represents the health status of a pipeline and its components

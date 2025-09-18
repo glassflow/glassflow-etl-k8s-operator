@@ -35,6 +35,7 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/status"
 )
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -159,10 +160,18 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, nil
 	}
 
-	// Set status to Created first
-	err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusCreated)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("update pipeline status to created: %w", err)
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusCreated) {
+		log.Info("pipeline is already being created", "pipeline_id", p.Spec.ID)
+		// Continue with the creation process
+	} else {
+		// Transition to Creation status first
+		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusCreated)
+
+		// Update CRD status
+		err := r.Status().Update(ctx, &p, &client.SubResourceUpdateOptions{})
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline CRD status: %w", err)
+		}
 	}
 
 	ns, err := r.createNamespace(ctx, p)
@@ -322,10 +331,22 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 
 	namespace := "pipeline-" + p.Spec.ID
 
-	// Check if pipeline is already paused
+	// Check if pipeline is already paused or pausing
 	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPaused) {
 		log.Info("pipeline already paused", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
+	}
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPausing) {
+		log.Info("pipeline is already being paused", "pipeline_id", p.Spec.ID)
+		// Continue with the pause process
+	} else {
+		// Transition to Pausing status first
+		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusPausing)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to pausing: %w", err)
+		}
+		// Requeue to continue with the pause process
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Step 1: Stop Ingestor deployments
@@ -428,10 +449,22 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 
 	namespace := "pipeline-" + p.Spec.ID
 
-	// Check if pipeline is already running
+	// Check if pipeline is already running or resuming
 	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning) {
 		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
+	}
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusResuming) {
+		log.Info("pipeline is already being resumed", "pipeline_id", p.Spec.ID)
+		// Continue with the resume process
+	} else {
+		// Transition to Resuming status first
+		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusResuming)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
+		}
+		// Requeue to continue with the resume process
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Get namespace
@@ -533,10 +566,18 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, nil
 	}
 
-	// Set status to Stopping first
-	err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopping)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
+	// Check if pipeline is already stopping
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusStopping) {
+		log.Info("pipeline is already being stopped", "pipeline_id", p.Spec.ID)
+		// Continue with the stop process
+	} else {
+		// Transition to Stopping status first
+		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopping)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
+		}
+		// Requeue to continue with the stop process
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Step 1: Stop Ingestor deployments
@@ -1092,26 +1133,35 @@ func (r *PipelineReconciler) isDeploymentReady(ctx context.Context, namespace, n
 	return false, nil
 }
 
-// updatePipelineStatus updates both NATS KV and CRD status
-func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, status nats.PipelineStatus) error {
+// updatePipelineStatus updates both NATS KV and CRD status with validation
+func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus nats.PipelineStatus) error {
+	// Validate status transition
+	currentStatus := nats.PipelineStatus(p.Status)
+	err := status.ValidatePipelineStatusTransition(currentStatus, newStatus)
+	if err != nil {
+		log.Error(err, "invalid status transition", "pipeline_id", p.Spec.ID, "from", currentStatus, "to", newStatus)
+		return fmt.Errorf("invalid status transition from %s to %s: %w", currentStatus, newStatus, err)
+	}
+
 	// Update NATS KV store status
 	if r.NATSClient != nil {
-		err := r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, status)
+		err := r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, newStatus)
 		if err != nil {
-			log.Error(err, "failed to update pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", status)
+			log.Error(err, "failed to update pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
 			// Don't fail the reconciliation if NATS update fails, just log the error
 		} else {
-			log.Info("successfully updated pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", status)
+			log.Info("successfully updated pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
 		}
 	}
 
 	// Update CRD status
-	p.Status = etlv1alpha1.PipelineStatus(status)
-	err := r.Status().Update(ctx, p, &client.SubResourceUpdateOptions{})
+	p.Status = etlv1alpha1.PipelineStatus(newStatus)
+	err = r.Status().Update(ctx, p, &client.SubResourceUpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("update pipeline CRD status: %w", err)
 	}
 
+	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "from", currentStatus, "to", newStatus)
 	return nil
 }
 
