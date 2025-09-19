@@ -54,6 +54,10 @@ spec:
                       largest representable duration to approximately 290 years.
                     format: int64
                     type: integer
+                  nats_left_consumer_name:
+                    type: string
+                  nats_right_consumer_name:
+                    type: string
                   replicas:
                     minimum: 1
                     type: integer
@@ -79,6 +83,8 @@ spec:
                 type: string
               sink:
                 properties:
+                  nats_consumer_name:
+                    type: string
                   replicas:
                     minimum: 1
                     type: integer
