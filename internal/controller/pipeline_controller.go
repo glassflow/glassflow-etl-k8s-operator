@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -105,6 +106,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&etlv1alpha1.Pipeline{}).
 		Named("pipeline").
 		WithEventFilter(pipelineOperationPredicate).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }
 
