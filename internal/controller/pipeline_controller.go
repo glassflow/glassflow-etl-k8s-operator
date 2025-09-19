@@ -381,6 +381,64 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	return ctrl.Result{}, nil
 }
 
+// checkJoinPendingMessages checks if join consumers have pending messages
+func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	if !p.Spec.Join.Enabled {
+		return nil // No join, nothing to check
+	}
+
+	// Get consumer names and stream names directly from spec
+	leftConsumerName := p.Spec.Join.NATSLeftConsumerName
+	rightConsumerName := p.Spec.Join.NATSRightConsumerName
+	leftStreamName := p.Spec.Ingestor.Streams[0].OutputStream
+	rightStreamName := p.Spec.Ingestor.Streams[1].OutputStream
+
+	// Check left stream
+	hasPending, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
+	if err != nil {
+		return fmt.Errorf("check left join consumer: %w", err)
+	}
+	if hasPending {
+		return fmt.Errorf("left join consumer has %d pending and %d unacknowledged messages", pending, unack)
+	}
+
+	// Check right stream
+	hasPending, pending, unack, err = r.NATSClient.CheckConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
+	if err != nil {
+		return fmt.Errorf("check right join consumer: %w", err)
+	}
+	if hasPending {
+		return fmt.Errorf("right join consumer has %d pending and %d unacknowledged messages", pending, unack)
+	}
+
+	return nil
+}
+
+// checkSinkPendingMessages checks if sink consumer has pending messages
+func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	// Get consumer name and stream name directly from spec
+	sinkConsumerName := p.Spec.Sink.NATSConsumerName
+
+	// Get stream name based on whether join is enabled
+	var sinkStreamName string
+	if p.Spec.Join.Enabled {
+		sinkStreamName = p.Spec.Join.OutputStream
+	} else {
+		sinkStreamName = p.Spec.Ingestor.Streams[0].OutputStream
+	}
+
+	// Check sink stream
+	hasPending, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
+	if err != nil {
+		return fmt.Errorf("check sink consumer: %w", err)
+	}
+	if hasPending {
+		return fmt.Errorf("sink consumer has %d pending and %d unacknowledged messages", pending, unack)
+	}
+
+	return nil
+}
+
 func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	log.Info("reconciling pipeline pause", "pipeline_id", p.Spec.ID)
 
@@ -432,8 +490,17 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 		}
 	}
 
-	// Step 2: Stop Join deployment (if enabled)
+	// Step 2: Check join and stop Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
+		// Check for pending messages first
+		err := r.checkJoinPendingMessages(ctx, p)
+		if err != nil {
+			log.Info("join has pending messages, requeuing pause operation",
+				"pipeline_id", p.Spec.ID,
+				"error", err.Error())
+			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+		}
+
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
@@ -459,7 +526,16 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 		}
 	}
 
-	// Step 3: Stop Sink deployment
+	// Step 3: Check sink and stop Sink deployment
+	// Check for pending messages first
+	err := r.checkSinkPendingMessages(ctx, p)
+	if err != nil {
+		log.Info("sink has pending messages, requeuing pause operation",
+			"pipeline_id", p.Spec.ID,
+			"error", err.Error())
+		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+	}
+
 	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
@@ -675,8 +751,17 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		}
 	}
 
-	// Step 2: Stop Join deployment (if enabled)
+	// Step 2: Check join and stop Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
+		// Check for pending messages first
+		err := r.checkJoinPendingMessages(ctx, p)
+		if err != nil {
+			log.Info("join has pending messages, requeuing stop operation",
+				"pipeline_id", p.Spec.ID,
+				"error", err.Error())
+			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+		}
+
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
@@ -702,7 +787,16 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		}
 	}
 
-	// Step 3: Stop Sink deployment
+	// Step 3: Check sink and stop Sink deployment
+	// Check for pending messages first
+	err := r.checkSinkPendingMessages(ctx, p)
+	if err != nil {
+		log.Info("sink has pending messages, requeuing stop operation",
+			"pipeline_id", p.Spec.ID,
+			"error", err.Error())
+		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+	}
+
 	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
