@@ -12,11 +12,16 @@ type containerBuilder interface {
 	withImage(image string) containerBuilder
 	withVolumeMount(mount v1.VolumeMount) containerBuilder
 	withEnv(env []v1.EnvVar) containerBuilder
+	withResources(cpuRequest, cpuLimit, memoryRequest, memoryLimit string) containerBuilder
 	build() *v1.Container
 }
 
 type componentContainer struct {
-	con *v1.Container
+	con           *v1.Container
+	cpuRequest    string
+	cpuLimit      string
+	memoryRequest string
+	memoryLimit   string
 }
 
 func newComponentContainerBuilder() *componentContainer {
@@ -52,17 +57,31 @@ func (c *componentContainer) withName(name string) containerBuilder {
 	return c
 }
 
+// withResources implements containerBuilder.
+func (c *componentContainer) withResources(cpuRequest, cpuLimit, memoryRequest, memoryLimit string) containerBuilder {
+	c.cpuRequest = cpuRequest
+	c.cpuLimit = cpuLimit
+	c.memoryRequest = memoryRequest
+	c.memoryLimit = memoryLimit
+	return c
+}
+
 // build implements containerBuilder.
 func (c *componentContainer) build() *v1.Container {
-	// TODO: see what other common params must be set
+	// Parse resource strings and create resource requirements
+	cpuRequest, _ := resource.ParseQuantity(c.cpuRequest)
+	cpuLimit, _ := resource.ParseQuantity(c.cpuLimit)
+	memoryRequest, _ := resource.ParseQuantity(c.memoryRequest)
+	memoryLimit, _ := resource.ParseQuantity(c.memoryLimit)
+
 	c.con.Resources = v1.ResourceRequirements{
 		Limits: v1.ResourceList{
-			v1.ResourceCPU:    *resource.NewMilliQuantity(1500, resource.DecimalSI),
-			v1.ResourceMemory: *resource.NewQuantity(1536*1024*1024, resource.BinarySI), // 1.5 GB
+			v1.ResourceCPU:    cpuLimit,
+			v1.ResourceMemory: memoryLimit,
 		},
 		Requests: v1.ResourceList{
-			v1.ResourceCPU:    *resource.NewMilliQuantity(1000, resource.DecimalSI),
-			v1.ResourceMemory: *resource.NewQuantity(1024*1024*1024, resource.BinarySI), // 1 GB
+			v1.ResourceCPU:    cpuRequest,
+			v1.ResourceMemory: memoryRequest,
 		},
 	}
 	// TODO: Make it configurable may be?
