@@ -32,10 +32,11 @@ var StatusValidationMatrix = map[nats.PipelineStatus][]nats.PipelineStatus{
 		nats.PipelineStatusPaused,
 	},
 
-	// Paused status can transition to Resuming or Stopping
+	// Paused status can transition to Resuming, Stopping, or Terminating
 	nats.PipelineStatusPaused: {
 		nats.PipelineStatusResuming,
 		nats.PipelineStatusStopping,
+		nats.PipelineStatusTerminating,
 	},
 
 	// Resuming status can only transition to Running
@@ -72,6 +73,7 @@ var StatusTransitionDescriptions = map[string]string{
 	"Pausing->Paused":         "Complete pause operation",
 	"Paused->Resuming":        "Resume pipeline",
 	"Paused->Stopping":        "Stop paused pipeline",
+	"Paused->Terminating":     "Terminate paused pipeline",
 	"Resuming->Running":       "Complete resume operation",
 	"Stopping->Stopped":       "Complete stop operation",
 	"Terminating->Terminated": "Complete termination operation",

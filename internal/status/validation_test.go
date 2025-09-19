@@ -58,6 +58,12 @@ func TestValidateStatusTransition(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name:        "Paused to Terminating",
+			from:        nats.PipelineStatusPaused,
+			to:          nats.PipelineStatusTerminating,
+			expectError: false,
+		},
+		{
 			name:        "Resuming to Running",
 			from:        nats.PipelineStatusResuming,
 			to:          nats.PipelineStatusRunning,
@@ -175,10 +181,11 @@ func TestGetValidTransitions(t *testing.T) {
 		{
 			name:          "Paused status transitions",
 			from:          nats.PipelineStatusPaused,
-			expectedCount: 2,
+			expectedCount: 3,
 			expectedStatus: []nats.PipelineStatus{
 				nats.PipelineStatusResuming,
 				nats.PipelineStatusStopping,
+				nats.PipelineStatusTerminating,
 			},
 			expectError: false,
 		},
