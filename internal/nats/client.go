@@ -141,7 +141,7 @@ func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamNam
 	}
 
 	pending := int(info.NumPending)
-	unacknowledged := int(info.NumAckPending)
+	unacknowledged := info.NumAckPending
 	totalPending := pending + unacknowledged
 	hasPending := totalPending > 0
 

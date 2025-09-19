@@ -67,6 +67,9 @@ type Join struct {
 	Enabled        bool          `json:"enabled"`
 	LeftBufferTTL  time.Duration `json:"left_buffer_ttl,omitempty"`
 	RightBufferTTL time.Duration `json:"right_buffer_ttl,omitempty"`
+
+	NATSLeftConsumerName  string `json:"nats_left_consumer_name,omitempty"`
+	NATSRightConsumerName string `json:"nats_right_consumer_name,omitempty"`
 }
 
 type Sink struct {
@@ -74,6 +77,8 @@ type Sink struct {
 	Type string `json:"type"`
 	// +kubebuilder:validation:Minimum=1
 	Replicas int `json:"replicas"`
+
+	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
 }
 
 // PipelineStatus defines the observed state of Pipeline.

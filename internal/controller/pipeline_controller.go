@@ -1319,7 +1319,7 @@ func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *a
 func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus nats.PipelineStatus) error {
 	// Validate status transition
 	currentStatus := nats.PipelineStatus(p.Status)
-	err := status.ValidatePipelineStatusTransition(currentStatus, newStatus)
+	err := status.ValidateStatusTransition(currentStatus, newStatus)
 	if err != nil {
 		log.Error(err, "invalid status transition", "pipeline_id", p.Spec.ID, "from", currentStatus, "to", newStatus)
 		return fmt.Errorf("invalid status transition from %s to %s: %w", currentStatus, newStatus, err)
