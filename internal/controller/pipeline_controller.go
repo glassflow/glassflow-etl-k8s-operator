@@ -76,12 +76,7 @@ var pipelineOperationPredicate = predicate.Funcs{
 		// Trigger on annotation changes (our operation triggers)
 		oldAnnotations := oldObj.GetAnnotations()
 		newAnnotations := newObj.GetAnnotations()
-		if !reflect.DeepEqual(oldAnnotations, newAnnotations) {
-			return true
-		}
-
-		// Don't trigger on status-only changes
-		return false
+		return !reflect.DeepEqual(oldAnnotations, newAnnotations)
 	},
 	GenericFunc: func(e event.GenericEvent) bool {
 		return true // Always reconcile on generic events
