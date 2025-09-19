@@ -1,13 +1,17 @@
 name: Chart Release
 
 on:
-  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  test-chart:
+    uses: ./.github/workflows/test-chart.yml
+
   release:
+    needs: [test-chart]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -34,3 +38,8 @@ jobs:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CR_SKIP_EXISTING: true           # Skip if release already exists
           CR_GENERATE_RELEASE_NOTES: true  # Auto generate GitHub release notes
+
+  notify:
+    needs: [release]
+    uses: ./.github/workflows/notify.yaml
+    secrets: inherit

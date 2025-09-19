@@ -10,7 +10,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-const StreamMaxAge = 30 * 24 * time.Hour // 30 days
+const StreamMaxAge = 24 * time.Hour // 24 hours
 
 // PipelineStatus represents the overall status of a pipeline
 type PipelineStatus string

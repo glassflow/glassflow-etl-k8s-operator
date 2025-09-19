@@ -37,6 +37,30 @@ componentImages:
     repository: ghcr.io/glassflow/glassflow-etl-sink
     tag: stable
 
+# Component resource configurations
+componentResources:
+  ingestor:
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+    limits:
+      cpu: 1500m
+      memory: 1.5Gi
+  join:
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+    limits:
+      cpu: 1500m
+      memory: 1.5Gi
+  sink:
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+    limits:
+      cpu: 1500m
+      memory: 1.5Gi
+
 
 metricsService:
   ports:
