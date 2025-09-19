@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -31,7 +32,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
@@ -49,6 +52,41 @@ const (
 	PipelineStopAnnotation      = "pipeline.etl.glassflow.io/stop"
 	PipelineTerminateAnnotation = "pipeline.etl.glassflow.io/terminate"
 )
+
+// -------------------------------------------------------------------------------------------------------------------
+
+// pipelineOperationPredicate filters events to trigger reconcile on spec changes or annotation changes
+// but not on status-only changes, does not filter requeue
+var pipelineOperationPredicate = predicate.Funcs{
+	CreateFunc: func(e event.CreateEvent) bool {
+		return true // Always reconcile on create
+	},
+	DeleteFunc: func(e event.DeleteEvent) bool {
+		return true // Always reconcile on delete
+	},
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldObj := e.ObjectOld
+		newObj := e.ObjectNew
+
+		// Trigger on spec changes (generation changes)
+		if oldObj.GetGeneration() != newObj.GetGeneration() {
+			return true
+		}
+
+		// Trigger on annotation changes (our operation triggers)
+		oldAnnotations := oldObj.GetAnnotations()
+		newAnnotations := newObj.GetAnnotations()
+		if !reflect.DeepEqual(oldAnnotations, newAnnotations) {
+			return true
+		}
+
+		// Don't trigger on status-only changes
+		return false
+	},
+	GenericFunc: func(e event.GenericEvent) bool {
+		return true // Always reconcile on generic events
+	},
+}
 
 // -------------------------------------------------------------------------------------------------------------------
 
@@ -71,6 +109,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&etlv1alpha1.Pipeline{}).
 		Named("pipeline").
+		WithEventFilter(pipelineOperationPredicate).
 		Complete(r)
 }
 
@@ -205,7 +244,9 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
 		}
 		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is ready", "namespace", namespace)
 	}
 
 	// Step 2: Create Join deployment (if enabled)
@@ -221,7 +262,9 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
 			}
 			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already created", "namespace", namespace)
 		}
 	}
 
@@ -239,7 +282,9 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
 			}
 			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already created", "namespace", namespace)
 		}
 	}
 
@@ -346,7 +391,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to pausing: %w", err)
 		}
 		// Requeue to continue with the pause process
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
 	// Step 1: Stop Ingestor deployments
@@ -371,7 +416,9 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 				}
 			}
 			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
 		}
 	}
 
@@ -396,7 +443,9 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 				}
 			}
 			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already deleted", "namespace", namespace)
 		}
 	}
 
@@ -420,7 +469,9 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 			}
 		}
 		// Requeue to wait for deployment to be fully deleted
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is already deleted", "namespace", namespace)
 	}
 
 	// All deployments are deleted, update status to Paused
@@ -464,7 +515,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
 		// Requeue to continue with the resume process
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
 	// Get namespace
@@ -496,7 +547,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
 		}
 		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is already created", "namespace", namespace)
 	}
 
 	// Step 2: Create Join deployment (if enabled)
@@ -512,7 +565,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
 			}
 			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already created", "namespace", namespace)
 		}
 	}
 
@@ -530,7 +585,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
 			}
 			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already created", "namespace", namespace)
 		}
 	}
 
@@ -577,7 +634,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
 		}
 		// Requeue to continue with the stop process
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
 	// Step 1: Stop Ingestor deployments
@@ -602,7 +659,9 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 				}
 			}
 			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already deleted", "namespace", namespace)
 		}
 	}
 
@@ -627,7 +686,9 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 				}
 			}
 			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already deleted", "namespace", namespace)
 		}
 	}
 
@@ -651,7 +712,9 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 			}
 		}
 		// Requeue to wait for deployment to be fully deleted
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is already deleted", "namespace", namespace)
 	}
 
 	// All deployments are deleted, clean up NATS resources
