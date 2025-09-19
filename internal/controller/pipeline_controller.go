@@ -405,7 +405,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
 				}
 			} else {
-				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				err = r.deleteDeployment(ctx, &deployment)
 				if err != nil {
 					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
 				}
@@ -432,7 +432,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
 				}
 			} else {
-				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				err = r.deleteDeployment(ctx, &deployment)
 				if err != nil {
 					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
 				}
@@ -458,7 +458,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
 			}
 		} else {
-			err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+			err = r.deleteDeployment(ctx, &deployment)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
 			}
@@ -648,7 +648,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
 				}
 			} else {
-				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				err = r.deleteDeployment(ctx, &deployment)
 				if err != nil {
 					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
 				}
@@ -675,7 +675,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
 				}
 			} else {
-				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				err = r.deleteDeployment(ctx, &deployment)
 				if err != nil {
 					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
 				}
@@ -701,7 +701,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
 			}
 		} else {
-			err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+			err = r.deleteDeployment(ctx, &deployment)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
 			}
@@ -1189,6 +1189,18 @@ func (r *PipelineReconciler) isDeploymentReady(ctx context.Context, namespace, n
 		return true, nil
 	}
 	return false, nil
+}
+
+// deleteDeployment safely deletes a deployment, handling NotFound errors gracefully
+func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *appsv1.Deployment) error {
+	err := r.Delete(ctx, deployment, &client.DeleteOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // Already deleted, that's fine
+		}
+		return fmt.Errorf("delete deployment: %w", err)
+	}
+	return nil
 }
 
 // updatePipelineStatus updates both NATS KV and CRD status with validation
