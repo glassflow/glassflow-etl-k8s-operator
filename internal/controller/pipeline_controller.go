@@ -381,6 +381,19 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	return ctrl.Result{}, nil
 }
 
+// checkConsumerPendingMessages checks if a specific consumer has pending messages
+func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, streamName, consumerName string) error {
+	hasPending, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, streamName, consumerName)
+	if err != nil {
+		return fmt.Errorf("check consumer %s: %w", consumerName, err)
+	}
+	if hasPending {
+		return fmt.Errorf("consumer %s has %d pending and %d unacknowledged messages", consumerName, pending, unack)
+	}
+
+	return nil
+}
+
 // checkJoinPendingMessages checks if join consumers have pending messages
 func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	if !p.Spec.Join.Enabled {
@@ -394,21 +407,15 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 	rightStreamName := p.Spec.Ingestor.Streams[1].OutputStream
 
 	// Check left stream
-	hasPending, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
+	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
 	if err != nil {
-		return fmt.Errorf("check left join consumer: %w", err)
-	}
-	if hasPending {
-		return fmt.Errorf("left join consumer has %d pending and %d unacknowledged messages", pending, unack)
+		return fmt.Errorf("left join consumer: %w", err)
 	}
 
 	// Check right stream
-	hasPending, pending, unack, err = r.NATSClient.CheckConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
+	err = r.checkConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
 	if err != nil {
-		return fmt.Errorf("check right join consumer: %w", err)
-	}
-	if hasPending {
-		return fmt.Errorf("right join consumer has %d pending and %d unacknowledged messages", pending, unack)
+		return fmt.Errorf("right join consumer: %w", err)
 	}
 
 	return nil
@@ -428,12 +435,9 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 	}
 
 	// Check sink stream
-	hasPending, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
+	err := r.checkConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
 	if err != nil {
-		return fmt.Errorf("check sink consumer: %w", err)
-	}
-	if hasPending {
-		return fmt.Errorf("sink consumer has %d pending and %d unacknowledged messages", pending, unack)
+		return fmt.Errorf("sink consumer: %w", err)
 	}
 
 	return nil
