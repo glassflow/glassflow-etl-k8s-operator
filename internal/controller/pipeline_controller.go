@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
+	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -30,26 +32,57 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/status"
 )
 
 // -------------------------------------------------------------------------------------------------------------------
 
 const (
 	// PipelineFinalizerName is the name of the finalizer added to Pipeline resources
-	PipelineFinalizerName          = "pipeline.etl.glassflow.io/finalizer"
-	PipelineDeletionTypeAnnotation = "pipeline.etl.glassflow.io/deletion-type"
-	PipelinePauseAnnotation        = "pipeline.etl.glassflow.io/pause"
-	PipelineResumeAnnotation       = "pipeline.etl.glassflow.io/resume"
+	PipelineFinalizerName       = "pipeline.etl.glassflow.io/finalizer"
+	PipelineCreateAnnotation    = "pipeline.etl.glassflow.io/create"
+	PipelinePauseAnnotation     = "pipeline.etl.glassflow.io/pause"
+	PipelineResumeAnnotation    = "pipeline.etl.glassflow.io/resume"
+	PipelineStopAnnotation      = "pipeline.etl.glassflow.io/stop"
+	PipelineTerminateAnnotation = "pipeline.etl.glassflow.io/terminate"
 )
 
-const (
-	PipelineDeletionTypeShutdown  = "shutdown"
-	PipelineDeletionTypeTerminate = "terminate"
-)
+// -------------------------------------------------------------------------------------------------------------------
+
+// pipelineOperationPredicate filters events to trigger reconcile on spec changes or annotation changes
+// but not on status-only changes, does not filter requeue
+var pipelineOperationPredicate = predicate.Funcs{
+	CreateFunc: func(e event.CreateEvent) bool {
+		return true // Always reconcile on create
+	},
+	DeleteFunc: func(e event.DeleteEvent) bool {
+		return true // Always reconcile on delete
+	},
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldObj := e.ObjectOld
+		newObj := e.ObjectNew
+
+		// Trigger on spec changes (generation changes)
+		if oldObj.GetGeneration() != newObj.GetGeneration() {
+			return true
+		}
+
+		// Trigger on annotation changes (our operation triggers)
+		oldAnnotations := oldObj.GetAnnotations()
+		newAnnotations := newObj.GetAnnotations()
+		return !reflect.DeepEqual(oldAnnotations, newAnnotations)
+	},
+	GenericFunc: func(e event.GenericEvent) bool {
+		return true // Always reconcile on generic events
+	},
+}
 
 // -------------------------------------------------------------------------------------------------------------------
 
@@ -85,6 +118,8 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&etlv1alpha1.Pipeline{}).
 		Named("pipeline").
+		WithEventFilter(pipelineOperationPredicate).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }
 
@@ -115,27 +150,39 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// pipeline deletion flow
-	if !p.DeletionTimestamp.IsZero() {
-		return r.deletePipeline(ctx, p)
-	}
-
-	// pipeline creation flow
-	if !containsFinalizer(p.Finalizers, PipelineFinalizerName) {
-		return r.createPipeline(ctx, p)
-	}
-
-	// pipeline pause/resume flow
+	// Check for operation annotations
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		if _, hasPause := annotations[PipelinePauseAnnotation]; hasPause {
-			return r.reconcilePause(ctx, log, p)
+		// Determine which operation to perform based on annotations
+		var operation string
+		if _, hasCreate := annotations[PipelineCreateAnnotation]; hasCreate {
+			operation = "create"
+		} else if _, hasPause := annotations[PipelinePauseAnnotation]; hasPause {
+			operation = "pause"
+		} else if _, hasResume := annotations[PipelineResumeAnnotation]; hasResume {
+			operation = "resume"
+		} else if _, hasStop := annotations[PipelineStopAnnotation]; hasStop {
+			operation = "stop"
+		} else if _, hasTerminate := annotations[PipelineTerminateAnnotation]; hasTerminate {
+			operation = "terminate"
 		}
-		if _, hasResume := annotations[PipelineResumeAnnotation]; hasResume {
+
+		// Execute the appropriate operation
+		switch operation {
+		case "create":
+			return r.createPipeline(ctx, p)
+		case "pause":
+			return r.reconcilePause(ctx, log, p)
+		case "resume":
 			return r.reconcileResume(ctx, log, p)
+		case "stop":
+			return r.reconcileStop(ctx, log, p)
+		case "terminate":
+			return r.reconcileTerminate(ctx, log, p)
 		}
 	}
 
+	// No operation needed
 	return ctrl.Result{}, nil
 }
 
@@ -148,136 +195,257 @@ func (r *PipelineReconciler) createPipeline(ctx context.Context, p etlv1alpha1.P
 		return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
 	}
 
-	err = r.reconcileCreate(ctx, log, p)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("create pipeline: %w", err)
-	}
-
-	// Return to trigger another reconciling
-	return ctrl.Result{Requeue: true}, nil
-}
-
-func (r *PipelineReconciler) deletePipeline(ctx context.Context, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-	err := r.removeFinalizer(ctx, &p)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
-	}
-
-	if deletionType, exists := p.GetAnnotations()[PipelineDeletionTypeAnnotation]; exists {
-		if deletionType == PipelineDeletionTypeTerminate {
-			err = r.reconcileTerminate(ctx, log, p)
-			if err != nil {
-				log.Error(err, "unable to terminate Pipeline")
-				return ctrl.Result{}, err
-			}
-		} else {
-			err = r.reconcileShutdown(ctx, log, p)
-			if err != nil {
-				log.Error(err, "unable to shutdown Pipeline")
-				return ctrl.Result{}, err
-			}
-		}
-	}
-
-	return ctrl.Result{}, nil
+	return r.reconcileCreate(ctx, log, p)
 }
 
 // -------------------------------------------------------------------------------------------------------------------
 
-func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log.Info("reconciling pipeline creation", "pipeline_id", p.Spec.ID)
+
+	// Check if pipeline is already running
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning) {
+		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
+		return ctrl.Result{}, nil
+	}
+
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusCreated) {
+		log.Info("pipeline is already being created", "pipeline_id", p.Spec.ID)
+		// Continue with the creation process
+	} else {
+		// Transition to Creation status first
+		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusCreated)
+
+		// Update CRD status
+		err := r.Status().Update(ctx, &p, &client.SubResourceUpdateOptions{})
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline CRD status: %w", err)
+		}
+	}
+
 	ns, err := r.createNamespace(ctx, p)
 	if err != nil {
-		return fmt.Errorf("setup namespace: %w", err)
+		return ctrl.Result{}, fmt.Errorf("setup namespace: %w", err)
 	}
 
 	err = r.createNATSStreams(ctx, p)
 	if err != nil {
-		return fmt.Errorf("setup streams: %w", err)
+		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
 	labels := preparePipelineLabels(p)
 
 	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: p.Spec.ID}, labels, p)
 	if err != nil {
-		return fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
+		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
 	}
 
-	err = r.createIngestors(ctx, log, ns, labels, secret, p)
+	namespace := "pipeline-" + p.Spec.ID
+
+	// Step 1: Create Sink deployment
+	ready, err := r.isDeploymentReady(ctx, namespace, "sink")
 	if err != nil {
-		return fmt.Errorf("setup ingestors: %w", err)
+		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+	}
+	if !ready {
+		log.Info("creating sink deployment", "namespace", namespace)
+		err = r.createSink(ctx, ns, labels, secret)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
+		}
+		// Requeue to wait for deployment to be ready
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is ready", "namespace", namespace)
 	}
 
+	// Step 2: Create Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		err := r.createJoin(ctx, ns, labels, secret)
+		ready, err := r.isDeploymentReady(ctx, namespace, "join")
 		if err != nil {
-			return fmt.Errorf("setup join: %w", err)
+			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
+		}
+		if !ready {
+			log.Info("creating join deployment", "namespace", namespace)
+			err := r.createJoin(ctx, ns, labels, secret)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
+			}
+			// Requeue to wait for deployment to be ready
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already created", "namespace", namespace)
 		}
 	}
 
-	err = r.createSink(ctx, ns, labels, secret)
-	if err != nil {
-		return fmt.Errorf("setup sink: %w", err)
+	// Step 3: Create Ingestor deployments
+	for i := range p.Spec.Ingestor.Streams {
+		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+		}
+		if !ready {
+			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			err = r.createIngestors(ctx, log, ns, labels, secret, p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
+			}
+			// Requeue to wait for deployment to be ready
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already created", "namespace", namespace)
+		}
 	}
 
-	// Update pipeline status to "Running" after successful creation
+	// All deployments are ready, update status to Running
 	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusRunning)
 	if err != nil {
-		return fmt.Errorf("update pipeline status to running: %w", err)
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
-	return nil
+	// Remove create annotation
+	annotations := p.GetAnnotations()
+	if annotations != nil {
+		delete(annotations, PipelineCreateAnnotation)
+		p.SetAnnotations(annotations)
+		err = r.Update(ctx, &p)
+		if err != nil {
+			log.Error(err, "failed to remove create annotation", "pipeline_id", p.Spec.ID)
+		}
+	}
+
+	log.Info("pipeline creation completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	return ctrl.Result{}, nil
 }
 
-// nolint:unparam
-func (r *PipelineReconciler) reconcileShutdown(_ context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("reconciling pipeline deletion", "pipeline_id", p.Spec.ID)
-	// Delete ingestor deployments
-	// Wait for NATS stream for join to be empty (i.e. 0 messages) if enabled
-	// Delete join deployment
-	// Wait for NATS stream for sink to be empty (i.e. 0 messages) if enabled
-	// Delete sink deployment
-	// Delete namespace
-	// Delete natsStreams for this pipeline
-	return nil
-}
-
-func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	log.Info("reconciling pipeline termination", "pipeline_id", p.Spec.ID)
 
-	// Delete namespace for this pipeline
-	err := r.deleteNamespace(ctx, log, p)
+	// Check if pipeline is already terminated
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusTerminated) {
+		log.Info("pipeline already terminated", "pipeline_id", p.Spec.ID)
+		return ctrl.Result{}, nil
+	}
+
+	// Set status to Terminating first
+	err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusTerminating)
 	if err != nil {
-		return fmt.Errorf("delete pipeline namespace: %w", err)
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to terminating: %w", err)
+	}
+
+	// Delete namespace for this pipeline
+	err = r.deleteNamespace(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline namespace: %w", err)
 	}
 
 	// Clean up NATS streams but keep the pipeline configuration
 	err = r.cleanupNATSPipelineStreams(ctx, log, p)
 	if err != nil {
-		return fmt.Errorf("cleanup NATS streams: %w", err)
+		log.Info("failed to cleanup NATS resources during termination", "pipeline_id", p.Spec.ID)
+		// Don't return error here as namespace is already deleted
+		// Just log and continue
 	}
 
-	// Update pipeline status to "Terminated" instead of deleting
+	// Update pipeline status to "Terminated"
 	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusTerminated)
 	if err != nil {
-		log.Error(err, "failed to update pipeline status to Terminated", "pipeline_id", p.Spec.ID)
-		// Don't fail the reconciliation if status update fails, just log the error
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to terminated: %w", err)
+	}
+
+	// Remove terminate annotation
+	annotations := p.GetAnnotations()
+	if annotations != nil {
+		delete(annotations, PipelineTerminateAnnotation)
+		p.SetAnnotations(annotations)
+		err = r.Update(ctx, &p)
+		if err != nil {
+			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
+		}
+	}
+
+	// Remove finalizer
+	err = r.removeFinalizer(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+
+	// Delete the pipeline CRD
+	err = r.Delete(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	return ctrl.Result{}, nil
+}
+
+// checkConsumerPendingMessages checks if a specific consumer has pending messages
+func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, streamName, consumerName string) error {
+	hasPending, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, streamName, consumerName)
+	if err != nil {
+		return fmt.Errorf("check consumer %s: %w", consumerName, err)
+	}
+	if hasPending {
+		return fmt.Errorf("consumer %s has %d pending and %d unacknowledged messages", consumerName, pending, unack)
+	}
+
 	return nil
 }
 
-func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	log.Info("reconciling pipeline pause", "pipeline_id", p.Spec.ID)
-
-	namespace := "pipeline-" + p.Spec.ID
-
-	// Check if pipeline is already paused
-	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPaused) {
-		log.Info("pipeline already paused", "pipeline_id", p.Spec.ID)
-		return ctrl.Result{}, nil
+// checkJoinPendingMessages checks if join consumers have pending messages
+func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	if !p.Spec.Join.Enabled {
+		return nil // No join, nothing to check
 	}
+
+	// Get consumer names and stream names directly from spec
+	leftConsumerName := p.Spec.Join.NATSLeftConsumerName
+	rightConsumerName := p.Spec.Join.NATSRightConsumerName
+	leftStreamName := p.Spec.Ingestor.Streams[0].OutputStream
+	rightStreamName := p.Spec.Ingestor.Streams[1].OutputStream
+
+	// Check left stream
+	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
+	if err != nil {
+		return fmt.Errorf("left join consumer: %w", err)
+	}
+
+	// Check right stream
+	err = r.checkConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
+	if err != nil {
+		return fmt.Errorf("right join consumer: %w", err)
+	}
+
+	return nil
+}
+
+// checkSinkPendingMessages checks if sink consumer has pending messages
+func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	// Get consumer name and stream name directly from spec
+	sinkConsumerName := p.Spec.Sink.NATSConsumerName
+
+	// Get stream name based on whether join is enabled
+	var sinkStreamName string
+	if p.Spec.Join.Enabled {
+		sinkStreamName = p.Spec.Join.OutputStream
+	} else {
+		sinkStreamName = p.Spec.Ingestor.Streams[0].OutputStream
+	}
+
+	// Check sink stream
+	err := r.checkConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
+	if err != nil {
+		return fmt.Errorf("sink consumer: %w", err)
+	}
+
+	return nil
+}
+
+// stopPipelineComponents stops all pipeline components in the correct order with pending message checks
+func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	namespace := "pipeline-" + p.Spec.ID
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
@@ -295,18 +463,29 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
 				}
 			} else {
-				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				err = r.deleteDeployment(ctx, &deployment)
 				if err != nil {
 					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
 				}
 			}
 			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
 		}
 	}
 
-	// Step 2: Stop Join deployment (if enabled)
+	// Step 2: Check join and stop Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
+		// Check for pending messages first
+		err := r.checkJoinPendingMessages(ctx, p)
+		if err != nil {
+			log.Info("join has pending messages, requeuing operation",
+				"pipeline_id", p.Spec.ID,
+				"error", err.Error())
+			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+		}
+
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
@@ -320,17 +499,28 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
 				}
 			} else {
-				err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+				err = r.deleteDeployment(ctx, &deployment)
 				if err != nil {
 					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
 				}
 			}
 			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already deleted", "namespace", namespace)
 		}
 	}
 
-	// Step 3: Stop Sink deployment
+	// Step 3: Check sink and stop Sink deployment
+	// Check for pending messages first
+	err := r.checkSinkPendingMessages(ctx, p)
+	if err != nil {
+		log.Info("sink has pending messages, requeuing operation",
+			"pipeline_id", p.Spec.ID,
+			"error", err.Error())
+		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+	}
+
 	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
@@ -344,13 +534,49 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
 			}
 		} else {
-			err = r.Delete(ctx, &deployment, &client.DeleteOptions{})
+			err = r.deleteDeployment(ctx, &deployment)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
 			}
 		}
 		// Requeue to wait for deployment to be fully deleted
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is already deleted", "namespace", namespace)
+	}
+
+	// All deployments are deleted
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log.Info("reconciling pipeline pause", "pipeline_id", p.Spec.ID)
+
+	// Check if pipeline is already paused or pausing
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPaused) {
+		log.Info("pipeline already paused", "pipeline_id", p.Spec.ID)
+		return ctrl.Result{}, nil
+	}
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPausing) {
+		log.Info("pipeline is already being paused", "pipeline_id", p.Spec.ID)
+		// Continue with the pause process
+	} else {
+		// Transition to Pausing status first
+		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusPausing)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to pausing: %w", err)
+		}
+		// Requeue to continue with the pause process
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	}
+
+	// Stop all pipeline components
+	result, err := r.stopPipelineComponents(ctx, log, p)
+	if err != nil {
+		return result, err
+	}
+	if result.Requeue {
+		return result, nil
 	}
 
 	// All deployments are deleted, update status to Paused
@@ -379,10 +605,22 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 
 	namespace := "pipeline-" + p.Spec.ID
 
-	// Check if pipeline is already running
+	// Check if pipeline is already running or resuming
 	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning) {
 		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
+	}
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusResuming) {
+		log.Info("pipeline is already being resumed", "pipeline_id", p.Spec.ID)
+		// Continue with the resume process
+	} else {
+		// Transition to Resuming status first
+		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusResuming)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
+		}
+		// Requeue to continue with the resume process
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
 	// Get namespace
@@ -414,7 +652,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
 		}
 		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is already created", "namespace", namespace)
 	}
 
 	// Step 2: Create Join deployment (if enabled)
@@ -430,7 +670,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
 			}
 			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already created", "namespace", namespace)
 		}
 	}
 
@@ -448,7 +690,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
 			}
 			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already created", "namespace", namespace)
 		}
 	}
 
@@ -470,6 +714,85 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	log.Info("pipeline resume completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log.Info("reconciling pipeline stop", "pipeline_id", p.Spec.ID)
+
+	// Check if pipeline is already stopped
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped) {
+		log.Info("pipeline already stopped", "pipeline_id", p.Spec.ID)
+		return ctrl.Result{}, nil
+	}
+
+	// Check if pipeline is already stopping
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusStopping) {
+		log.Info("pipeline is already being stopped", "pipeline_id", p.Spec.ID)
+		// Continue with the stop process
+	} else {
+		// Transition to Stopping status first
+		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopping)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
+		}
+		// Requeue to continue with the stop process
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	}
+
+	// Stop all pipeline components
+	result, err := r.stopPipelineComponents(ctx, log, p)
+	if err != nil {
+		return result, err
+	}
+	if result.Requeue {
+		return result, nil
+	}
+
+	// All deployments are deleted, clean up NATS resources
+	err = r.cleanupNATSPipelineStreams(ctx, log, p)
+	if err != nil {
+		log.Error(err, "failed to cleanup NATS resources during stop", "pipeline_id", p.Spec.ID)
+		// Don't return error here as deployments are already deleted
+		// Just log the error and continue
+	}
+
+	// Delete namespace for this pipeline
+	err = r.deleteNamespace(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline namespace: %w", err)
+	}
+
+	// Update status to Stopped
+	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusStopped)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
+	}
+
+	// Remove stop annotation
+	annotations := p.GetAnnotations()
+	if annotations != nil {
+		delete(annotations, PipelineStopAnnotation)
+		p.SetAnnotations(annotations)
+		err = r.Update(ctx, &p)
+		if err != nil {
+			log.Error(err, "failed to remove stop annotation", "pipeline_id", p.Spec.ID)
+		}
+	}
+
+	// Remove finalizer
+	err = r.removeFinalizer(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+
+	// Delete the pipeline CRD
+	err = r.Delete(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
+	}
+
+	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
@@ -562,64 +885,6 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 	}
 
 	log.Info("namespace deleted successfully", "namespace", namespaceName.Name)
-	return nil
-}
-
-// nolint:unused
-func (r *PipelineReconciler) deleteDeployments(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("deleting pipeline deployments", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-
-	// List all deployments in the pipeline namespace
-	var deployments appsv1.DeploymentList
-	labels := preparePipelineLabels(p)
-
-	err := r.List(ctx, &deployments, client.InNamespace("pipeline-"+p.Spec.ID), client.MatchingLabels(labels))
-	if err != nil {
-		return fmt.Errorf("list deployments: %w", err)
-	}
-
-	// Delete each deployment
-	for _, deployment := range deployments.Items {
-		log.Info("deleting deployment", "deployment", deployment.Name, "namespace", deployment.Namespace)
-		err := r.Delete(ctx, &deployment, &client.DeleteOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				log.Info("deployment already deleted", "deployment", deployment.Name)
-				continue
-			}
-			return fmt.Errorf("delete deployment %s: %w", deployment.Name, err)
-		}
-		log.Info("deployment deleted successfully", "deployment", deployment.Name)
-	}
-
-	return nil
-}
-
-// nolint:unused
-func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("deleting pipeline secret", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-
-	secretName := types.NamespacedName{
-		Namespace: "pipeline-" + p.Spec.ID,
-		Name:      p.Spec.ID,
-	}
-
-	var secret v1.Secret
-	err := r.Get(ctx, secretName, &secret)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("secret already deleted", "secret", secretName.String())
-			return nil
-		}
-		return fmt.Errorf("get secret %s: %w", secretName.String(), err)
-	}
-
-	err = r.Delete(ctx, &secret, &client.DeleteOptions{})
-	if err != nil {
-		return fmt.Errorf("delete secret %s: %w", secretName.String(), err)
-	}
-
-	log.Info("secret deleted successfully", "secret", secretName.String())
 	return nil
 }
 
@@ -791,6 +1056,23 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 		if err != nil {
 			return fmt.Errorf("create stream %s: %w", p.Spec.Join.OutputStream, err)
 		}
+
+		// create join KV stores for each source stream
+		// The join KV store names are the same as the stream names
+		for _, stream := range p.Spec.Ingestor.Streams {
+			// Use LeftBufferTTL for the first stream, RightBufferTTL for the second
+			var ttl time.Duration
+			if stream.OutputStream == p.Spec.Ingestor.Streams[0].OutputStream {
+				ttl = p.Spec.Join.LeftBufferTTL
+			} else {
+				ttl = p.Spec.Join.RightBufferTTL
+			}
+
+			err := r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, stream.OutputStream, ttl)
+			if err != nil {
+				return fmt.Errorf("create join KV store %s: %w", stream.OutputStream, err)
+			}
+		}
 	}
 
 	return nil
@@ -949,26 +1231,47 @@ func (r *PipelineReconciler) isDeploymentReady(ctx context.Context, namespace, n
 	return false, nil
 }
 
-// updatePipelineStatus updates both NATS KV and CRD status
-func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, status nats.PipelineStatus) error {
+// deleteDeployment safely deletes a deployment, handling NotFound errors gracefully
+func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *appsv1.Deployment) error {
+	err := r.Delete(ctx, deployment, &client.DeleteOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // Already deleted, that's fine
+		}
+		return fmt.Errorf("delete deployment: %w", err)
+	}
+	return nil
+}
+
+// updatePipelineStatus updates both NATS KV and CRD status with validation
+func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus nats.PipelineStatus) error {
+	// Validate status transition
+	currentStatus := nats.PipelineStatus(p.Status)
+	err := status.ValidateStatusTransition(currentStatus, newStatus)
+	if err != nil {
+		log.Error(err, "invalid status transition", "pipeline_id", p.Spec.ID, "from", currentStatus, "to", newStatus)
+		return fmt.Errorf("invalid status transition from %s to %s: %w", currentStatus, newStatus, err)
+	}
+
 	// Update NATS KV store status
 	if r.NATSClient != nil {
-		err := r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, status)
+		err := r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, newStatus)
 		if err != nil {
-			log.Error(err, "failed to update pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", status)
+			log.Error(err, "failed to update pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
 			// Don't fail the reconciliation if NATS update fails, just log the error
 		} else {
-			log.Info("successfully updated pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", status)
+			log.Info("successfully updated pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
 		}
 	}
 
 	// Update CRD status
-	p.Status = etlv1alpha1.PipelineStatus(status)
-	err := r.Status().Update(ctx, p, &client.SubResourceUpdateOptions{})
+	p.Status = etlv1alpha1.PipelineStatus(newStatus)
+	err = r.Status().Update(ctx, p, &client.SubResourceUpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("update pipeline CRD status: %w", err)
 	}
 
+	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "from", currentStatus, "to", newStatus)
 	return nil
 }
 

@@ -15,11 +15,15 @@ const StreamMaxAge = 24 * time.Hour // 24 hours
 // PipelineStatus represents the overall status of a pipeline
 type PipelineStatus string
 
-// TODO - defined in clickhouse-etl models, reuse it after merging
+// Pipeline status constants - must match the main API constants
 const (
 	PipelineStatusCreated     PipelineStatus = "Created"
 	PipelineStatusRunning     PipelineStatus = "Running"
+	PipelineStatusPausing     PipelineStatus = "Pausing"
 	PipelineStatusPaused      PipelineStatus = "Paused"
+	PipelineStatusResuming    PipelineStatus = "Resuming"
+	PipelineStatusStopping    PipelineStatus = "Stopping"
+	PipelineStatusStopped     PipelineStatus = "Stopped"
 	PipelineStatusTerminating PipelineStatus = "Terminating"
 	PipelineStatusTerminated  PipelineStatus = "Terminated"
 	PipelineStatusFailed      PipelineStatus = "Failed"
@@ -92,8 +96,56 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 	return nil
 }
 
+// CreateOrUpdateJoinKeyValueStore creates or updates a NATS KeyValue store
+func (n *NATSClient) CreateOrUpdateJoinKeyValueStore(ctx context.Context, storeName string, ttl time.Duration) error {
+	//nolint:exhaustruct // optional config
+	cfg := jetstream.KeyValueConfig{
+		Bucket:      storeName,
+		TTL:         ttl,
+		Description: "Store for Join component KV",
+	}
+
+	_, err := n.JetStream().CreateOrUpdateKeyValue(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("cannot create nats key value store %s: %w", storeName, err)
+	}
+
+	return nil
+}
+
 func (n *NATSClient) JetStream() jetstream.JetStream {
 	return n.js
+}
+
+// CheckConsumerPendingMessages checks if a consumer has any pending or unacknowledged messages
+// Returns: hasPending (bool), pendingCount (int), unacknowledgedCount (int), error
+func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamName, consumerName string) (bool, int, int, error) {
+	// Add timeout for consumer info retrieval
+	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	stream, err := n.js.Stream(infoCtx, streamName)
+	if err != nil {
+		return false, 0, 0, fmt.Errorf("get stream %s: %w", streamName, err)
+	}
+
+	consumer, err := stream.Consumer(infoCtx, consumerName)
+	if err != nil {
+		// Consumer doesn't exist - fail with error as requested
+		return false, 0, 0, fmt.Errorf("consumer %s does not exist in stream %s: %w", consumerName, streamName, err)
+	}
+
+	info, err := consumer.Info(infoCtx)
+	if err != nil {
+		return false, 0, 0, fmt.Errorf("get consumer info for %s: %w", consumerName, err)
+	}
+
+	pending := int(info.NumPending)
+	unacknowledged := info.NumAckPending
+	totalPending := pending + unacknowledged
+	hasPending := totalPending > 0
+
+	return hasPending, pending, unacknowledged, nil
 }
 
 func (n *NATSClient) Close() error {
