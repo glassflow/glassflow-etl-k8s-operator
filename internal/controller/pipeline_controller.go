@@ -443,28 +443,9 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 	return nil
 }
 
-func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	log.Info("reconciling pipeline pause", "pipeline_id", p.Spec.ID)
-
+// stopPipelineComponents stops all pipeline components in the correct order with pending message checks
+func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	namespace := "pipeline-" + p.Spec.ID
-
-	// Check if pipeline is already paused or pausing
-	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPaused) {
-		log.Info("pipeline already paused", "pipeline_id", p.Spec.ID)
-		return ctrl.Result{}, nil
-	}
-	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPausing) {
-		log.Info("pipeline is already being paused", "pipeline_id", p.Spec.ID)
-		// Continue with the pause process
-	} else {
-		// Transition to Pausing status first
-		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusPausing)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("update pipeline status to pausing: %w", err)
-		}
-		// Requeue to continue with the pause process
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
@@ -499,7 +480,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 		// Check for pending messages first
 		err := r.checkJoinPendingMessages(ctx, p)
 		if err != nil {
-			log.Info("join has pending messages, requeuing pause operation",
+			log.Info("join has pending messages, requeuing operation",
 				"pipeline_id", p.Spec.ID,
 				"error", err.Error())
 			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
@@ -534,7 +515,7 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 	// Check for pending messages first
 	err := r.checkSinkPendingMessages(ctx, p)
 	if err != nil {
-		log.Info("sink has pending messages, requeuing pause operation",
+		log.Info("sink has pending messages, requeuing operation",
 			"pipeline_id", p.Spec.ID,
 			"error", err.Error())
 		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
@@ -562,6 +543,40 @@ func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger
 		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	} else {
 		log.Info("sink deployment is already deleted", "namespace", namespace)
+	}
+
+	// All deployments are deleted
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log.Info("reconciling pipeline pause", "pipeline_id", p.Spec.ID)
+
+	// Check if pipeline is already paused or pausing
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPaused) {
+		log.Info("pipeline already paused", "pipeline_id", p.Spec.ID)
+		return ctrl.Result{}, nil
+	}
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPausing) {
+		log.Info("pipeline is already being paused", "pipeline_id", p.Spec.ID)
+		// Continue with the pause process
+	} else {
+		// Transition to Pausing status first
+		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusPausing)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to pausing: %w", err)
+		}
+		// Requeue to continue with the pause process
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	}
+
+	// Stop all pipeline components
+	result, err := r.stopPipelineComponents(ctx, log, p)
+	if err != nil {
+		return result, err
+	}
+	if result.Requeue {
+		return result, nil
 	}
 
 	// All deployments are deleted, update status to Paused
@@ -705,8 +720,6 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	log.Info("reconciling pipeline stop", "pipeline_id", p.Spec.ID)
 
-	namespace := "pipeline-" + p.Spec.ID
-
 	// Check if pipeline is already stopped
 	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped) {
 		log.Info("pipeline already stopped", "pipeline_id", p.Spec.ID)
@@ -727,102 +740,13 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
-	// Step 1: Stop Ingestor deployments
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := fmt.Sprintf("ingestor-%d", i)
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if !deleted {
-			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: deploymentName}, &deployment)
-			if err != nil {
-				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
-				}
-			} else {
-				err = r.deleteDeployment(ctx, &deployment)
-				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
-				}
-			}
-			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("ingestor deployment is already deleted", "namespace", namespace)
-		}
-	}
-
-	// Step 2: Check join and stop Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		// Check for pending messages first
-		err := r.checkJoinPendingMessages(ctx, p)
-		if err != nil {
-			log.Info("join has pending messages, requeuing stop operation",
-				"pipeline_id", p.Spec.ID,
-				"error", err.Error())
-			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
-		}
-
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !deleted {
-			log.Info("deleting join deployment", "namespace", namespace)
-			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "join"}, &deployment)
-			if err != nil {
-				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
-				}
-			} else {
-				err = r.deleteDeployment(ctx, &deployment)
-				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
-				}
-			}
-			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("join deployment is already deleted", "namespace", namespace)
-		}
-	}
-
-	// Step 3: Check sink and stop Sink deployment
-	// Check for pending messages first
-	err := r.checkSinkPendingMessages(ctx, p)
+	// Stop all pipeline components
+	result, err := r.stopPipelineComponents(ctx, log, p)
 	if err != nil {
-		log.Info("sink has pending messages, requeuing stop operation",
-			"pipeline_id", p.Spec.ID,
-			"error", err.Error())
-		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+		return result, err
 	}
-
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
-	}
-	if !deleted {
-		log.Info("deleting sink deployment", "namespace", namespace)
-		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "sink"}, &deployment)
-		if err != nil {
-			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
-			}
-		} else {
-			err = r.deleteDeployment(ctx, &deployment)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
-			}
-		}
-		// Requeue to wait for deployment to be fully deleted
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	} else {
-		log.Info("sink deployment is already deleted", "namespace", namespace)
+	if result.Requeue {
+		return result, nil
 	}
 
 	// All deployments are deleted, clean up NATS resources
