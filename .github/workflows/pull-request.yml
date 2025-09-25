@@ -28,6 +28,7 @@ jobs:
     uses: ./.github/workflows/test-operator.yml
   build-operator-image:
     needs: [test-operator]
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
     uses: ./.github/workflows/build-image.yml
     with:
       push: true

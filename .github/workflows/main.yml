@@ -1,16 +1,33 @@
 name: Merge to Main
 
 on:
-  push:
-    branches:
-      - main
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 jobs:
+  check-merge:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      should-build: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
+    steps:
+      - name: Check if PR has no-build label
+        run: |
+          if [ "${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}" = "true" ]; then
+            echo "✅ PR does not have 'no-build' label - proceeding with build"
+          else
+            echo "❌ PR has 'no-build' label - skipping build"
+          fi
+
   test-operator:
+    needs: [check-merge]
+    if: needs.check-merge.outputs.should-build
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
     needs: [test-operator]
+    if: needs.check-merge.outputs.should-build
     uses: ./.github/workflows/build-image.yml
     with:
       push: true
