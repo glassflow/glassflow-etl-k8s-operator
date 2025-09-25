@@ -11,21 +11,14 @@ on:
 
 jobs:
   build-docker-image:
-    name: Build Component Image
+    name: Build Multi-Platform Image
     runs-on: ubuntu-latest
     outputs:
-      glassflow-operator-amd64: ${{ steps.gen-output.outputs.glassflow-operator-amd64 }}
-      glassflow-operator-arm64: ${{ steps.gen-output.outputs.glassflow-operator-arm64 }}
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-metadata: ${{ steps.build.outputs.metadata }}
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        platform:
-          - os: linux
-            arch: amd64
-          - os: linux
-            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,27 +32,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Build & push Docker image
+      - name: Build & push multi-platform image
         uses: docker/build-push-action@v6
-        id: build-arch-image
+        id: build
         with:
-          platforms: ${{ matrix.platform.os }}/${{ matrix.platform.arch }}
+          platforms: linux/amd64,linux/arm64
           context: .
           file: Dockerfile
           push: ${{ inputs.push }}
           provenance: false
-          outputs: push-by-digest=true,type=image
+          cache-from: type=gha,scope=buildx
+          cache-to: type=gha,mode=max,scope=buildx
           tags: |
             ghcr.io/glassflow/glassflow-etl-k8s-operator
-      - name: Generate output
-        id: gen-output
-        run: echo "glassflow-operator-${ARCH}=$DIGEST" >> "$GITHUB_OUTPUT"
-        env:
-          ARCH: ${{ matrix.platform.arch }}
-          DIGEST: ${{ steps.build-arch-image.outputs.digest }}
 
-  push-docker-manifest:
-    name: Push Operator Image
+  tag-and-push:
+    name: Tag and Push Multi-Platform Image
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -81,16 +69,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Push multiarch manifest
+      - name: Tag and push multi-platform image
         run: |
           echo "$TAGS" | while IFS= read -r TAG; do
-            docker manifest create "$REPOSITORY:$TAG" \
-              --amend "$REPOSITORY@$AMD64_DIGEST" \
-              --amend "$REPOSITORY@$ARM64_DIGEST"
-            docker manifest push "$REPOSITORY:$TAG"
+            docker buildx imagetools create \
+              --tag "$REPOSITORY:$TAG" \
+              "$REPOSITORY@${{ needs.build-docker-image.outputs.image-digest }}"
           done
         env:
-          AMD64_DIGEST: ${{ needs.build-docker-image.outputs.glassflow-operator-amd64 }}
-          ARM64_DIGEST: ${{ needs.build-docker-image.outputs.glassflow-operator-arm64 }}
           TAGS: ${{ steps.meta.outputs.tags }}
           REPOSITORY: ghcr.io/glassflow/glassflow-etl-k8s-operator
