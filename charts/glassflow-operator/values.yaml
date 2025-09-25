@@ -7,7 +7,7 @@ controllerManager:
         - ALL
     image:
       repository: ghcr.io/glassflow/glassflow-etl-k8s-operator
-      tag: main
+      tag: v0.0.5
       pullPolicy: Always
     resources:
       limits:
