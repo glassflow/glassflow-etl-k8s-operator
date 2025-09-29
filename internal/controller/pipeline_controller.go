@@ -154,17 +154,18 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		// Determine which operation to perform based on annotations
+		// Terminate has highest priority to handle stuck pipelines
 		var operation string
-		if _, hasCreate := annotations[PipelineCreateAnnotation]; hasCreate {
+		if _, hasTerminate := annotations[PipelineTerminateAnnotation]; hasTerminate {
+			operation = "terminate"
+		} else if _, hasCreate := annotations[PipelineCreateAnnotation]; hasCreate {
 			operation = "create"
+		} else if _, hasStop := annotations[PipelineStopAnnotation]; hasStop {
+			operation = "stop"
 		} else if _, hasPause := annotations[PipelinePauseAnnotation]; hasPause {
 			operation = "pause"
 		} else if _, hasResume := annotations[PipelineResumeAnnotation]; hasResume {
 			operation = "resume"
-		} else if _, hasStop := annotations[PipelineStopAnnotation]; hasStop {
-			operation = "stop"
-		} else if _, hasTerminate := annotations[PipelineTerminateAnnotation]; hasTerminate {
-			operation = "terminate"
 		}
 
 		// Execute the appropriate operation
@@ -1257,7 +1258,7 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 	if r.NATSClient != nil {
 		err := r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, newStatus)
 		if err != nil {
-			log.Error(err, "failed to update pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
+			log.Info("failed to update pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
 			// Don't fail the reconciliation if NATS update fails, just log the error
 		} else {
 			log.Info("successfully updated pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
