@@ -29,12 +29,18 @@ controllerManager:
     annotations: {}
 kubernetesClusterDomain: cluster.local
 
+# Observability configuration
+observability:
+  enabled: true
+  otelEndpoint: "http://otel-collector.observability.svc.cluster.local:4318"
+
 # Glassflow components configuration
 glassflowComponents:
   ingestor:
     image:
       repository: ghcr.io/glassflow/glassflow-etl-ingestor
       tag: stable
+    logLevel: "info"
     resources:
       requests:
         cpu: 1000m
@@ -48,6 +54,7 @@ glassflowComponents:
     image:
       repository: ghcr.io/glassflow/glassflow-etl-join
       tag: stable
+    logLevel: "info"
     resources:
       requests:
         cpu: 1000m
@@ -61,6 +68,7 @@ glassflowComponents:
     image:
       repository: ghcr.io/glassflow/glassflow-etl-sink
       tag: stable
+    logLevel: "info"
     resources:
       requests:
         cpu: 1000m

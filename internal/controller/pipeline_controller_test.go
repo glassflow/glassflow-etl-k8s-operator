@@ -104,13 +104,21 @@ var _ = Describe("Pipeline Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &PipelineReconciler{
-				Client:            k8sClient,
-				Scheme:            k8sClient.Scheme(),
-				NATSClient:        nc,
-				ComponentNATSAddr: "nats://nats.default.svc.cluster.local:4222",
-				IngestorImage:     "ghcr.io/glassflow/glassflow-etl-ingestor:latest",
-				JoinImage:         "ghcr.io/glassflow/glassflow-etl-join:latest",
-				SinkImage:         "ghcr.io/glassflow/glassflow-etl-sink:latest",
+				Client:                    k8sClient,
+				Scheme:                    k8sClient.Scheme(),
+				NATSClient:                nc,
+				ComponentNATSAddr:         "nats://nats.default.svc.cluster.local:4222",
+				IngestorImage:             "ghcr.io/glassflow/glassflow-etl-ingestor:latest",
+				JoinImage:                 "ghcr.io/glassflow/glassflow-etl-join:latest",
+				SinkImage:                 "ghcr.io/glassflow/glassflow-etl-sink:latest",
+				ObservabilityEnabled:      "true",
+				ObservabilityOTelEndpoint: "http://otel-collector.observability.svc.cluster.local:4318",
+				IngestorLogLevel:          "info",
+				JoinLogLevel:              "info",
+				SinkLogLevel:              "info",
+				IngestorImageTag:          "latest",
+				JoinImageTag:              "latest",
+				SinkImageTag:              "latest",
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

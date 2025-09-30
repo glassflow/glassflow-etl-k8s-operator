@@ -77,6 +77,22 @@ spec:
           value: {{ .Values.glassflowComponents.join.affinity | toJson | quote }}
         - name: SINK_AFFINITY
           value: {{ .Values.glassflowComponents.sink.affinity | toJson | quote }}
+        - name: OBSERVABILITY_ENABLED
+          value: {{ .Values.observability.enabled | quote }}
+        - name: OBSERVABILITY_OTEL_ENDPOINT
+          value: {{ .Values.observability.otelEndpoint | quote }}
+        - name: INGESTOR_LOG_LEVEL
+          value: {{ .Values.glassflowComponents.ingestor.logLevel | quote }}
+        - name: JOIN_LOG_LEVEL
+          value: {{ .Values.glassflowComponents.join.logLevel | quote }}
+        - name: SINK_LOG_LEVEL
+          value: {{ .Values.glassflowComponents.sink.logLevel | quote }}
+        - name: INGESTOR_IMAGE_TAG
+          value: {{ .Values.glassflowComponents.ingestor.image.tag | quote }}
+        - name: JOIN_IMAGE_TAG
+          value: {{ .Values.glassflowComponents.join.image.tag | quote }}
+        - name: SINK_IMAGE_TAG
+          value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:

@@ -171,6 +171,36 @@ func main() {
 		"SINK_AFFINITY", ""),
 		"Node affinity for sink component (JSON)")
 
+	// Observability configuration
+	var observabilityEnabled, observabilityOTelEndpoint string
+	var ingestorLogLevel, joinLogLevel, sinkLogLevel string
+	var ingestorImageTag, joinImageTag, sinkImageTag string
+
+	flag.StringVar(&observabilityEnabled, "observability-enabled", getEnvOrDefault(
+		"OBSERVABILITY_ENABLED", "true"),
+		"Enable OpenTelemetry observability")
+	flag.StringVar(&observabilityOTelEndpoint, "observability-otel-endpoint", getEnvOrDefault(
+		"OBSERVABILITY_OTEL_ENDPOINT", "http://otel-collector.observability.svc.cluster.local:4318"),
+		"OpenTelemetry collector endpoint")
+	flag.StringVar(&ingestorLogLevel, "ingestor-log-level", getEnvOrDefault(
+		"INGESTOR_LOG_LEVEL", "info"),
+		"Log level for ingestor component")
+	flag.StringVar(&joinLogLevel, "join-log-level", getEnvOrDefault(
+		"JOIN_LOG_LEVEL", "info"),
+		"Log level for join component")
+	flag.StringVar(&sinkLogLevel, "sink-log-level", getEnvOrDefault(
+		"SINK_LOG_LEVEL", "info"),
+		"Log level for sink component")
+	flag.StringVar(&ingestorImageTag, "ingestor-image-tag", getEnvOrDefault(
+		"INGESTOR_IMAGE_TAG", "stable"),
+		"Image tag for ingestor component (used as service version)")
+	flag.StringVar(&joinImageTag, "join-image-tag", getEnvOrDefault(
+		"JOIN_IMAGE_TAG", "stable"),
+		"Image tag for join component (used as service version)")
+	flag.StringVar(&sinkImageTag, "sink-image-tag", getEnvOrDefault(
+		"SINK_IMAGE_TAG", "stable"),
+		"Image tag for sink component (used as service version)")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -299,28 +329,36 @@ func main() {
 	}
 
 	if err = (&controller.PipelineReconciler{
-		Client:                mgr.GetClient(),
-		Scheme:                mgr.GetScheme(),
-		NATSClient:            natsClient,
-		ComponentNATSAddr:     natsComponentAddr,
-		IngestorImage:         ingestorImage,
-		JoinImage:             joinImage,
-		SinkImage:             sinkImage,
-		IngestorCPURequest:    ingestorCPURequest,
-		IngestorCPULimit:      ingestorCPULimit,
-		IngestorMemoryRequest: ingestorMemoryRequest,
-		IngestorMemoryLimit:   ingestorMemoryLimit,
-		JoinCPURequest:        joinCPURequest,
-		JoinCPULimit:          joinCPULimit,
-		JoinMemoryRequest:     joinMemoryRequest,
-		JoinMemoryLimit:       joinMemoryLimit,
-		SinkCPURequest:        sinkCPURequest,
-		SinkCPULimit:          sinkCPULimit,
-		SinkMemoryRequest:     sinkMemoryRequest,
-		SinkMemoryLimit:       sinkMemoryLimit,
-		IngestorAffinity:      ingestorAffinity,
-		JoinAffinity:          joinAffinity,
-		SinkAffinity:          sinkAffinity,
+		Client:                    mgr.GetClient(),
+		Scheme:                    mgr.GetScheme(),
+		NATSClient:                natsClient,
+		ComponentNATSAddr:         natsComponentAddr,
+		IngestorImage:             ingestorImage,
+		JoinImage:                 joinImage,
+		SinkImage:                 sinkImage,
+		IngestorCPURequest:        ingestorCPURequest,
+		IngestorCPULimit:          ingestorCPULimit,
+		IngestorMemoryRequest:     ingestorMemoryRequest,
+		IngestorMemoryLimit:       ingestorMemoryLimit,
+		JoinCPURequest:            joinCPURequest,
+		JoinCPULimit:              joinCPULimit,
+		JoinMemoryRequest:         joinMemoryRequest,
+		JoinMemoryLimit:           joinMemoryLimit,
+		SinkCPURequest:            sinkCPURequest,
+		SinkCPULimit:              sinkCPULimit,
+		SinkMemoryRequest:         sinkMemoryRequest,
+		SinkMemoryLimit:           sinkMemoryLimit,
+		IngestorAffinity:          ingestorAffinity,
+		JoinAffinity:              joinAffinity,
+		SinkAffinity:              sinkAffinity,
+		ObservabilityEnabled:      observabilityEnabled,
+		ObservabilityOTelEndpoint: observabilityOTelEndpoint,
+		IngestorLogLevel:          ingestorLogLevel,
+		JoinLogLevel:              joinLogLevel,
+		SinkLogLevel:              sinkLogLevel,
+		IngestorImageTag:          ingestorImageTag,
+		JoinImageTag:              joinImageTag,
+		SinkImageTag:              sinkImageTag,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)
