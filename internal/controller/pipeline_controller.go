@@ -109,6 +109,10 @@ type PipelineReconciler struct {
 	SinkCPULimit          string
 	SinkMemoryRequest     string
 	SinkMemoryLimit       string
+	// Component affinity configurations
+	IngestorAffinity string
+	JoinAffinity     string
+	SinkAffinity     string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -932,6 +936,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}).
 			withReplicas(t.Replicas).
 			withContainer(*container).
+			withAffinity(r.IngestorAffinity).
 			build()
 
 		err := r.createDeployment(ctx, deployment)
@@ -979,6 +984,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*container).
+		withAffinity(r.JoinAffinity).
 		build()
 
 	fmt.Println(len(deployment.Spec.Template.Spec.Containers))
@@ -1026,6 +1032,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*container).
+		withAffinity(r.SinkAffinity).
 		build()
 
 	err := r.createDeployment(ctx, deployment)

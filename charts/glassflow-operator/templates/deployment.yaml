@@ -21,8 +21,12 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: manager
     spec:
-      {{- with .Values.nodeSelector }}
+      {{- with .Values.controllerManager.manager.nodeSelector }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controllerManager.manager.affinity }}
+      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
@@ -67,6 +71,12 @@ spec:
           value: {{ .Values.glassflowComponents.sink.resources.requests.memory | quote }}
         - name: SINK_MEMORY_LIMIT
           value: {{ .Values.glassflowComponents.sink.resources.limits.memory | quote }}
+        - name: INGESTOR_AFFINITY
+          value: {{ .Values.glassflowComponents.ingestor.affinity | toJson | quote }}
+        - name: JOIN_AFFINITY
+          value: {{ .Values.glassflowComponents.join.affinity | toJson | quote }}
+        - name: SINK_AFFINITY
+          value: {{ .Values.glassflowComponents.sink.affinity | toJson | quote }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:

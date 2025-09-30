@@ -159,6 +159,18 @@ func main() {
 		"SINK_MEMORY_LIMIT", "1Gi"),
 		"Memory limit for sink component")
 
+	// Component affinity configuration
+	var ingestorAffinity, joinAffinity, sinkAffinity string
+	flag.StringVar(&ingestorAffinity, "ingestor-affinity", getEnvOrDefault(
+		"INGESTOR_AFFINITY", ""),
+		"Node affinity for ingestor component (JSON)")
+	flag.StringVar(&joinAffinity, "join-affinity", getEnvOrDefault(
+		"JOIN_AFFINITY", ""),
+		"Node affinity for join component (JSON)")
+	flag.StringVar(&sinkAffinity, "sink-affinity", getEnvOrDefault(
+		"SINK_AFFINITY", ""),
+		"Node affinity for sink component (JSON)")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -306,6 +318,9 @@ func main() {
 		SinkCPULimit:          sinkCPULimit,
 		SinkMemoryRequest:     sinkMemoryRequest,
 		SinkMemoryLimit:       sinkMemoryLimit,
+		IngestorAffinity:      ingestorAffinity,
+		JoinAffinity:          joinAffinity,
+		SinkAffinity:          sinkAffinity,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)

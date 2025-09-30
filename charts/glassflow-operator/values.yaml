@@ -16,6 +16,10 @@ controllerManager:
       requests:
         cpu: 10m
         memory: 64Mi
+    # Node affinity for the operator (optional)
+    affinity: {}
+    # Legacy nodeSelector support (optional, for backward compatibility)
+    nodeSelector: {}
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
@@ -38,6 +42,8 @@ glassflowComponents:
       limits:
         cpu: 1500m
         memory: 1.5Gi
+    # Node affinity for ingestor component (optional)
+    affinity: {}
   join:
     image:
       repository: ghcr.io/glassflow/glassflow-etl-join
@@ -49,6 +55,8 @@ glassflowComponents:
       limits:
         cpu: 1500m
         memory: 1.5Gi
+    # Node affinity for join component (optional)
+    affinity: {}
   sink:
     image:
       repository: ghcr.io/glassflow/glassflow-etl-sink
@@ -60,6 +68,8 @@ glassflowComponents:
       limits:
         cpu: 1500m
         memory: 1.5Gi
+    # Node affinity for sink component (optional)
+    affinity: {}
 
 
 metricsService:
