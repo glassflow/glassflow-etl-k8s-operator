@@ -202,7 +202,7 @@ func main() {
 		"Image tag for sink component (used as service version)")
 
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
