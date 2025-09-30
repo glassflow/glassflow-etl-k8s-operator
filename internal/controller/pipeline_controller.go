@@ -263,7 +263,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 	if !ready {
 		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret)
+		err = r.createSink(ctx, ns, labels, secret, p)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
 		}
@@ -281,7 +281,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		}
 		if !ready {
 			log.Info("creating join deployment", "namespace", namespace)
-			err := r.createJoin(ctx, ns, labels, secret)
+			err := r.createJoin(ctx, ns, labels, secret, p)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
 			}
@@ -661,7 +661,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 	if !ready {
 		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret)
+		err = r.createSink(ctx, ns, labels, secret, p)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
 		}
@@ -679,7 +679,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		}
 		if !ready {
 			log.Info("creating join deployment", "namespace", namespace)
-			err = r.createJoin(ctx, ns, labels, secret)
+			err = r.createJoin(ctx, ns, labels, secret, p)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
 			}
@@ -932,6 +932,8 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "ingestor"},
 				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.IngestorImageTag},
+				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 			}).
 			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit).
 			build()
@@ -963,7 +965,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 	return nil
 }
 
-func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret) error {
+func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	resourceRef := "join"
 
 	joinLabels := r.getJoinLabels()
@@ -987,6 +989,8 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "join"},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.JoinImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 		}).
 		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit).
 		build()
@@ -1018,7 +1022,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	return nil
 }
 
-func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret) error {
+func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	resourceRef := "sink"
 
 	sinkLabels := r.getSinkLabels()
@@ -1041,6 +1045,8 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "sink"},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.SinkImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 		}).
 		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
 		build()
