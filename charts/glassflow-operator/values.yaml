@@ -25,41 +25,41 @@ controllerManager:
     annotations: {}
 kubernetesClusterDomain: cluster.local
 
-# Component image configurations
-componentImages:
+# Glassflow components configuration
+glassflowComponents:
   ingestor:
-    repository: ghcr.io/glassflow/glassflow-etl-ingestor
-    tag: stable
+    image:
+      repository: ghcr.io/glassflow/glassflow-etl-ingestor
+      tag: stable
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 1.5Gi
   join:
-    repository: ghcr.io/glassflow/glassflow-etl-join
-    tag: stable
+    image:
+      repository: ghcr.io/glassflow/glassflow-etl-join
+      tag: stable
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 1.5Gi
   sink:
-    repository: ghcr.io/glassflow/glassflow-etl-sink
-    tag: stable
-
-# Component resource configurations
-componentResources:
-  ingestor:
-    requests:
-      cpu: 1000m
-      memory: 1Gi
-    limits:
-      cpu: 1500m
-      memory: 1.5Gi
-  join:
-    requests:
-      cpu: 1000m
-      memory: 1Gi
-    limits:
-      cpu: 1500m
-      memory: 1.5Gi
-  sink:
-    requests:
-      cpu: 1000m
-      memory: 1Gi
-    limits:
-      cpu: 1500m
-      memory: 1.5Gi
+    image:
+      repository: ghcr.io/glassflow/glassflow-etl-sink
+      tag: stable
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 1.5Gi
 
 
 metricsService:
