@@ -29,10 +29,7 @@ controllerManager:
     annotations: {}
 kubernetesClusterDomain: cluster.local
 
-# Observability configuration
-observability:
-  enabled: true
-  otelEndpoint: "http://otel-collector.observability.svc.cluster.local:4318"
+# Observability configuration -- set on the main chart at global level by the user
 
 # Glassflow components configuration
 glassflowComponents:
