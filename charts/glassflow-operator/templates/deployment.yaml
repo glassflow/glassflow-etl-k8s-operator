@@ -77,8 +77,10 @@ spec:
           value: {{ .Values.glassflowComponents.join.affinity | toJson | quote }}
         - name: SINK_AFFINITY
           value: {{ .Values.glassflowComponents.sink.affinity | toJson | quote }}
-        - name: OBSERVABILITY_ENABLED
-          value: {{ .Values.global.observability.enabled | quote }}
+        - name: OBSERVABILITY_LOGS_ENABLED
+          value: {{ .Values.global.observability.logs.enabled | quote }}
+        - name: OBSERVABILITY_METRICS_ENABLED
+          value: {{ .Values.global.observability.metrics.enabled | quote }}
         - name: OBSERVABILITY_OTEL_ENDPOINT
           value: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}.svc.cluster.local:4318"
         - name: INGESTOR_LOG_LEVEL
