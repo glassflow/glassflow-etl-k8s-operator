@@ -114,14 +114,15 @@ type PipelineReconciler struct {
 	JoinAffinity     string
 	SinkAffinity     string
 	// Observability configurations
-	ObservabilityEnabled      string
-	ObservabilityOTelEndpoint string
-	IngestorLogLevel          string
-	JoinLogLevel              string
-	SinkLogLevel              string
-	IngestorImageTag          string
-	JoinImageTag              string
-	SinkImageTag              string
+	ObservabilityLogsEnabled    string
+	ObservabilityMetricsEnabled string
+	ObservabilityOTelEndpoint   string
+	IngestorLogLevel            string
+	JoinLogLevel                string
+	SinkLogLevel                string
+	IngestorImageTag            string
+	JoinImageTag                string
+	SinkImageTag                string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -927,7 +928,8 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
 
-				{Name: "GLASSFLOW_OTEL_OBSERVABILITY", Value: r.ObservabilityEnabled},
+				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
 				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "ingestor"},
 				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.IngestorImageTag},
@@ -989,7 +991,8 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
 
-			{Name: "GLASSFLOW_OTEL_OBSERVABILITY", Value: r.ObservabilityEnabled},
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "join"},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.JoinImageTag},
@@ -1050,7 +1053,8 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
 
-			{Name: "GLASSFLOW_OTEL_OBSERVABILITY", Value: r.ObservabilityEnabled},
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "sink"},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.SinkImageTag},
