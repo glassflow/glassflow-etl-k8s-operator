@@ -905,7 +905,6 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 // -------------------------------------------------------------------------------------------------------------------
 
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	// TODO: incase of multiple ingestors, ensure type and relevant images
 	ing := p.Spec.Ingestor
 
 	for i, t := range ing.Streams {
@@ -934,6 +933,11 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.IngestorImageTag},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
 				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+					FieldRef: &v1.ObjectFieldSelector{
+						FieldPath: "metadata.name",
+					},
+				}},
 			}).
 			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit).
 			build()
@@ -991,6 +995,11 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.JoinImageTag},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			}},
 		}).
 		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit).
 		build()
@@ -1047,6 +1056,11 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.SinkImageTag},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			}},
 		}).
 		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
 		build()
