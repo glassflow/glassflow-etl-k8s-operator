@@ -42,11 +42,11 @@ spec:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         - name: INGESTOR_IMAGE
-          value: {{ .Values.glassflowComponents.ingestor.image.repository }}:{{ .Values.glassflowComponents.ingestor.image.tag }}
+          value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.ingestor.image.repository }}:{{ .Values.glassflowComponents.ingestor.image.tag }}"
         - name: JOIN_IMAGE
-          value: {{ .Values.glassflowComponents.join.image.repository }}:{{ .Values.glassflowComponents.join.image.tag }}
+          value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.join.image.repository }}:{{ .Values.glassflowComponents.join.image.tag }}"
         - name: SINK_IMAGE
-          value: {{ .Values.glassflowComponents.sink.image.repository }}:{{ .Values.glassflowComponents.sink.image.tag }}
+          value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.sink.image.repository }}:{{ .Values.glassflowComponents.sink.image.tag }}"
         - name: INGESTOR_CPU_REQUEST
           value: {{ .Values.glassflowComponents.ingestor.resources.requests.cpu | quote }}
         - name: INGESTOR_CPU_LIMIT
@@ -78,9 +78,9 @@ spec:
         - name: SINK_AFFINITY
           value: {{ .Values.glassflowComponents.sink.affinity | toJson | quote }}
         - name: OBSERVABILITY_ENABLED
-          value: {{ .Values.observability.enabled | quote }}
+          value: {{ .Values.global.observability.enabled | quote }}
         - name: OBSERVABILITY_OTEL_ENDPOINT
-          value: {{ .Values.observability.otelEndpoint | quote }}
+          value: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}.svc.cluster.local:4318"
         - name: INGESTOR_LOG_LEVEL
           value: {{ .Values.glassflowComponents.ingestor.logLevel | quote }}
         - name: JOIN_LOG_LEVEL
