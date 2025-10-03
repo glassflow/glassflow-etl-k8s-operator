@@ -16,6 +16,10 @@ controllerManager:
       requests:
         cpu: 10m
         memory: 64Mi
+    # Node affinity for the operator (optional)
+    affinity: {}
+    # Legacy nodeSelector support (optional, for backward compatibility)
+    nodeSelector: {}
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
@@ -25,41 +29,63 @@ controllerManager:
     annotations: {}
 kubernetesClusterDomain: cluster.local
 
-# Component image configurations
-componentImages:
-  ingestor:
-    repository: ghcr.io/glassflow/glassflow-etl-ingestor
-    tag: stable
-  join:
-    repository: ghcr.io/glassflow/glassflow-etl-join
-    tag: stable
-  sink:
-    repository: ghcr.io/glassflow/glassflow-etl-sink
-    tag: stable
+# Global configuration
+global:
+  # Image registry for all components
+  imageRegistry: ""
+  # Observability configuration
+  observability:
+    logs:
+      enabled: false
+    metrics:
+      enabled: false
 
-# Component resource configurations
-componentResources:
+# Observability configuration -- set on the main chart at global level by the user
+
+# Glassflow components configuration
+glassflowComponents:
   ingestor:
-    requests:
-      cpu: 1000m
-      memory: 1Gi
-    limits:
-      cpu: 1500m
-      memory: 1.5Gi
+    image:
+      repository: ghcr.io/glassflow/glassflow-etl-ingestor
+      tag: stable
+    logLevel: "info"
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 1.5Gi
+    # Node affinity for ingestor component (optional)
+    affinity: {}
   join:
-    requests:
-      cpu: 1000m
-      memory: 1Gi
-    limits:
-      cpu: 1500m
-      memory: 1.5Gi
+    image:
+      repository: ghcr.io/glassflow/glassflow-etl-join
+      tag: stable
+    logLevel: "info"
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 1.5Gi
+    # Node affinity for join component (optional)
+    affinity: {}
   sink:
-    requests:
-      cpu: 1000m
-      memory: 1Gi
-    limits:
-      cpu: 1500m
-      memory: 1.5Gi
+    image:
+      repository: ghcr.io/glassflow/glassflow-etl-sink
+      tag: stable
+    logLevel: "info"
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 1.5Gi
+    # Node affinity for sink component (optional)
+    affinity: {}
 
 
 metricsService:

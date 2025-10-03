@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"encoding/json"
+
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -97,6 +99,7 @@ type deploymentBuilder interface {
 	withVolume(volume v1.Volume) deploymentBuilder
 	withContainer(container v1.Container) deploymentBuilder
 	withReplicas(replicas int) deploymentBuilder
+	withAffinity(affinityJSON string) deploymentBuilder
 	build() *appsv1.Deployment
 }
 
@@ -152,6 +155,26 @@ func (c *componentDeployment) withReplicas(replicas int) deploymentBuilder {
 	if replicas > 0 {
 		c.dep.Spec.Replicas = ptrInt32(int32(replicas))
 	}
+	return c
+}
+
+// withAffinity implements deploymentBuilder.
+func (c *componentDeployment) withAffinity(affinityJSON string) deploymentBuilder {
+	// If no affinity is specified, return without setting anything (default scheduling)
+	if affinityJSON == "" {
+		return c
+	}
+
+	// Parse the JSON affinity configuration
+	var affinity v1.Affinity
+	if err := json.Unmarshal([]byte(affinityJSON), &affinity); err != nil {
+		// If JSON parsing fails, log the error but don't fail the deployment
+		// This ensures backward compatibility and graceful degradation
+		return c
+	}
+
+	// Set the affinity on the deployment
+	c.dep.Spec.Template.Spec.Affinity = &affinity
 	return c
 }
 

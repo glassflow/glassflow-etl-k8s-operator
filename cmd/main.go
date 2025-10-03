@@ -128,7 +128,7 @@ func main() {
 		"INGESTOR_MEMORY_REQUEST", "128Mi"),
 		"Memory request for ingestor component")
 	flag.StringVar(&ingestorMemoryLimit, "ingestor-memory-limit", getEnvOrDefault(
-		"INGESTOR_MEMORY_LIMIT", "512Mi"),
+		"INGESTOR_MEMORY_LIMIT", "128Mi"),
 		"Memory limit for ingestor component")
 
 	// Join resources
@@ -142,7 +142,7 @@ func main() {
 		"JOIN_MEMORY_REQUEST", "128Mi"),
 		"Memory request for join component")
 	flag.StringVar(&joinMemoryLimit, "join-memory-limit", getEnvOrDefault(
-		"JOIN_MEMORY_LIMIT", "512Mi"),
+		"JOIN_MEMORY_LIMIT", "128Mi"),
 		"Memory limit for join component")
 
 	// Sink resources
@@ -153,11 +153,56 @@ func main() {
 		"SINK_CPU_LIMIT", "150m"),
 		"CPU limit for sink component")
 	flag.StringVar(&sinkMemoryRequest, "sink-memory-request", getEnvOrDefault(
-		"SINK_MEMORY_REQUEST", "512Mi"),
+		"SINK_MEMORY_REQUEST", "128Mi"),
 		"Memory request for sink component")
 	flag.StringVar(&sinkMemoryLimit, "sink-memory-limit", getEnvOrDefault(
-		"SINK_MEMORY_LIMIT", "1Gi"),
+		"SINK_MEMORY_LIMIT", "256Mi"),
 		"Memory limit for sink component")
+
+	// Component affinity configuration
+	var ingestorAffinity, joinAffinity, sinkAffinity string
+	flag.StringVar(&ingestorAffinity, "ingestor-affinity", getEnvOrDefault(
+		"INGESTOR_AFFINITY", ""),
+		"Node affinity for ingestor component (JSON)")
+	flag.StringVar(&joinAffinity, "join-affinity", getEnvOrDefault(
+		"JOIN_AFFINITY", ""),
+		"Node affinity for join component (JSON)")
+	flag.StringVar(&sinkAffinity, "sink-affinity", getEnvOrDefault(
+		"SINK_AFFINITY", ""),
+		"Node affinity for sink component (JSON)")
+
+	// Observability configuration
+	var observabilityLogsEnabled, observabilityMetricsEnabled, observabilityOTelEndpoint string
+	var ingestorLogLevel, joinLogLevel, sinkLogLevel string
+	var ingestorImageTag, joinImageTag, sinkImageTag string
+
+	flag.StringVar(&observabilityLogsEnabled, "observability-logs-enabled", getEnvOrDefault(
+		"OBSERVABILITY_LOGS_ENABLED", "false"),
+		"Enable OpenTelemetry logs")
+	flag.StringVar(&observabilityMetricsEnabled, "observability-metrics-enabled", getEnvOrDefault(
+		"OBSERVABILITY_METRICS_ENABLED", "false"),
+		"Enable OpenTelemetry metrics")
+	flag.StringVar(&observabilityOTelEndpoint, "observability-otel-endpoint", getEnvOrDefault(
+		"OBSERVABILITY_OTEL_ENDPOINT", "http://otel-collector.observability.svc.cluster.local:4318"),
+		"OpenTelemetry collector endpoint")
+	flag.StringVar(&ingestorLogLevel, "ingestor-log-level", getEnvOrDefault(
+		"INGESTOR_LOG_LEVEL", "info"),
+		"Log level for ingestor component")
+	flag.StringVar(&joinLogLevel, "join-log-level", getEnvOrDefault(
+		"JOIN_LOG_LEVEL", "info"),
+		"Log level for join component")
+	flag.StringVar(&sinkLogLevel, "sink-log-level", getEnvOrDefault(
+		"SINK_LOG_LEVEL", "info"),
+		"Log level for sink component")
+	flag.StringVar(&ingestorImageTag, "ingestor-image-tag", getEnvOrDefault(
+		"INGESTOR_IMAGE_TAG", "stable"),
+		"Image tag for ingestor component (used as service version)")
+	flag.StringVar(&joinImageTag, "join-image-tag", getEnvOrDefault(
+		"JOIN_IMAGE_TAG", "stable"),
+		"Image tag for join component (used as service version)")
+	flag.StringVar(&sinkImageTag, "sink-image-tag", getEnvOrDefault(
+		"SINK_IMAGE_TAG", "stable"),
+		"Image tag for sink component (used as service version)")
 
 	opts := zap.Options{
 		Development: true,
@@ -287,25 +332,37 @@ func main() {
 	}
 
 	if err = (&controller.PipelineReconciler{
-		Client:                mgr.GetClient(),
-		Scheme:                mgr.GetScheme(),
-		NATSClient:            natsClient,
-		ComponentNATSAddr:     natsComponentAddr,
-		IngestorImage:         ingestorImage,
-		JoinImage:             joinImage,
-		SinkImage:             sinkImage,
-		IngestorCPURequest:    ingestorCPURequest,
-		IngestorCPULimit:      ingestorCPULimit,
-		IngestorMemoryRequest: ingestorMemoryRequest,
-		IngestorMemoryLimit:   ingestorMemoryLimit,
-		JoinCPURequest:        joinCPURequest,
-		JoinCPULimit:          joinCPULimit,
-		JoinMemoryRequest:     joinMemoryRequest,
-		JoinMemoryLimit:       joinMemoryLimit,
-		SinkCPURequest:        sinkCPURequest,
-		SinkCPULimit:          sinkCPULimit,
-		SinkMemoryRequest:     sinkMemoryRequest,
-		SinkMemoryLimit:       sinkMemoryLimit,
+		Client:                      mgr.GetClient(),
+		Scheme:                      mgr.GetScheme(),
+		NATSClient:                  natsClient,
+		ComponentNATSAddr:           natsComponentAddr,
+		IngestorImage:               ingestorImage,
+		JoinImage:                   joinImage,
+		SinkImage:                   sinkImage,
+		IngestorCPURequest:          ingestorCPURequest,
+		IngestorCPULimit:            ingestorCPULimit,
+		IngestorMemoryRequest:       ingestorMemoryRequest,
+		IngestorMemoryLimit:         ingestorMemoryLimit,
+		JoinCPURequest:              joinCPURequest,
+		JoinCPULimit:                joinCPULimit,
+		JoinMemoryRequest:           joinMemoryRequest,
+		JoinMemoryLimit:             joinMemoryLimit,
+		SinkCPURequest:              sinkCPURequest,
+		SinkCPULimit:                sinkCPULimit,
+		SinkMemoryRequest:           sinkMemoryRequest,
+		SinkMemoryLimit:             sinkMemoryLimit,
+		IngestorAffinity:            ingestorAffinity,
+		JoinAffinity:                joinAffinity,
+		SinkAffinity:                sinkAffinity,
+		ObservabilityLogsEnabled:    observabilityLogsEnabled,
+		ObservabilityMetricsEnabled: observabilityMetricsEnabled,
+		ObservabilityOTelEndpoint:   observabilityOTelEndpoint,
+		IngestorLogLevel:            ingestorLogLevel,
+		JoinLogLevel:                joinLogLevel,
+		SinkLogLevel:                sinkLogLevel,
+		IngestorImageTag:            ingestorImageTag,
+		JoinImageTag:                joinImageTag,
+		SinkImageTag:                sinkImageTag,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)

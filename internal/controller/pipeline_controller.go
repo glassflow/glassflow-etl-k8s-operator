@@ -109,6 +109,20 @@ type PipelineReconciler struct {
 	SinkCPULimit          string
 	SinkMemoryRequest     string
 	SinkMemoryLimit       string
+	// Component affinity configurations
+	IngestorAffinity string
+	JoinAffinity     string
+	SinkAffinity     string
+	// Observability configurations
+	ObservabilityLogsEnabled    string
+	ObservabilityMetricsEnabled string
+	ObservabilityOTelEndpoint   string
+	IngestorLogLevel            string
+	JoinLogLevel                string
+	SinkLogLevel                string
+	IngestorImageTag            string
+	JoinImageTag                string
+	SinkImageTag                string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -250,7 +264,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 	if !ready {
 		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret)
+		err = r.createSink(ctx, ns, labels, secret, p)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
 		}
@@ -268,7 +282,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		}
 		if !ready {
 			log.Info("creating join deployment", "namespace", namespace)
-			err := r.createJoin(ctx, ns, labels, secret)
+			err := r.createJoin(ctx, ns, labels, secret, p)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
 			}
@@ -648,7 +662,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 	if !ready {
 		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret)
+		err = r.createSink(ctx, ns, labels, secret, p)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
 		}
@@ -666,7 +680,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		}
 		if !ready {
 			log.Info("creating join deployment", "namespace", namespace)
-			err = r.createJoin(ctx, ns, labels, secret)
+			err = r.createJoin(ctx, ns, labels, secret, p)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
 			}
@@ -892,7 +906,6 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 // -------------------------------------------------------------------------------------------------------------------
 
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	// TODO: incase of multiple ingestors, ensure type and relevant images
 	ing := p.Spec.Ingestor
 
 	for i, t := range ing.Streams {
@@ -913,6 +926,20 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
+				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
+
+				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
+				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "ingestor"},
+				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.IngestorImageTag},
+				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+					FieldRef: &v1.ObjectFieldSelector{
+						FieldPath: "metadata.name",
+					},
+				}},
 			}).
 			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit).
 			build()
@@ -932,6 +959,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}).
 			withReplicas(t.Replicas).
 			withContainer(*container).
+			withAffinity(r.IngestorAffinity).
 			build()
 
 		err := r.createDeployment(ctx, deployment)
@@ -943,7 +971,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 	return nil
 }
 
-func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret) error {
+func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	resourceRef := "join"
 
 	joinLabels := r.getJoinLabels()
@@ -961,6 +989,20 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		withEnv([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
+
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "join"},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.JoinImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			}},
 		}).
 		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit).
 		build()
@@ -979,6 +1021,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*container).
+		withAffinity(r.JoinAffinity).
 		build()
 
 	fmt.Println(len(deployment.Spec.Template.Spec.Containers))
@@ -991,7 +1034,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	return nil
 }
 
-func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret) error {
+func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	resourceRef := "sink"
 
 	sinkLabels := r.getSinkLabels()
@@ -1008,6 +1051,20 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		withEnv([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
+
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "sink"},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.SinkImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			}},
 		}).
 		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
 		build()
@@ -1026,6 +1083,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*container).
+		withAffinity(r.SinkAffinity).
 		build()
 
 	err := r.createDeployment(ctx, deployment)

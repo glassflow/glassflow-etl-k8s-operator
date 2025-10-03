@@ -21,8 +21,12 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: manager
     spec:
-      {{- with .Values.nodeSelector }}
+      {{- with .Values.controllerManager.manager.nodeSelector }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controllerManager.manager.affinity }}
+      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
@@ -38,35 +42,59 @@ spec:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         - name: INGESTOR_IMAGE
-          value: {{ .Values.componentImages.ingestor.repository }}:{{ .Values.componentImages.ingestor.tag }}
+          value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.ingestor.image.repository }}:{{ .Values.glassflowComponents.ingestor.image.tag }}"
         - name: JOIN_IMAGE
-          value: {{ .Values.componentImages.join.repository }}:{{ .Values.componentImages.join.tag }}
+          value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.join.image.repository }}:{{ .Values.glassflowComponents.join.image.tag }}"
         - name: SINK_IMAGE
-          value: {{ .Values.componentImages.sink.repository }}:{{ .Values.componentImages.sink.tag }}
+          value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.sink.image.repository }}:{{ .Values.glassflowComponents.sink.image.tag }}"
         - name: INGESTOR_CPU_REQUEST
-          value: {{ .Values.componentResources.ingestor.requests.cpu | quote }}
+          value: {{ .Values.glassflowComponents.ingestor.resources.requests.cpu | quote }}
         - name: INGESTOR_CPU_LIMIT
-          value: {{ .Values.componentResources.ingestor.limits.cpu | quote }}
+          value: {{ .Values.glassflowComponents.ingestor.resources.limits.cpu | quote }}
         - name: INGESTOR_MEMORY_REQUEST
-          value: {{ .Values.componentResources.ingestor.requests.memory | quote }}
+          value: {{ .Values.glassflowComponents.ingestor.resources.requests.memory | quote }}
         - name: INGESTOR_MEMORY_LIMIT
-          value: {{ .Values.componentResources.ingestor.limits.memory | quote }}
+          value: {{ .Values.glassflowComponents.ingestor.resources.limits.memory | quote }}
         - name: JOIN_CPU_REQUEST
-          value: {{ .Values.componentResources.join.requests.cpu | quote }}
+          value: {{ .Values.glassflowComponents.join.resources.requests.cpu | quote }}
         - name: JOIN_CPU_LIMIT
-          value: {{ .Values.componentResources.join.limits.cpu | quote }}
+          value: {{ .Values.glassflowComponents.join.resources.limits.cpu | quote }}
         - name: JOIN_MEMORY_REQUEST
-          value: {{ .Values.componentResources.join.requests.memory | quote }}
+          value: {{ .Values.glassflowComponents.join.resources.requests.memory | quote }}
         - name: JOIN_MEMORY_LIMIT
-          value: {{ .Values.componentResources.join.limits.memory | quote }}
+          value: {{ .Values.glassflowComponents.join.resources.limits.memory | quote }}
         - name: SINK_CPU_REQUEST
-          value: {{ .Values.componentResources.sink.requests.cpu | quote }}
+          value: {{ .Values.glassflowComponents.sink.resources.requests.cpu | quote }}
         - name: SINK_CPU_LIMIT
-          value: {{ .Values.componentResources.sink.limits.cpu | quote }}
+          value: {{ .Values.glassflowComponents.sink.resources.limits.cpu | quote }}
         - name: SINK_MEMORY_REQUEST
-          value: {{ .Values.componentResources.sink.requests.memory | quote }}
+          value: {{ .Values.glassflowComponents.sink.resources.requests.memory | quote }}
         - name: SINK_MEMORY_LIMIT
-          value: {{ .Values.componentResources.sink.limits.memory | quote }}
+          value: {{ .Values.glassflowComponents.sink.resources.limits.memory | quote }}
+        - name: INGESTOR_AFFINITY
+          value: {{ .Values.glassflowComponents.ingestor.affinity | toJson | quote }}
+        - name: JOIN_AFFINITY
+          value: {{ .Values.glassflowComponents.join.affinity | toJson | quote }}
+        - name: SINK_AFFINITY
+          value: {{ .Values.glassflowComponents.sink.affinity | toJson | quote }}
+        - name: OBSERVABILITY_LOGS_ENABLED
+          value: {{ .Values.global.observability.logs.enabled | quote }}
+        - name: OBSERVABILITY_METRICS_ENABLED
+          value: {{ .Values.global.observability.metrics.enabled | quote }}
+        - name: OBSERVABILITY_OTEL_ENDPOINT
+          value: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}.svc.cluster.local:4318"
+        - name: INGESTOR_LOG_LEVEL
+          value: {{ .Values.glassflowComponents.ingestor.logLevel | quote }}
+        - name: JOIN_LOG_LEVEL
+          value: {{ .Values.glassflowComponents.join.logLevel | quote }}
+        - name: SINK_LOG_LEVEL
+          value: {{ .Values.glassflowComponents.sink.logLevel | quote }}
+        - name: INGESTOR_IMAGE_TAG
+          value: {{ .Values.glassflowComponents.ingestor.image.tag | quote }}
+        - name: JOIN_IMAGE_TAG
+          value: {{ .Values.glassflowComponents.join.image.tag | quote }}
+        - name: SINK_IMAGE_TAG
+          value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:
