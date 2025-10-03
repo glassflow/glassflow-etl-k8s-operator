@@ -177,10 +177,10 @@ func main() {
 	var ingestorImageTag, joinImageTag, sinkImageTag string
 
 	flag.StringVar(&observabilityLogsEnabled, "observability-logs-enabled", getEnvOrDefault(
-		"OBSERVABILITY_LOGS_ENABLED", "true"),
+		"OBSERVABILITY_LOGS_ENABLED", "false"),
 		"Enable OpenTelemetry logs")
 	flag.StringVar(&observabilityMetricsEnabled, "observability-metrics-enabled", getEnvOrDefault(
-		"OBSERVABILITY_METRICS_ENABLED", "true"),
+		"OBSERVABILITY_METRICS_ENABLED", "false"),
 		"Enable OpenTelemetry metrics")
 	flag.StringVar(&observabilityOTelEndpoint, "observability-otel-endpoint", getEnvOrDefault(
 		"OBSERVABILITY_OTEL_ENDPOINT", "http://otel-collector.observability.svc.cluster.local:4318"),
