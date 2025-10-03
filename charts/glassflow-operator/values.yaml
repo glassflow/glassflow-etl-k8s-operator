@@ -31,7 +31,7 @@ kubernetesClusterDomain: cluster.local
 
 # Global configuration
 global:
-  # Image registry for all components 
+  # Image registry for all components
   imageRegistry: ""
   # Observability configuration
   observability:
