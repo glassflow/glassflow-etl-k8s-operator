@@ -7,7 +7,7 @@ global:
     logs:
       enabled: false
     metrics:
-      enabled: false      
+      enabled: false
 
 controllerManager:
   manager:
