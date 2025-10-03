@@ -1,3 +1,14 @@
+# Global configuration
+global:
+  # Image registry for all components
+  imageRegistry: "ghcr.io/glassflow/"
+  # Observability configuration
+  observability:
+    logs:
+      enabled: false
+    metrics:
+      enabled: false      
+
 controllerManager:
   manager:
     containerSecurityContext:
@@ -6,8 +17,8 @@ controllerManager:
         drop:
         - ALL
     image:
-      repository: ghcr.io/glassflow/glassflow-etl-k8s-operator
-      tag: v0.0.5
+      repository: glassflow-etl-k8s-operator
+      tag: v1.0.0
       pullPolicy: Always
     resources:
       limits:
@@ -29,26 +40,13 @@ controllerManager:
     annotations: {}
 kubernetesClusterDomain: cluster.local
 
-# Global configuration
-global:
-  # Image registry for all components
-  imageRegistry: ""
-  # Observability configuration
-  observability:
-    logs:
-      enabled: false
-    metrics:
-      enabled: false
-
-# Observability configuration -- set on the main chart at global level by the user
-
 # Glassflow components configuration
 glassflowComponents:
   ingestor:
     image:
-      repository: ghcr.io/glassflow/glassflow-etl-ingestor
+      repository: glassflow-etl-ingestor
       tag: stable
-    logLevel: "info"
+    logLevel: "INFO"
     resources:
       requests:
         cpu: 1000m
@@ -60,9 +58,9 @@ glassflowComponents:
     affinity: {}
   join:
     image:
-      repository: ghcr.io/glassflow/glassflow-etl-join
+      repository: glassflow-etl-join
       tag: stable
-    logLevel: "info"
+    logLevel: "INFO"
     resources:
       requests:
         cpu: 1000m
@@ -74,9 +72,9 @@ glassflowComponents:
     affinity: {}
   sink:
     image:
-      repository: ghcr.io/glassflow/glassflow-etl-sink
+      repository: glassflow-etl-sink
       tag: stable
-    logLevel: "info"
+    logLevel: "INFO"
     resources:
       requests:
         cpu: 1000m
