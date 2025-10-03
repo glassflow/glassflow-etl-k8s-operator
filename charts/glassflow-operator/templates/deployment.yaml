@@ -95,7 +95,7 @@ spec:
           value: {{ .Values.glassflowComponents.join.image.tag | quote }}
         - name: SINK_IMAGE_TAG
           value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
-        image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}
+        image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:
           httpGet:
