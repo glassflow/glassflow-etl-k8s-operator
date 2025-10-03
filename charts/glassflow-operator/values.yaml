@@ -29,6 +29,17 @@ controllerManager:
     annotations: {}
 kubernetesClusterDomain: cluster.local
 
+# Global configuration
+global:
+  # Image registry for all components 
+  imageRegistry: ""
+  # Observability configuration
+  observability:
+    logs:
+      enabled: false
+    metrics:
+      enabled: false
+
 # Observability configuration -- set on the main chart at global level by the user
 
 # Glassflow components configuration
