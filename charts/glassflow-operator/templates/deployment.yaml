@@ -95,6 +95,10 @@ spec:
           value: {{ .Values.glassflowComponents.join.image.tag | quote }}
         - name: SINK_IMAGE_TAG
           value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
+        - name: NATS_MAX_STREAM_AGE
+          value: {{ .Values.nats.stream.maxAge | quote }}
+        - name: NATS_MAX_STREAM_BYTES
+          value: {{ .Values.nats.stream.maxBytes | quote }}
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:

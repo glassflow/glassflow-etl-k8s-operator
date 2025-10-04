@@ -10,7 +10,8 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-const StreamMaxAge = 24 * time.Hour // 24 hours
+const DefaultStreamMaxAge = 168 * time.Hour       // 7 days
+const DefaultStreamMaxBytes = int64(107374182400) // 100GB
 
 // PipelineStatus represents the overall status of a pipeline
 type PipelineStatus string
@@ -51,11 +52,17 @@ type PipelineConfig struct {
 }
 
 type NATSClient struct {
-	nc *nats.Conn
-	js jetstream.JetStream
+	nc       *nats.Conn
+	js       jetstream.JetStream
+	maxAge   time.Duration
+	maxBytes int64
 }
 
 func New(url string) (*NATSClient, error) {
+	return NewWithStreamConfig(url, DefaultStreamMaxAge, DefaultStreamMaxBytes)
+}
+
+func NewWithStreamConfig(url string, maxAge time.Duration, maxBytes int64) (*NATSClient, error) {
 	nc, err := nats.Connect(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
@@ -67,8 +74,10 @@ func New(url string) (*NATSClient, error) {
 	}
 
 	return &NATSClient{
-		nc: nc,
-		js: js,
+		nc:       nc,
+		js:       js,
+		maxAge:   maxAge,
+		maxBytes: maxBytes,
 	}, nil
 }
 
@@ -80,7 +89,8 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 		Storage:  jetstream.FileStorage,
 
 		Retention: jetstream.LimitsPolicy,
-		MaxAge:    StreamMaxAge,
+		MaxAge:    n.maxAge,
+		MaxBytes:  n.maxBytes,
 		Discard:   jetstream.DiscardOld,
 	}
 
