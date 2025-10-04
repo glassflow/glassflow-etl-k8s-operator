@@ -32,7 +32,8 @@ func ParseBytes(s string) (int64, error) {
 	// Handle human-readable formats
 	s = strings.ToUpper(strings.TrimSpace(s))
 
-	var multiplier int64 = 1
+	var multiplier int64
+	multiplier = 1
 	var numStr string
 
 	if strings.HasSuffix(s, "KB") {
@@ -69,7 +70,8 @@ func ConvertBytesToString(bytesStr string) string {
 	// Handle human-readable formats
 	s := strings.ToUpper(strings.TrimSpace(bytesStr))
 
-	var multiplier int64 = 1
+	var multiplier int64
+	multiplier = 1
 	var numStr string
 
 	if strings.HasSuffix(s, "KB") {

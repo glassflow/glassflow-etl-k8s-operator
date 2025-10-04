@@ -339,13 +339,16 @@ func main() {
 	// Parse NATS stream configuration with fallback to defaults
 	maxAge, err := time.ParseDuration(natsMaxStreamAge)
 	if err != nil {
-		setupLog.Error(err, "unable to parse nats max stream age, using default", "value", natsMaxStreamAge, "default", "168h")
+		setupLog.Error(err,
+			"unable to parse nats max stream age, using default",
+			"value", natsMaxStreamAge, "default", "168h")
 		maxAge = 168 * time.Hour // 7 days default
 	}
 
 	maxBytes, err := utils.ParseBytes(natsMaxStreamBytes)
 	if err != nil {
-		setupLog.Error(err, "unable to parse nats max stream bytes, using default", "value", natsMaxStreamBytes, "default", "107374182400")
+		setupLog.Error(err, "unable to parse nats max stream bytes, using default",
+			"value", natsMaxStreamBytes, "default", "107374182400")
 		maxBytes = 107374182400 // 100GB default
 	}
 
