@@ -28,3 +28,6 @@ go.work
 
 # Generated chart
 generated
+
+# Go vendor directory
+vendor

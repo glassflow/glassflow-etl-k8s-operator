@@ -198,7 +198,7 @@ spec:
 | **Deduplication** | ✅ | Configurable time-window deduplication |
 | **Stream Joins** | ✅ | Multi-stream data joining |
 | **Auto-scaling** | ✅ | Horizontal pod autoscaling / ingestor replicas support |
-| **Monitoring** | ✅ | Prometheus metrics integration |
+| **Monitoring** | ✅ | OpenTelemetry integration for components |
 
 ## 🛠️ Development Setup
 
