@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -11,6 +12,15 @@ import (
 )
 
 const StreamMaxAge = 24 * time.Hour // 24 hours
+
+// NATS connection retry constants - similar to glassflow-api
+const (
+	NATSConnectionTimeout = 1 * time.Minute
+	NATSConnectionRetries = 12
+	NATSInitialRetryDelay = 1 * time.Second
+	NATSMaxRetryDelay     = 30 * time.Second
+	NATSMaxConnectionWait = 2 * time.Minute
+)
 
 // PipelineStatus represents the overall status of a pipeline
 type PipelineStatus string
@@ -56,7 +66,45 @@ type NATSClient struct {
 }
 
 func New(url string) (*NATSClient, error) {
-	nc, err := nats.Connect(url)
+	ctx := context.Background()
+	return NewWithContext(ctx, url)
+}
+
+func NewWithContext(ctx context.Context, url string) (*NATSClient, error) {
+	var (
+		nc  *nats.Conn
+		err error
+	)
+
+	connCtx, cancel := context.WithTimeout(ctx, NATSMaxConnectionWait)
+	defer cancel()
+
+	retryDelay := NATSInitialRetryDelay
+
+	for i := range NATSConnectionRetries {
+		select {
+		case <-connCtx.Done():
+			return nil, fmt.Errorf("timeout after %v waiting to connect to NATS at %s", NATSMaxConnectionWait, url)
+		default:
+		}
+
+		nc, err = nats.Connect(url, nats.Timeout(NATSConnectionTimeout))
+		if err == nil {
+			break
+		}
+
+		if i < NATSConnectionRetries-1 {
+			select {
+			case <-time.After(retryDelay):
+				log.Printf("Retrying connection to NATS to %s in %v...", url, retryDelay)
+				// Continue with retry
+			case <-connCtx.Done():
+				return nil, fmt.Errorf("timeout during retry delay for NATS at %s: %w", url, connCtx.Err())
+			}
+			// Exponential backoff
+			retryDelay = min(time.Duration(float64(retryDelay)*1.5), NATSMaxRetryDelay)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
