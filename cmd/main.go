@@ -76,7 +76,6 @@ func main() {
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	var natsAddr string
-	var natsComponentAddr string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -98,9 +97,7 @@ func main() {
 
 	// TODO: update nats default value based on namespace
 	flag.StringVar(&natsAddr, "nats-addr", "nats://nats.default.svc.cluster.local:4222",
-		"NATS server address for operator")
-	flag.StringVar(&natsComponentAddr, "nats-component-addr", "nats://nats.default.svc.cluster.local:4222",
-		"NATS server address for components")
+		"NATS server address for operator and components")
 
 	// NATS stream configuration
 	var natsMaxStreamAge, natsMaxStreamBytes string
@@ -362,7 +359,7 @@ func main() {
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),
 		NATSClient:                  natsClient,
-		ComponentNATSAddr:           natsComponentAddr,
+		ComponentNATSAddr:           natsAddr,
 		NATSMaxStreamAge:            natsMaxStreamAge,
 		NATSMaxStreamBytes:          natsMaxStreamBytes,
 		IngestorImage:               ingestorImage,

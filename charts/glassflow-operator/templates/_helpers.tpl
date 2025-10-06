@@ -72,13 +72,3 @@ Create the nats address
 {{- end }}
 {{- end }}
 
-{{/*
-Create the nats component address
-*/}}
-{{- define "glassflow-operator.natsComponentAddress" -}}
-{{- if .Values.nats.componentAddress }}
-{{- .Values.nats.componentAddress }}
-{{- else }}
-{{- printf "%s-nats.%s.svc.cluster.local" .Release.Name .Release.Namespace }}
-{{- end }}
-{{- end }}

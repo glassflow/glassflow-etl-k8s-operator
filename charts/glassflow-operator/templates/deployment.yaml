@@ -35,7 +35,6 @@ spec:
         - --leader-elect
         - --health-probe-bind-address=:8081
         - --nats-addr={{ include "glassflow-operator.natsAddress" . }}
-        - --nats-component-addr={{ include "glassflow-operator.natsComponentAddress" . }}
         command:
         - /manager
         env:
