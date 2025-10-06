@@ -98,5 +98,5 @@ nats:
   address: ""
   componentAddress: ""
   stream:
-    maxAge: "7d"
+    maxAge: "168h"
     maxBytes: "100GB"
