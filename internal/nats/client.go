@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -12,6 +13,15 @@ import (
 
 const DefaultStreamMaxAge = 168 * time.Hour       // 7 days
 const DefaultStreamMaxBytes = int64(107374182400) // 100GB
+
+// NATS connection retry constants - similar to glassflow-api
+const (
+	NATSConnectionTimeout = 1 * time.Minute
+	NATSConnectionRetries = 12
+	NATSInitialRetryDelay = 1 * time.Second
+	NATSMaxRetryDelay     = 30 * time.Second
+	NATSMaxConnectionWait = 2 * time.Minute
+)
 
 // PipelineStatus represents the overall status of a pipeline
 type PipelineStatus string
