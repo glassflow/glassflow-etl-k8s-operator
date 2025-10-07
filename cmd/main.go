@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -349,7 +350,8 @@ func main() {
 		maxBytes = 107374182400 // 100GB default
 	}
 
-	natsClient, err := nats.NewWithStreamConfig(natsAddr, maxAge, maxBytes)
+	ctx := context.Background()
+	natsClient, err := nats.New(ctx, natsAddr, maxAge, maxBytes)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to nats")
 		os.Exit(1)

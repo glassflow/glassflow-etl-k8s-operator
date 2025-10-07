@@ -68,12 +68,41 @@ type NATSClient struct {
 	maxBytes int64
 }
 
-func New(url string) (*NATSClient, error) {
-	return NewWithStreamConfig(url, DefaultStreamMaxAge, DefaultStreamMaxBytes)
-}
+func New(ctx context.Context, url string, maxAge time.Duration, maxBytes int64) (*NATSClient, error) {
+	var (
+		nc  *nats.Conn
+		err error
+	)
 
-func NewWithStreamConfig(url string, maxAge time.Duration, maxBytes int64) (*NATSClient, error) {
-	nc, err := nats.Connect(url)
+	connCtx, cancel := context.WithTimeout(ctx, NATSMaxConnectionWait)
+	defer cancel()
+
+	retryDelay := NATSInitialRetryDelay
+
+	for i := range NATSConnectionRetries {
+		select {
+		case <-connCtx.Done():
+			return nil, fmt.Errorf("timeout after %v waiting to connect to NATS at %s", NATSMaxConnectionWait, url)
+		default:
+		}
+
+		nc, err = nats.Connect(url, nats.Timeout(NATSConnectionTimeout))
+		if err == nil {
+			break
+		}
+
+		if i < NATSConnectionRetries-1 {
+			select {
+			case <-time.After(retryDelay):
+				log.Printf("Retrying connection to NATS to %s in %v...", url, retryDelay)
+				// Continue with retry
+			case <-connCtx.Done():
+				return nil, fmt.Errorf("timeout during retry delay for NATS at %s: %w", url, connCtx.Err())
+			}
+			// Exponential backoff
+			retryDelay = min(time.Duration(float64(retryDelay)*1.5), NATSMaxRetryDelay)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
