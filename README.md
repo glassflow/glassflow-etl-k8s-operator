@@ -145,6 +145,22 @@ Deploy just the operator as a dependency:
 helm install glassflow-operator glassflow/glassflow-operator
 ```
 
+### Uninstalling the Operator
+
+The operator includes automatic cleanup functionality that ensures all pipelines are immediately terminated when uninstalling:
+
+```bash
+helm uninstall glassflow-operator
+```
+
+This will:
+- ✅ Terminate all existing pipelines ungracefully
+- ✅ Clean up all resources (namespaces, deployments, NATS streams)
+- ✅ Remove Pipeline CRD definitions
+- ✅ Remove the operator deployment
+
+For more details, see [HELM_UNINSTALL.md](HELM_UNINSTALL.md).
+
 ### Option 3: Manual Installation
 
 ```bash
@@ -199,6 +215,7 @@ spec:
 | **Stream Joins** | ✅ | Multi-stream data joining |
 | **Auto-scaling** | ✅ | Horizontal pod autoscaling / ingestor replicas support |
 | **Monitoring** | ✅ | Prometheus metrics integration |
+| **Helm Uninstall Cleanup** | ✅ | Automatic pipeline termination and CRD cleanup on uninstall |
 
 ## 🛠️ Development Setup
 

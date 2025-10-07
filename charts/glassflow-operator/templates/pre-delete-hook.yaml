@@ -1,0 +1,155 @@
+{{/*
+Helm pre-delete hook to terminate all pipelines before operator shutdown.
+This hook runs before the operator is terminated and annotates all existing
+Pipeline CRDs with the helm-uninstall annotation for graceful termination.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "glassflow-operator.fullname" . }}-pre-delete-hook
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-timeout": "600"  # 10 minutes timeout
+  labels:
+    {{- include "glassflow-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pre-delete-hook
+spec:
+  ttlSecondsAfterFinished: 300  # Clean up job after 5 minutes
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "glassflow-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: pre-delete-hook
+    spec:
+      serviceAccountName: {{ .Release.Name }}-controller-manager
+      restartPolicy: Never
+      containers:
+      - name: pre-delete-hook
+        image: bitnami/kubectl:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Starting Helm pre-delete hook for GlassFlow operator..."
+          
+          # Function to annotate all pipelines with helm-uninstall annotation
+          annotate_pipelines() {
+            echo "Looking for existing Pipeline CRDs..."
+            
+            # Get all Pipeline CRDs
+            PIPELINES=$(kubectl get pipelines.etl.glassflow.io --all-namespaces -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+            
+            if [ -z "$PIPELINES" ]; then
+              echo "No Pipeline CRDs found. Nothing to terminate."
+              return 0
+            fi
+            
+            echo "Found Pipeline CRDs: $PIPELINES"
+            
+            # Annotate each pipeline with helm-uninstall annotation
+            for pipeline in $PIPELINES; do
+              echo "Annotating pipeline: $pipeline"
+              kubectl annotate pipeline.etl.glassflow.io "$pipeline" pipeline.etl.glassflow.io/helm-uninstall="true" --overwrite || {
+                echo "Warning: Failed to annotate pipeline $pipeline"
+              }
+            done
+            
+            echo "All pipelines annotated for helm uninstall"
+          }
+          
+          # Function to wait for pipelines to be terminated (BLOCKS until complete)
+          wait_for_termination() {
+            echo "Waiting for all pipelines to be terminated..."
+            local max_attempts=60  # 10 minutes with 10 second intervals
+            local attempt=0
+            
+            while [ $attempt -lt $max_attempts ]; do
+              # Check if any pipelines still exist
+              REMAINING_PIPELINES=$(kubectl get pipelines.etl.glassflow.io --all-namespaces -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+              
+              if [ -z "$REMAINING_PIPELINES" ]; then
+                echo "All pipelines terminated successfully"
+                return 0
+              fi
+              
+              echo "Waiting for pipelines to terminate: $REMAINING_PIPELINES"
+              sleep 10
+              attempt=$((attempt + 1))
+            done
+            
+            echo "TIMEOUT: Some pipelines were not terminated within the timeout period"
+            echo "Remaining pipelines: $REMAINING_PIPELINES"
+            return 1
+          }
+          
+          # Function to delete CRD definition
+          delete_crd_definition() {
+            echo "Deleting Pipeline CRD definition..."
+            kubectl delete crd pipelines.etl.glassflow.io --ignore-not-found=true || {
+              echo "Warning: Failed to delete Pipeline CRD definition"
+            }
+            echo "Pipeline CRD definition deletion attempted"
+          }
+          
+          # Function to add finalizer to operator deployment to prevent deletion
+          protect_operator_deployment() {
+            echo "Protecting operator deployment from premature shutdown..."
+            
+            local operator_deployment_name="{{ .Release.Name }}-controller-manager"
+            local operator_namespace="{{ .Release.Namespace }}"
+            local operator_deployment="deployment/$operator_deployment_name"
+            
+            kubectl patch "$operator_deployment" -n "$operator_namespace" --type=merge -p='{"metadata":{"finalizers":["helm-pre-delete-hook.glassflow.io/cleanup"]}}' || {
+              echo "Warning: Failed to add finalizer to operator deployment"
+            }
+          }
+          
+          # Function to remove finalizer from operator deployment
+          unprotect_operator_deployment() {
+            echo "Removing finalizer from operator deployment to allow shutdown..."
+            
+            local operator_deployment_name="{{ .Release.Name }}-controller-manager"
+            local operator_namespace="{{ .Release.Namespace }}"
+            local operator_deployment="deployment/$operator_deployment_name"
+            
+            kubectl patch "$operator_deployment" -n "$operator_namespace" --type=merge -p='{"metadata":{"finalizers":[]}}' || {
+              echo "Warning: Failed to remove finalizer from operator deployment"
+            }
+          }
+          
+          # Main execution
+          echo "=== Helm Pre-Delete Hook Started ==="
+          
+          # Step 1: Protect operator deployment from deletion
+          protect_operator_deployment
+          
+          # Step 2: Annotate all pipelines for termination
+          annotate_pipelines
+          
+          # Step 3: Wait for operator to terminate all pipelines (BLOCKS here)
+          wait_for_termination
+          
+          # Step 4: Remove protection from operator deployment
+          unprotect_operator_deployment
+          
+          # Step 5: Delete the CRD definition
+          delete_crd_definition
+          
+          echo "=== Helm Pre-Delete Hook Completed ==="
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      {{- with .Values.controllerManager.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
