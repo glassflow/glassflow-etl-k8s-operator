@@ -453,6 +453,17 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		// Don't return error here - we're in force cleanup mode
 	}
 
+	// Clean up pipeline configuration from NATS KV store
+	if r.NATSClient != nil {
+		err = r.NATSClient.DeletePipeline(ctx, p.Spec.ID)
+		if err != nil {
+			log.Info("failed to delete pipeline configuration from NATS KV store", "pipeline_id", p.Spec.ID)
+			// Don't return error here - we're in force cleanup mode
+		} else {
+			log.Info("successfully deleted pipeline configuration from NATS KV store", "pipeline_id", p.Spec.ID)
+		}
+	}
+
 	// Remove all pipeline operation annotations
 	annotations := p.GetAnnotations()
 	if annotations != nil {
