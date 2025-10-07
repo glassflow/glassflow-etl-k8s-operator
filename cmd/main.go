@@ -71,7 +71,7 @@ func main() {
 	var probeAddr string
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	var natsAddr string
+	var natsAddr, natsOperatorAddr string
 
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -83,9 +83,17 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the webhook server")
 
-	// TODO: update nats default value based on namespace
 	flag.StringVar(&natsAddr, "nats-addr", "nats://nats.default.svc.cluster.local:4222",
 		"NATS server address for operator and components")
+
+	// useful in development environment
+
+	flag.StringVar(&natsOperatorAddr, "nats-op-addr", "",
+		"NATS server address for operator and components")
+
+	if natsOperatorAddr == "" {
+		natsOperatorAddr = natsAddr
+	}
 
 	// NATS stream configuration
 	var natsMaxStreamAge, natsMaxStreamBytes string
@@ -292,7 +300,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	natsClient, err := nats.New(ctx, natsAddr, maxAge, maxBytes)
+	natsClient, err := nats.New(ctx, natsOperatorAddr, maxAge, maxBytes)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to nats")
 		os.Exit(1)
