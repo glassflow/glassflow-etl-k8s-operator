@@ -44,7 +44,7 @@ var _ = Describe("Pipeline Controller", func() {
 		}
 		pipeline := &etlv1alpha1.Pipeline{}
 
-		nc, err := nats.New("http://localhost:4222")
+		nc, err := nats.New(ctx, "http://localhost:4222", nats.DefaultStreamMaxAge, nats.DefaultStreamMaxBytes)
 		Expect(err).NotTo(HaveOccurred())
 
 		BeforeEach(func() {

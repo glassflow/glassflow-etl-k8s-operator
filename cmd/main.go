@@ -17,10 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -40,6 +42,7 @@ import (
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -74,7 +77,6 @@ func main() {
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	var natsAddr string
-	var natsComponentAddr string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -96,9 +98,16 @@ func main() {
 
 	// TODO: update nats default value based on namespace
 	flag.StringVar(&natsAddr, "nats-addr", "nats://nats.default.svc.cluster.local:4222",
-		"NATS server address for operator")
-	flag.StringVar(&natsComponentAddr, "nats-component-addr", "nats://nats.default.svc.cluster.local:4222",
-		"NATS server address for components")
+		"NATS server address for operator and components")
+
+	// NATS stream configuration
+	var natsMaxStreamAge, natsMaxStreamBytes string
+	flag.StringVar(&natsMaxStreamAge, "nats-max-stream-age", getEnvOrDefault(
+		"NATS_MAX_STREAM_AGE", "168h"),
+		"Maximum age for NATS streams (default: 7 days)")
+	flag.StringVar(&natsMaxStreamBytes, "nats-max-stream-bytes", getEnvOrDefault(
+		"NATS_MAX_STREAM_BYTES", "107374182400"),
+		"Maximum bytes for NATS streams (default: 100GB)")
 
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage string
@@ -325,7 +334,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	natsClient, err := nats.New(natsAddr)
+	// Parse NATS stream configuration with fallback to defaults
+	maxAge, err := time.ParseDuration(natsMaxStreamAge)
+	if err != nil {
+		setupLog.Error(err,
+			"unable to parse nats max stream age, using default",
+			"value", natsMaxStreamAge, "default", "168h")
+		maxAge = 168 * time.Hour // 7 days default
+	}
+
+	maxBytes, err := utils.ParseBytes(natsMaxStreamBytes)
+	if err != nil {
+		setupLog.Error(err, "unable to parse nats max stream bytes, using default",
+			"value", natsMaxStreamBytes, "default", "107374182400")
+		maxBytes = 107374182400 // 100GB default
+	}
+
+	ctx := context.Background()
+	natsClient, err := nats.New(ctx, natsAddr, maxAge, maxBytes)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to nats")
 		os.Exit(1)
@@ -335,7 +361,9 @@ func main() {
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),
 		NATSClient:                  natsClient,
-		ComponentNATSAddr:           natsComponentAddr,
+		ComponentNATSAddr:           natsAddr,
+		NATSMaxStreamAge:            natsMaxStreamAge,
+		NATSMaxStreamBytes:          natsMaxStreamBytes,
 		IngestorImage:               ingestorImage,
 		JoinImage:                   joinImage,
 		SinkImage:                   sinkImage,

@@ -96,4 +96,6 @@ metricsService:
 
 nats:
   address: ""
-  componentAddress: ""
+  stream:
+    maxAge: "168h"
+    maxBytes: "100GB"
