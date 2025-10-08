@@ -76,7 +76,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	var natsAddr string
+	var natsAddr, natsOpAddr string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -99,6 +99,13 @@ func main() {
 	// TODO: update nats default value based on namespace
 	flag.StringVar(&natsAddr, "nats-addr", "nats://nats.default.svc.cluster.local:4222",
 		"NATS server address for operator and components")
+
+	// useful for development to run operator outside of the cluster
+	flag.StringVar(&natsOpAddr, "nats-op-addr", "",
+		"NATS server address for operator and components")
+	if natsOpAddr == "" {
+		natsOpAddr = natsAddr
+	}
 
 	// NATS stream configuration
 	var natsMaxStreamAge, natsMaxStreamBytes string
@@ -351,7 +358,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	natsClient, err := nats.New(ctx, natsAddr, maxAge, maxBytes)
+	natsClient, err := nats.New(ctx, natsOpAddr, maxAge, maxBytes)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to nats")
 		os.Exit(1)
