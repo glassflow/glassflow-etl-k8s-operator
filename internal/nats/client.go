@@ -261,3 +261,18 @@ func (n *NATSClient) GetPipelineConfig(ctx context.Context, pipelineID string) (
 
 	return &pipelineConfig, nil
 }
+
+// DeletePipeline removes a pipeline configuration from NATS KV store
+func (n *NATSClient) DeletePipeline(ctx context.Context, pipelineID string) error {
+	kv, err := n.JetStream().KeyValue(ctx, "glassflow-pipelines")
+	if err != nil {
+		return fmt.Errorf("failed to get glassflow pipelines key-value store: %w", err)
+	}
+
+	err = kv.Delete(ctx, pipelineID)
+	if err != nil {
+		return fmt.Errorf("failed to delete pipeline %s from KV store: %w", pipelineID, err)
+	}
+
+	return nil
+}

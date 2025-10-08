@@ -47,12 +47,13 @@ import (
 
 const (
 	// PipelineFinalizerName is the name of the finalizer added to Pipeline resources
-	PipelineFinalizerName       = "pipeline.etl.glassflow.io/finalizer"
-	PipelineCreateAnnotation    = "pipeline.etl.glassflow.io/create"
-	PipelinePauseAnnotation     = "pipeline.etl.glassflow.io/pause"
-	PipelineResumeAnnotation    = "pipeline.etl.glassflow.io/resume"
-	PipelineStopAnnotation      = "pipeline.etl.glassflow.io/stop"
-	PipelineTerminateAnnotation = "pipeline.etl.glassflow.io/terminate"
+	PipelineFinalizerName           = "pipeline.etl.glassflow.io/finalizer"
+	PipelineCreateAnnotation        = "pipeline.etl.glassflow.io/create"
+	PipelinePauseAnnotation         = "pipeline.etl.glassflow.io/pause"
+	PipelineResumeAnnotation        = "pipeline.etl.glassflow.io/resume"
+	PipelineStopAnnotation          = "pipeline.etl.glassflow.io/stop"
+	PipelineTerminateAnnotation     = "pipeline.etl.glassflow.io/terminate"
+	PipelineHelmUninstallAnnotation = "pipeline.etl.glassflow.io/helm-uninstall"
 )
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -172,9 +173,12 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		// Determine which operation to perform based on annotations
-		// Terminate has highest priority to handle stuck pipelines
+		// Helm uninstall has highest priority - it interrupts any ongoing operation
 		var operation string
-		if _, hasTerminate := annotations[PipelineTerminateAnnotation]; hasTerminate {
+		if _, hasHelmUninstall := annotations[PipelineHelmUninstallAnnotation]; hasHelmUninstall {
+			operation = "helm-uninstall"
+			log.Info("HELM UNINSTALL detected - interrupting any ongoing operations", "pipeline_id", p.Spec.ID)
+		} else if _, hasTerminate := annotations[PipelineTerminateAnnotation]; hasTerminate {
 			operation = "terminate"
 		} else if _, hasCreate := annotations[PipelineCreateAnnotation]; hasCreate {
 			operation = "create"
@@ -188,6 +192,8 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		// Execute the appropriate operation
 		switch operation {
+		case "helm-uninstall":
+			return r.reconcileHelmUninstall(ctx, log, p)
 		case "create":
 			return r.createPipeline(ctx, p)
 		case "pause":
@@ -397,6 +403,101 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	}
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log.Info("reconciling pipeline helm uninstall - FORCING cleanup regardless of current status", "pipeline_id", p.Spec.ID, "current_status", p.Status)
+
+	// FORCE cleanup regardless of current status - this is helm uninstall!
+	log.Info("HELM UNINSTALL: Forcing immediate cleanup of pipeline", "pipeline_id", p.Spec.ID)
+
+	// Check if pipeline is already terminated
+	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusTerminated) {
+		log.Info("pipeline already terminated during helm uninstall", "pipeline_id", p.Spec.ID)
+		// Remove helm uninstall annotation and finalizer to allow cleanup
+		annotations := p.GetAnnotations()
+		if annotations != nil {
+			delete(annotations, PipelineHelmUninstallAnnotation)
+			p.SetAnnotations(annotations)
+			err := r.Update(ctx, &p)
+			if err != nil {
+				log.Error(err, "failed to remove helm uninstall annotation", "pipeline_id", p.Spec.ID)
+			}
+		}
+		err := r.removeFinalizer(ctx, &p)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+		}
+		err = r.Delete(ctx, &p)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// FORCE cleanup - skip normal termination process for helm uninstall
+	log.Info("HELM UNINSTALL: Force deleting pipeline namespace and resources", "pipeline_id", p.Spec.ID)
+
+	// Force delete namespace for this pipeline (this will delete all deployments)
+	err := r.deleteNamespace(ctx, log, p)
+	if err != nil {
+		log.Error(err, "failed to delete pipeline namespace during helm uninstall", "pipeline_id", p.Spec.ID)
+		// Continue anyway - we're in force cleanup mode
+	}
+
+	// Clean up NATS streams but keep the pipeline configuration
+	err = r.cleanupNATSPipelineStreams(ctx, log, p)
+	if err != nil {
+		log.Info("failed to cleanup NATS resources during helm uninstall", "pipeline_id", p.Spec.ID)
+		// Don't return error here - we're in force cleanup mode
+	}
+
+	// Clean up pipeline configuration from NATS KV store
+	if r.NATSClient != nil {
+		err = r.NATSClient.DeletePipeline(ctx, p.Spec.ID)
+		if err != nil {
+			log.Info("failed to delete pipeline configuration from NATS KV store", "pipeline_id", p.Spec.ID)
+			// Don't return error here - we're in force cleanup mode
+		} else {
+			log.Info("successfully deleted pipeline configuration from NATS KV store", "pipeline_id", p.Spec.ID)
+		}
+	}
+
+	// Remove all pipeline operation annotations
+	annotations := p.GetAnnotations()
+	if annotations != nil {
+		// Remove all pipeline operation annotations
+		for _, annotation := range []string{
+			PipelineHelmUninstallAnnotation,
+			PipelineCreateAnnotation,
+			PipelineTerminateAnnotation,
+			PipelineStopAnnotation,
+			PipelinePauseAnnotation,
+			PipelineResumeAnnotation,
+		} {
+			delete(annotations, annotation)
+		}
+		p.SetAnnotations(annotations)
+		err = r.Update(ctx, &p)
+		if err != nil {
+			log.Error(err, "failed to remove annotations during helm uninstall", "pipeline_id", p.Spec.ID)
+		}
+	}
+
+	// Remove finalizer
+	err = r.removeFinalizer(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+
+	// Delete the pipeline CRD
+	err = r.Delete(ctx, &p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
+	}
+
+	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
