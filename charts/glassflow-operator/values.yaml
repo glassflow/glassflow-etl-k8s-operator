@@ -85,8 +85,6 @@ glassflowComponents:
     # Node affinity for sink component (optional)
     affinity: {}
 
-
-
 nats:
   address: ""
   stream:
