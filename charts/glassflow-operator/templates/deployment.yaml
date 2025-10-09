@@ -32,11 +32,16 @@ spec:
       containers:
       - args:
         - --leader-elect
-        - --health-probe-bind-address=:8081
-        - --nats-addr={{ include "glassflow-operator.natsAddress" . }}
+        - --health-probe-bind-address=:8081        
         command:
         - /manager
         env:
+        - name: NATS_ADDR
+          value: "{{ .Values.global.nats.address | default (printf "nats://%s-nats.%s.svc.cluster.local:4222" .Release.Name .Release.Namespace) }}"
+        - name: NATS_MAX_STREAM_AGE
+          value: "{{ .Values.global.nats.stream.maxAge }}"
+        - name: NATS_MAX_STREAM_BYTES
+          value: "{{ .Values.global.nats.stream.maxBytes }}"
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         - name: INGESTOR_IMAGE
@@ -93,10 +98,6 @@ spec:
           value: {{ .Values.glassflowComponents.join.image.tag | quote }}
         - name: SINK_IMAGE_TAG
           value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
-        - name: NATS_MAX_STREAM_AGE
-          value: {{ .Values.nats.stream.maxAge | quote }}
-        - name: NATS_MAX_STREAM_BYTES
-          value: {{ .Values.nats.stream.maxBytes | quote }}
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:

@@ -71,8 +71,6 @@ func main() {
 	var probeAddr string
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	var natsAddr, natsOperatorAddr string
-
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -83,13 +81,14 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the webhook server")
 
-	flag.StringVar(&natsAddr, "nats-addr", "nats://nats.default.svc.cluster.local:4222",
+	// NATS address configuration
+	var natsAddr, natsOperatorAddr string
+	flag.StringVar(&natsAddr, "nats-addr", getEnvOrDefault(
+		"NATS_ADDR", "nats://nats.default.svc.cluster.local:4222"),
 		"NATS server address for operator and components")
-
-	// useful in development environment
-
-	flag.StringVar(&natsOperatorAddr, "nats-op-addr", "",
-		"NATS server address for operator and components")
+	flag.StringVar(&natsOperatorAddr, "nats-op-addr", getEnvOrDefault(
+		"NATS_OP_ADDR", ""),
+		"NATS server address for operator (defaults to nats-addr)")
 
 	if natsOperatorAddr == "" {
 		natsOperatorAddr = natsAddr
