@@ -32,11 +32,12 @@ spec:
       containers:
       - args:
         - --leader-elect
-        - --health-probe-bind-address=:8081
-        - --nats-addr={{ include "glassflow-operator.natsAddress" . }}
+        - --health-probe-bind-address=:8081        
         command:
         - /manager
         env:
+        - name: NATS_ADDR
+          value: {{ .Values.nats.address | default (printf "nats://%s-nats.%s.svc.cluster.local:4222" .Release.Name .Release.Namespace) }}
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         - name: INGESTOR_IMAGE
