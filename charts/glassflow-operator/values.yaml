@@ -38,6 +38,18 @@ controllerManager:
   replicas: 1
   serviceAccount:
     annotations: {}
+  env:
+    # NATS stream configuration
+    # Supported variables:
+    # - NATS_MAX_STREAM_AGE: 
+    # - NATS_MAX_STREAM_BYTES: 
+    # - NATS_ADDR    
+    - name: NATS_MAX_STREAM_AGE
+      value: "168h"
+    - name: NATS_MAX_STREAM_BYTES
+      value: "100GB"
+
+      
 kubernetesClusterDomain: cluster.local
 
 # Glassflow components configuration
@@ -85,8 +97,3 @@ glassflowComponents:
     # Node affinity for sink component (optional)
     affinity: {}
 
-nats:
-  address: ""
-  stream:
-    maxAge: "168h"
-    maxBytes: "100GB"

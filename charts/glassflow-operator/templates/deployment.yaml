@@ -37,7 +37,11 @@ spec:
         - /manager
         env:
         - name: NATS_ADDR
-          value: {{ .Values.nats.address | default (printf "nats://%s-nats.%s.svc.cluster.local:4222" .Release.Name .Release.Namespace) }}
+          value: "nats://{{ .Release.Name }}-nats.{{ .Release.Namespace }}.svc.cluster.local:4222"
+        - name: NATS_MAX_STREAM_AGE
+          value: "168h"
+        - name: NATS_MAX_STREAM_BYTES
+          value: "100GB"
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         - name: INGESTOR_IMAGE
@@ -93,11 +97,11 @@ spec:
         - name: JOIN_IMAGE_TAG
           value: {{ .Values.glassflowComponents.join.image.tag | quote }}
         - name: SINK_IMAGE_TAG
-          value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
-        - name: NATS_MAX_STREAM_AGE
-          value: {{ .Values.nats.stream.maxAge | quote }}
-        - name: NATS_MAX_STREAM_BYTES
-          value: {{ .Values.nats.stream.maxBytes | quote }}
+          value: {{ .Values.glassflowComponents.sink.image.tag | quote }}        
+        {{- range .Values.controllerManager.manager.env }}
+          - name: {{ .name | quote }}
+            value: {{ .value | quote }}
+        {{- end }}
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:
