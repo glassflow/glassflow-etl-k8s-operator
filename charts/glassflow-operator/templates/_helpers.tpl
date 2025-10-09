@@ -60,15 +60,3 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
-
-{{/*
-Create the nats address
-*/}}
-{{- define "glassflow-operator.natsAddress" -}}
-{{- if .Values.nats.address }}
-{{- .Values.nats.address }}
-{{- else }}
-{{- printf "%s-nats.%s.svc.cluster.local" .Release.Name .Release.Namespace }}
-{{- end }}
-{{- end }}
-

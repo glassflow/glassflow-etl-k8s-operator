@@ -8,6 +8,11 @@ global:
       enabled: false
     metrics:
       enabled: false
+  nats:
+#    address: "localhost:4222"
+    stream:
+      maxAge: 168h
+      maxBytes: 100GB
 
 controllerManager:
   manager:
@@ -18,7 +23,7 @@ controllerManager:
         - ALL
     image:
       repository: glassflow-etl-k8s-operator
-      tag: v1.2.0
+      tag: v1.2.1
       pullPolicy: Always
     resources:
       limits:
@@ -84,9 +89,3 @@ glassflowComponents:
         memory: 1.5Gi
     # Node affinity for sink component (optional)
     affinity: {}
-
-nats:
-  address: ""
-  stream:
-    maxAge: "168h"
-    maxBytes: "100GB"
