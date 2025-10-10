@@ -123,9 +123,10 @@ func New(ctx context.Context, url string, maxAge time.Duration, maxBytes int64) 
 func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedupWindow time.Duration) error {
 	//nolint:exhaustruct // readability
 	sc := jetstream.StreamConfig{
-		Name:     name,
-		Subjects: []string{name + ".*"},
-		Storage:  jetstream.FileStorage,
+		Name:               name,
+		Subjects:           []string{name + ".*"},
+		Storage:            jetstream.FileStorage,
+		AllowAtomicPublish: true,
 
 		Retention: jetstream.LimitsPolicy,
 		MaxAge:    n.maxAge,
