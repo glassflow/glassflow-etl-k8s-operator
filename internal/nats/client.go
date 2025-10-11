@@ -30,8 +30,6 @@ type PipelineStatus string
 const (
 	PipelineStatusCreated     PipelineStatus = "Created"
 	PipelineStatusRunning     PipelineStatus = "Running"
-	PipelineStatusPausing     PipelineStatus = "Pausing"
-	PipelineStatusPaused      PipelineStatus = "Paused"
 	PipelineStatusResuming    PipelineStatus = "Resuming"
 	PipelineStatusStopping    PipelineStatus = "Stopping"
 	PipelineStatusStopped     PipelineStatus = "Stopped"

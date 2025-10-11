@@ -39,7 +39,6 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/status"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 )
 
@@ -49,7 +48,6 @@ const (
 	// PipelineFinalizerName is the name of the finalizer added to Pipeline resources
 	PipelineFinalizerName           = "pipeline.etl.glassflow.io/finalizer"
 	PipelineCreateAnnotation        = "pipeline.etl.glassflow.io/create"
-	PipelinePauseAnnotation         = "pipeline.etl.glassflow.io/pause"
 	PipelineResumeAnnotation        = "pipeline.etl.glassflow.io/resume"
 	PipelineStopAnnotation          = "pipeline.etl.glassflow.io/stop"
 	PipelineTerminateAnnotation     = "pipeline.etl.glassflow.io/terminate"
@@ -184,8 +182,6 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			operation = "create"
 		} else if _, hasStop := annotations[PipelineStopAnnotation]; hasStop {
 			operation = "stop"
-		} else if _, hasPause := annotations[PipelinePauseAnnotation]; hasPause {
-			operation = "pause"
 		} else if _, hasResume := annotations[PipelineResumeAnnotation]; hasResume {
 			operation = "resume"
 		}
@@ -196,8 +192,6 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return r.reconcileHelmUninstall(ctx, log, p)
 		case "create":
 			return r.createPipeline(ctx, p)
-		case "pause":
-			return r.reconcilePause(ctx, log, p)
 		case "resume":
 			return r.reconcileResume(ctx, log, p)
 		case "stop":
@@ -473,7 +467,6 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 			PipelineCreateAnnotation,
 			PipelineTerminateAnnotation,
 			PipelineStopAnnotation,
-			PipelinePauseAnnotation,
 			PipelineResumeAnnotation,
 		} {
 			delete(annotations, annotation)
@@ -666,57 +659,6 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 	}
 
 	// All deployments are deleted
-	return ctrl.Result{}, nil
-}
-
-func (r *PipelineReconciler) reconcilePause(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	log.Info("reconciling pipeline pause", "pipeline_id", p.Spec.ID)
-
-	// Check if pipeline is already paused or pausing
-	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPaused) {
-		log.Info("pipeline already paused", "pipeline_id", p.Spec.ID)
-		return ctrl.Result{}, nil
-	}
-	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusPausing) {
-		log.Info("pipeline is already being paused", "pipeline_id", p.Spec.ID)
-		// Continue with the pause process
-	} else {
-		// Transition to Pausing status first
-		err := r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusPausing)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("update pipeline status to pausing: %w", err)
-		}
-		// Requeue to continue with the pause process
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
-
-	// Stop all pipeline components
-	result, err := r.stopPipelineComponents(ctx, log, p)
-	if err != nil {
-		return result, err
-	}
-	if result.Requeue {
-		return result, nil
-	}
-
-	// All deployments are deleted, update status to Paused
-	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusPaused)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("update pipeline status to paused: %w", err)
-	}
-
-	// Remove pause annotation
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, PipelinePauseAnnotation)
-		p.SetAnnotations(annotations)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove pause annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	log.Info("pipeline pause completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
@@ -1413,15 +1355,9 @@ func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *a
 	return nil
 }
 
-// updatePipelineStatus updates both NATS KV and CRD status with validation
+// updatePipelineStatus updates both NATS KV and CRD status (validation handled by backend API)
 func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus nats.PipelineStatus) error {
-	// Validate status transition
-	currentStatus := nats.PipelineStatus(p.Status)
-	err := status.ValidateStatusTransition(currentStatus, newStatus)
-	if err != nil {
-		log.Error(err, "invalid status transition", "pipeline_id", p.Spec.ID, "from", currentStatus, "to", newStatus)
-		return fmt.Errorf("invalid status transition from %s to %s: %w", currentStatus, newStatus, err)
-	}
+	// Status validation is now handled by the backend API, so we trust the status update
 
 	// Update NATS KV store status
 	if r.NATSClient != nil {
@@ -1436,12 +1372,12 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 
 	// Update CRD status
 	p.Status = etlv1alpha1.PipelineStatus(newStatus)
-	err = r.Status().Update(ctx, p, &client.SubResourceUpdateOptions{})
+	err := r.Status().Update(ctx, p, &client.SubResourceUpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("update pipeline CRD status: %w", err)
 	}
 
-	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "from", currentStatus, "to", newStatus)
+	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "to", newStatus)
 	return nil
 }
 
