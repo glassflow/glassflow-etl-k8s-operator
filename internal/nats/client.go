@@ -34,7 +34,6 @@ const (
 	PipelineStatusStopping    PipelineStatus = "Stopping"
 	PipelineStatusStopped     PipelineStatus = "Stopped"
 	PipelineStatusTerminating PipelineStatus = "Terminating"
-	PipelineStatusTerminated  PipelineStatus = "Terminated"
 	PipelineStatusFailed      PipelineStatus = "Failed"
 )
 
