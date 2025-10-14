@@ -354,7 +354,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	}
 
 	// Stop all pipeline components
-	result, err := r.stopPipelineComponents(ctx, log, p)
+	result, err := r.terminatePipelineComponents(ctx, log, p)
 	if err != nil || result.Requeue {
 		return result, err
 	}
