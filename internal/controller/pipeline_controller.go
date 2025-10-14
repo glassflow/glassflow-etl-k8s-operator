@@ -52,6 +52,7 @@ const (
 	PipelineStopAnnotation          = "pipeline.etl.glassflow.io/stop"
 	PipelineTerminateAnnotation     = "pipeline.etl.glassflow.io/terminate"
 	PipelineDeleteAnnotation        = "pipeline.etl.glassflow.io/delete"
+	PipelineEditAnnotation          = "pipeline.etl.glassflow.io/edit"
 	PipelineHelmUninstallAnnotation = "pipeline.etl.glassflow.io/helm-uninstall"
 )
 
@@ -187,6 +188,8 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			operation = "stop"
 		} else if _, hasResume := annotations[PipelineResumeAnnotation]; hasResume {
 			operation = "resume"
+		} else if _, hasEdit := annotations[PipelineEditAnnotation]; hasEdit {
+			operation = "edit"
 		}
 
 		// Execute the appropriate operation
@@ -199,6 +202,8 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return r.reconcileResume(ctx, log, p)
 		case "stop":
 			return r.reconcileStop(ctx, log, p)
+		case "edit":
+			return r.reconcileEdit(ctx, log, p)
 		case "terminate":
 			return r.reconcileTerminate(ctx, log, p)
 		case "delete":
@@ -958,6 +963,110 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	}
 
 	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	log.Info("reconciling pipeline edit", "pipeline_id", p.Spec.ID)
+
+	namespace := "pipeline-" + p.Spec.ID
+
+	// Update the pipeline config secret with new config
+	labels := preparePipelineLabels(p)
+	secretName := types.NamespacedName{Namespace: namespace, Name: p.Spec.ID}
+	_, err := r.createSecret(ctx, secretName, labels, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)
+	}
+
+	// Transition status to Resuming
+	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusResuming)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
+	}
+
+	// Get namespace and secret for deployment creation
+	var ns v1.Namespace
+	err = r.Get(ctx, types.NamespacedName{Name: namespace}, &ns)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
+	}
+
+	var secret v1.Secret
+	err = r.Get(ctx, secretName, &secret)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
+	}
+
+	// Step 1: Create Sink deployment
+	ready, err := r.isDeploymentReady(ctx, namespace, "sink")
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+	}
+	if !ready {
+		log.Info("creating sink deployment", "namespace", namespace)
+		err = r.createSink(ctx, ns, labels, secret, p)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
+		}
+		// Requeue to wait for deployment to be ready
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	}
+
+	// Step 2: Create Join deployment (if enabled)
+	if p.Spec.Join.Enabled {
+		ready, err := r.isDeploymentReady(ctx, namespace, "join")
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
+		}
+		if !ready {
+			log.Info("creating join deployment", "namespace", namespace)
+			err = r.createJoin(ctx, ns, labels, secret, p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
+			}
+			// Requeue to wait for deployment to be ready
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		}
+	}
+
+	// Step 3: Create Ingestor deployments
+	for i := range p.Spec.Ingestor.Streams {
+		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+		}
+		if !ready {
+			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			err = r.createIngestors(ctx, log, ns, labels, secret, p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
+			}
+			// Requeue to wait for deployment to be ready
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		}
+	}
+
+	// All deployments are ready, update status to Running
+	err = r.updatePipelineStatus(ctx, log, &p, nats.PipelineStatusRunning)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
+	}
+
+	// Remove edit annotation
+	annotations := p.GetAnnotations()
+	if annotations != nil {
+		delete(annotations, PipelineEditAnnotation)
+		p.SetAnnotations(annotations)
+		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning)
+		err = r.Update(ctx, &p)
+		if err != nil {
+			log.Error(err, "failed to remove edit annotation", "pipeline_id", p.Spec.ID)
+		}
+	}
+
+	log.Info("pipeline edit completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
