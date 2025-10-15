@@ -13,5 +13,4 @@ const (
 	PipelineDeleteAnnotation        = "pipeline.etl.glassflow.io/delete"
 	PipelineEditAnnotation          = "pipeline.etl.glassflow.io/edit"
 	PipelineHelmUninstallAnnotation = "pipeline.etl.glassflow.io/helm-uninstall"
-	PipelinePauseAnnotation         = "pipeline.etl.glassflow.io/pause"
 )
