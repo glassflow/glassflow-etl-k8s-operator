@@ -23,7 +23,7 @@ jobs:
   build-operator-binary:
     needs: [check-merge]
     if: needs.check-merge.outputs.should-build
-    uses: ./.github/workflows/build_binary.yaml
+    uses: ./.github/workflows/build_binary.yml
 
   test-operator:
     needs: [check-merge]
@@ -33,7 +33,7 @@ jobs:
   build-operator-image:
     needs: [build-operator-binary, test-operator]
     if: needs.check-merge.outputs.should-build
-    uses: ./.github/workflows/build-image.yaml
+    uses: ./.github/workflows/build-image.yml
     with:
       push: true
     secrets: inherit

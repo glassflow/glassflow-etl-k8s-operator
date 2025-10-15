@@ -41,5 +41,5 @@ jobs:
 
   notify:
     needs: [release]
-    uses: ./.github/workflows/notify.yaml
+    uses: ./.github/workflows/notify.yml
     secrets: inherit
