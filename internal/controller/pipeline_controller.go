@@ -38,23 +38,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 )
 
 // -------------------------------------------------------------------------------------------------------------------
-
-const (
-	// PipelineFinalizerName is the name of the finalizer added to Pipeline resources
-	PipelineFinalizerName           = "pipeline.etl.glassflow.io/finalizer"
-	PipelineCreateAnnotation        = "pipeline.etl.glassflow.io/create"
-	PipelineResumeAnnotation        = "pipeline.etl.glassflow.io/resume"
-	PipelineStopAnnotation          = "pipeline.etl.glassflow.io/stop"
-	PipelineTerminateAnnotation     = "pipeline.etl.glassflow.io/terminate"
-	PipelineDeleteAnnotation        = "pipeline.etl.glassflow.io/delete"
-	PipelineEditAnnotation          = "pipeline.etl.glassflow.io/edit"
-	PipelineHelmUninstallAnnotation = "pipeline.etl.glassflow.io/helm-uninstall"
-)
 
 // -------------------------------------------------------------------------------------------------------------------
 
@@ -175,20 +164,20 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// Determine which operation to perform based on annotations
 		// Helm uninstall has highest priority - it interrupts any ongoing operation
 		var operation string
-		if _, hasHelmUninstall := annotations[PipelineHelmUninstallAnnotation]; hasHelmUninstall {
+		if _, hasHelmUninstall := annotations[constants.PipelineHelmUninstallAnnotation]; hasHelmUninstall {
 			operation = "helm-uninstall"
 			log.Info("HELM UNINSTALL detected - interrupting any ongoing operations", "pipeline_id", p.Spec.ID)
-		} else if _, hasTerminate := annotations[PipelineDeleteAnnotation]; hasTerminate {
+		} else if _, hasTerminate := annotations[constants.PipelineDeleteAnnotation]; hasTerminate {
 			operation = "delete"
-		} else if _, hasTerminate := annotations[PipelineTerminateAnnotation]; hasTerminate {
+		} else if _, hasTerminate := annotations[constants.PipelineTerminateAnnotation]; hasTerminate {
 			operation = "terminate"
-		} else if _, hasCreate := annotations[PipelineCreateAnnotation]; hasCreate {
+		} else if _, hasCreate := annotations[constants.PipelineCreateAnnotation]; hasCreate {
 			operation = "create"
-		} else if _, hasStop := annotations[PipelineStopAnnotation]; hasStop {
+		} else if _, hasStop := annotations[constants.PipelineStopAnnotation]; hasStop {
 			operation = "stop"
-		} else if _, hasResume := annotations[PipelineResumeAnnotation]; hasResume {
+		} else if _, hasResume := annotations[constants.PipelineResumeAnnotation]; hasResume {
 			operation = "resume"
-		} else if _, hasEdit := annotations[PipelineEditAnnotation]; hasEdit {
+		} else if _, hasEdit := annotations[constants.PipelineEditAnnotation]; hasEdit {
 			operation = "edit"
 		}
 
@@ -336,7 +325,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	// Remove create annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		delete(annotations, PipelineCreateAnnotation)
+		delete(annotations, constants.PipelineCreateAnnotation)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
@@ -373,7 +362,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	// Remove terminate annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		delete(annotations, PipelineTerminateAnnotation)
+		delete(annotations, constants.PipelineTerminateAnnotation)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped)
 		err = r.Update(ctx, &p)
@@ -422,7 +411,7 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	// Remove terminate annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		delete(annotations, PipelineDeleteAnnotation)
+		delete(annotations, constants.PipelineDeleteAnnotation)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped)
 		err = r.Update(ctx, &p)
@@ -459,7 +448,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		// Remove helm uninstall annotation and finalizer to allow cleanup
 		annotations := p.GetAnnotations()
 		if annotations != nil {
-			delete(annotations, PipelineHelmUninstallAnnotation)
+			delete(annotations, constants.PipelineHelmUninstallAnnotation)
 			p.SetAnnotations(annotations)
 			err := r.Update(ctx, &p)
 			if err != nil {
@@ -510,11 +499,11 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	if annotations != nil {
 		// Remove all pipeline operation annotations
 		for _, annotation := range []string{
-			PipelineHelmUninstallAnnotation,
-			PipelineCreateAnnotation,
-			PipelineTerminateAnnotation,
-			PipelineStopAnnotation,
-			PipelineResumeAnnotation,
+			constants.PipelineHelmUninstallAnnotation,
+			constants.PipelineCreateAnnotation,
+			constants.PipelineTerminateAnnotation,
+			constants.PipelineStopAnnotation,
+			constants.PipelineResumeAnnotation,
 		} {
 			delete(annotations, annotation)
 		}
@@ -902,7 +891,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	// Remove resume annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		delete(annotations, PipelineResumeAnnotation)
+		delete(annotations, constants.PipelineResumeAnnotation)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
@@ -953,7 +942,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	// Remove stop annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		delete(annotations, PipelineStopAnnotation)
+		delete(annotations, constants.PipelineStopAnnotation)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped)
 		err = r.Update(ctx, &p)
@@ -1057,7 +1046,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	// Remove edit annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		delete(annotations, PipelineEditAnnotation)
+		delete(annotations, constants.PipelineEditAnnotation)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
@@ -1596,8 +1585,8 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 // -------------------------------------------------------------------------------------------------------------------
 
 func (r *PipelineReconciler) addFinalizer(ctx context.Context, p *etlv1alpha1.Pipeline) error {
-	if !containsFinalizer(p.Finalizers, PipelineFinalizerName) {
-		p.Finalizers = append(p.Finalizers, PipelineFinalizerName)
+	if !containsFinalizer(p.Finalizers, constants.PipelineFinalizerName) {
+		p.Finalizers = append(p.Finalizers, constants.PipelineFinalizerName)
 		err := r.Update(ctx, p)
 		if err != nil {
 			return fmt.Errorf("add finalizer: %w", err)
@@ -1607,11 +1596,11 @@ func (r *PipelineReconciler) addFinalizer(ctx context.Context, p *etlv1alpha1.Pi
 }
 
 func (r *PipelineReconciler) removeFinalizer(ctx context.Context, p *etlv1alpha1.Pipeline) error {
-	if containsFinalizer(p.Finalizers, PipelineFinalizerName) {
+	if containsFinalizer(p.Finalizers, constants.PipelineFinalizerName) {
 		// Remove the finalizer from the slice
 		finalizers := make([]string, 0, len(p.Finalizers)-1)
 		for _, f := range p.Finalizers {
-			if f != PipelineFinalizerName {
+			if f != constants.PipelineFinalizerName {
 				finalizers = append(finalizers, f)
 			}
 		}
