@@ -241,7 +241,11 @@ func main() {
 
 	// Set OTEL endpoint env var for OTLP exporters if not already set
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" && observabilityOTelEndpoint != "" {
-		os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", observabilityOTelEndpoint)
+		err := os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", observabilityOTelEndpoint)
+		if err != nil {
+			setupLog.Error(err, "failed to set OTEL_EXPORTER_OTLP_ENDPOINT env var")
+			os.Exit(1)
+		}
 	}
 
 	// Configure observability
