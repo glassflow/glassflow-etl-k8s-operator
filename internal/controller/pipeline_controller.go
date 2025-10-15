@@ -963,7 +963,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	// Update the pipeline config secret with new config
 	labels := preparePipelineLabels(p)
 	secretName := types.NamespacedName{Namespace: namespace, Name: p.Spec.ID}
-	_, err := r.createSecret(ctx, secretName, labels, p)
+	_, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)
 	}
@@ -1125,6 +1125,29 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 	}
 
 	return s, nil
+}
+
+func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
+	// First, try to get the existing secret
+	var existingSecret v1.Secret
+	err := r.Get(ctx, namespacedName, &existingSecret)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Secret doesn't exist, create it
+			return r.createSecret(ctx, namespacedName, labels, p)
+		}
+		return zero, fmt.Errorf("get existing secret %s: %w", namespacedName, err)
+	}
+
+	// Delete the existing secret since it's immutable and cannot be updated
+	// We need to recreate it with the new configuration
+	err = r.Delete(ctx, &existingSecret)
+	if err != nil {
+		return zero, fmt.Errorf("delete existing secret %s: %w", namespacedName, err)
+	}
+
+	// Create a new secret with the updated config
+	return r.createSecret(ctx, namespacedName, labels, p)
 }
 
 func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
