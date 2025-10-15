@@ -6,7 +6,11 @@ on:
       - 'v*'
 
 jobs:
+  build-operator-binary:
+    uses: ./.github/workflows/build_binary.yaml
+
   test-operator:
+    needs: [build-operator-binary]
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:

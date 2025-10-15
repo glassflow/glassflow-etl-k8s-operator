@@ -20,8 +20,13 @@ jobs:
             echo "❌ PR has 'no-build' label - skipping build"
           fi
 
-  test-operator:
+  build-operator-binary:
     needs: [check-merge]
+    if: needs.check-merge.outputs.should-build
+    uses: ./.github/workflows/build_binary.yaml
+
+  test-operator:
+    needs: [build-operator-binary]
     if: needs.check-merge.outputs.should-build
     uses: ./.github/workflows/test-operator.yml
 
