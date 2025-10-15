@@ -240,14 +240,12 @@ stateDiagram
   direction LR
   [*] --> Created
   Created --> Running
-  Created --> Terminating
   Running --> Stopping
-  Running --> Terminating
   Stopping --> Stopped
   Stopped --> Resuming
-  Stopped --> Resuming
-  Resuming --> Running
   Terminating --> Stopped
+  Resuming --> Running
+  Any --> Terminating
 ```
 
 ### Key Operations
