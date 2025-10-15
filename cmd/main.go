@@ -217,6 +217,11 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	// Set OTEL endpoint env var for OTLP exporters
+	if observabilityOTelEndpoint != "" {
+		os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", observabilityOTelEndpoint)
+	}
+
 	// Get pod identity - use POD_NAME env var if set, otherwise fallback to hostname
 	podName := os.Getenv("POD_NAME")
 	if podName == "" {
