@@ -55,9 +55,14 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	By("building the manager(Operator) image")
-	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+	By("building the manager(Operator) binary")
+	cmd := exec.Command("make", "build")
 	_, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) binary")
+
+	By("building the manager(Operator) image")
+	cmd = exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+	_, err = utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
 
 	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is

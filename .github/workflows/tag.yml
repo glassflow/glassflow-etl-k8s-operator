@@ -6,11 +6,14 @@ on:
       - 'v*'
 
 jobs:
+  build-operator-binary:
+    uses: ./.github/workflows/build_binary.yaml
+
   test-operator:
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
-    needs: [test-operator]
+    needs: [build-operator-binary, test-operator]
     uses: ./.github/workflows/build-image.yml
     with:
       push: true
