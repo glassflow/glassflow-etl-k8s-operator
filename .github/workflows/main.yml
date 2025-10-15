@@ -33,7 +33,7 @@ jobs:
   build-operator-image:
     needs: [build-operator-binary, test-operator]
     if: needs.check-merge.outputs.should-build
-    uses: ./.github/workflows/build-image.yml
+    uses: ./.github/workflows/build-image.yaml
     with:
       push: true
     secrets: inherit

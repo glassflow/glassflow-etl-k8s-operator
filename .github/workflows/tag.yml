@@ -14,7 +14,7 @@ jobs:
 
   build-operator-image:
     needs: [build-operator-binary, test-operator]
-    uses: ./.github/workflows/build-image.yml
+    uses: ./.github/workflows/build-image.yaml
     with:
       push: true
       version_tag: ${{ github.ref_name }}
