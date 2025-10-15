@@ -11,7 +11,7 @@ func TestPipelineStatusConstants(t *testing.T) {
 		"Created":     PipelineStatusCreated,
 		"Running":     PipelineStatusRunning,
 		"Terminating": PipelineStatusTerminating,
-		"Terminated":  PipelineStatusTerminated,
+		"Stopped":     PipelineStatusStopped,
 		"Failed":      PipelineStatusFailed,
 	}
 
