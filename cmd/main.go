@@ -40,7 +40,6 @@ import (
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 	// +kubebuilder:scaffold:imports
 )
@@ -178,7 +177,7 @@ func main() {
 	// Observability configuration
 	var observabilityLogsEnabled, observabilityMetricsEnabled, observabilityOTelEndpoint string
 	var ingestorLogLevel, joinLogLevel, sinkLogLevel string
-	var ingestorImageTag, joinImageTag, sinkImageTag, operatorImageTag string
+	var ingestorImageTag, joinImageTag, sinkImageTag string
 
 	flag.StringVar(&observabilityLogsEnabled, "observability-logs-enabled", getEnvOrDefault(
 		"OBSERVABILITY_LOGS_ENABLED", "false"),
@@ -207,9 +206,6 @@ func main() {
 	flag.StringVar(&sinkImageTag, "sink-image-tag", getEnvOrDefault(
 		"SINK_IMAGE_TAG", "stable"),
 		"Image tag for sink component (used as service version)")
-	flag.StringVar(&operatorImageTag, "operator-image-tag", getEnvOrDefault(
-		"OPERATOR_IMAGE_TAG", "dev"),
-		"Image tag for operator (used as service version)")
 
 	opts := zap.Options{
 		Development: true,
@@ -217,48 +213,7 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	// Set OTEL endpoint env var for OTLP exporters
-	if observabilityOTelEndpoint != "" {
-		os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", observabilityOTelEndpoint)
-	}
-
-	// Get pod identity - use POD_NAME env var if set, otherwise fallback to hostname
-	podName := os.Getenv("POD_NAME")
-	if podName == "" {
-		hostname, err := os.Hostname()
-		if err == nil {
-			podName = hostname
-		} else {
-			podName = "unknown"
-		}
-	}
-
-	// For namespace, try POD_NAMESPACE env var first, fallback to reading from service account
-	podNamespace := os.Getenv("POD_NAMESPACE")
-	if podNamespace == "" {
-		// Read from /var/run/secrets/kubernetes.io/serviceaccount/namespace
-		if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-			podNamespace = string(data)
-		} else {
-			podNamespace = "default"
-		}
-	}
-
-	// Configure observability
-	obsConfig := &observability.Config{
-		LogsEnabled:       observabilityLogsEnabled == "true",
-		MetricsEnabled:    observabilityMetricsEnabled == "true",
-		ServiceName:       "glassflow-operator",
-		ServiceVersion:    operatorImageTag,
-		ServiceNamespace:  podNamespace,
-		ServiceInstanceID: podName,
-	}
-
-	logger := observability.ConfigureLogger(obsConfig)
-	meter := observability.ConfigureMeter(obsConfig, logger)
-
-	// Set global logger for controller-runtime
-	ctrl.SetLogger(logger)
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -353,7 +308,6 @@ func main() {
 	if err = (&controller.PipelineReconciler{
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),
-		Meter:                       meter,
 		NATSClient:                  natsClient,
 		ComponentNATSAddr:           natsAddr,
 		NATSMaxStreamAge:            natsMaxStreamAge,
