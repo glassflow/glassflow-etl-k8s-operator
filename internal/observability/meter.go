@@ -17,7 +17,6 @@ import (
 type Meter struct {
 	// Reconcile operation metrics
 	ReconcileOperationsTotal metric.Int64Counter
-	ReconcileDurationSeconds metric.Float64Histogram
 	ReconcileErrorsTotal     metric.Int64Counter
 
 	// Pipeline status metrics
@@ -25,15 +24,6 @@ type Meter struct {
 
 	// NATS operation metrics
 	NATSOperationsTotal metric.Int64Counter
-
-	// K8s resource operation metrics
-	K8sResourceOperationsTotal metric.Int64Counter
-
-	// Deployment metrics
-	DeploymentReadyDurationSeconds metric.Float64Histogram
-
-	// Pipeline count metrics
-	PipelinesRunningTotal metric.Int64Gauge
 }
 
 const GfmOperatorMetricPrefix = "gfm_operator"
@@ -86,20 +76,12 @@ func NewMeter() *Meter {
 	return &Meter{
 		ReconcileOperationsTotal: mustCreateCounter(meter, GfmOperatorMetricPrefix+"_reconcile_operations_total",
 			"Total number of reconcile operations by operation type and status"),
-		ReconcileDurationSeconds: mustCreateHistogram(meter, GfmOperatorMetricPrefix+"_reconcile_duration_seconds",
-			"Duration of reconcile operations in seconds"),
 		ReconcileErrorsTotal: mustCreateCounter(meter, GfmOperatorMetricPrefix+"_reconcile_errors_total",
 			"Total number of reconcile errors by error type"),
 		PipelineStatusTransitionsTotal: mustCreateCounter(meter, GfmOperatorMetricPrefix+"_pipeline_status_transitions_total",
 			"Total number of pipeline status transitions"),
 		NATSOperationsTotal: mustCreateCounter(meter, GfmOperatorMetricPrefix+"_nats_operations_total",
 			"Total number of NATS operations"),
-		K8sResourceOperationsTotal: mustCreateCounter(meter, GfmOperatorMetricPrefix+"_k8s_resource_operations_total",
-			"Total number of K8s resource operations"),
-		DeploymentReadyDurationSeconds: mustCreateHistogram(meter, GfmOperatorMetricPrefix+"_deployment_ready_duration_seconds",
-			"Time for deployments to become ready in seconds"),
-		PipelinesRunningTotal: mustCreateGauge(meter, GfmOperatorMetricPrefix+"_pipelines_running_total",
-			"Total number of pipelines currently running"),
 	}
 }
 
@@ -143,22 +125,4 @@ func mustCreateHistogram(meter metric.Meter, name, description string) metric.Fl
 		panic("failed to create histogram " + name + ": " + err.Error())
 	}
 	return histogram
-}
-
-func mustCreateGauge(meter metric.Meter, name, description string) metric.Int64Gauge {
-	gauge, err := meter.Int64Gauge(
-		name,
-		metric.WithDescription(description),
-		metric.WithUnit("1"), // unit for gauges
-	)
-	if err != nil {
-		slog.Error("Failed to create gauge", "name", name, "error", err)
-		panic("failed to create gauge " + name + ": " + err.Error())
-	}
-	return gauge
-}
-
-// RecordPipelinesRunning records the current number of running pipelines
-func (m *Meter) RecordPipelinesRunning(ctx context.Context, count int64) {
-	m.PipelinesRunningTotal.Record(ctx, count)
 }

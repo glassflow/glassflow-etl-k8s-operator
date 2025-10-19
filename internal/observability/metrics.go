@@ -2,13 +2,14 @@ package observability
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
 // RecordReconcileOperation records a reconcile operation
-func (m *Meter) RecordReconcileOperation(ctx context.Context, operation, status, pipelineID string, duration float64) {
+func (m *Meter) RecordReconcileOperation(ctx context.Context, operation, status, pipelineID string) {
 	attrs := []attribute.KeyValue{
 		attribute.String("operation", operation),
 		attribute.String("status", status),
@@ -16,7 +17,6 @@ func (m *Meter) RecordReconcileOperation(ctx context.Context, operation, status,
 	}
 
 	m.ReconcileOperationsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
-	m.ReconcileDurationSeconds.Record(ctx, duration, metric.WithAttributes(attrs...))
 }
 
 // RecordReconcileError records a reconcile error
@@ -36,40 +36,21 @@ func (m *Meter) RecordStatusTransition(ctx context.Context, fromStatus, toStatus
 		attribute.String("from_status", fromStatus),
 		attribute.String("to_status", toStatus),
 		attribute.String("pipeline_id", pipelineID),
+		attribute.Int64("timestamp", time.Now().Unix()),
 	}
 
 	m.PipelineStatusTransitionsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
 // RecordNATSOperation records a NATS operation
-func (m *Meter) RecordNATSOperation(ctx context.Context, operation, status string) {
+func (m *Meter) RecordNATSOperation(ctx context.Context, operation, status, pipelineID string) {
 	attrs := []attribute.KeyValue{
 		attribute.String("operation", operation),
 		attribute.String("status", status),
-	}
-
-	m.NATSOperationsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
-}
-
-// RecordK8sResourceOperation records a K8s resource operation
-func (m *Meter) RecordK8sResourceOperation(ctx context.Context, resourceType, operation, status string) {
-	attrs := []attribute.KeyValue{
-		attribute.String("resource_type", resourceType),
-		attribute.String("operation", operation),
-		attribute.String("status", status),
-	}
-
-	m.K8sResourceOperationsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
-}
-
-// RecordDeploymentReady records deployment readiness time
-func (m *Meter) RecordDeploymentReady(ctx context.Context, component, pipelineID string, duration float64) {
-	attrs := []attribute.KeyValue{
-		attribute.String("component", component),
 		attribute.String("pipeline_id", pipelineID),
 	}
 
-	m.DeploymentReadyDurationSeconds.Record(ctx, duration, metric.WithAttributes(attrs...))
+	m.NATSOperationsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
 // ClassifyError classifies an error into a category for metrics

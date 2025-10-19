@@ -221,7 +221,6 @@ func (r *PipelineReconciler) createPipeline(ctx context.Context, p etlv1alpha1.P
 // -------------------------------------------------------------------------------------------------------------------
 
 func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	start := time.Now()
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline creation", "pipeline_id", pipelineID)
@@ -242,20 +241,20 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		// Update CRD status
 		err := r.Status().Update(ctx, &p, &client.SubResourceUpdateOptions{})
 		if err != nil {
-			r.recordReconcileError(ctx, "create", pipelineID, err, start)
+			r.recordReconcileError(ctx, "create", pipelineID, err)
 			return ctrl.Result{}, fmt.Errorf("update pipeline CRD status: %w", err)
 		}
 	}
 
 	ns, err := r.createNamespace(ctx, p)
 	if err != nil {
-		r.recordReconcileError(ctx, "create", pipelineID, err, start)
+		r.recordReconcileError(ctx, "create", pipelineID, err)
 		return ctrl.Result{}, fmt.Errorf("setup namespace: %w", err)
 	}
 
 	err = r.createNATSStreams(ctx, p)
 	if err != nil {
-		r.recordReconcileError(ctx, "create", pipelineID, err, start)
+		r.recordReconcileError(ctx, "create", pipelineID, err)
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
@@ -343,17 +342,15 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 
 	// Record success metrics
-	if r.Meter != nil {
-		duration := time.Since(start).Seconds()
-		r.Meter.RecordReconcileOperation(ctx, "create", "success", pipelineID, duration)
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordReconcileOperation(ctx, "create", "success", pipelineID)
+	})
 
 	log.Info("pipeline creation completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
 func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	start := time.Now()
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline termination", "pipeline_id", pipelineID)
@@ -389,17 +386,15 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	}
 
 	// Record success metrics
-	if r.Meter != nil {
-		duration := time.Since(start).Seconds()
-		r.Meter.RecordReconcileOperation(ctx, "terminate", "success", pipelineID, duration)
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordReconcileOperation(ctx, "terminate", "success", pipelineID)
+	})
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
 func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	start := time.Now()
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline deletion", "pipeline_id", pipelineID)
@@ -416,7 +411,7 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	}
 
 	// Clean up NATS streams
-	err = r.cleanupNATSPipelineStreams(ctx, log, p)
+	err = r.cleanupNATSPipelineResources(ctx, log, p)
 	if err != nil {
 		log.Info("failed to cleanup NATS resources during termination", "pipeline_id", p.Spec.ID)
 		// Don't return error here as namespace is already deleted
@@ -459,10 +454,9 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	}
 
 	// Record success metrics
-	if r.Meter != nil {
-		duration := time.Since(start).Seconds()
-		r.Meter.RecordReconcileOperation(ctx, "delete", "success", pipelineID, duration)
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordReconcileOperation(ctx, "delete", "success", pipelineID)
+	})
 
 	log.Info("pipeline deletion completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -509,7 +503,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	}
 
 	// Clean up NATS streams but keep the pipeline configuration
-	err = r.cleanupNATSPipelineStreams(ctx, log, p)
+	err = r.cleanupNATSPipelineResources(ctx, log, p)
 	if err != nil {
 		log.Info("failed to cleanup NATS resources during helm uninstall", "pipeline_id", p.Spec.ID)
 		// Don't return error here - we're in force cleanup mode
@@ -819,7 +813,6 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 }
 
 func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	start := time.Now()
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline resume", "pipeline_id", pipelineID)
@@ -936,17 +929,15 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Record success metrics
-	if r.Meter != nil {
-		duration := time.Since(start).Seconds()
-		r.Meter.RecordReconcileOperation(ctx, "resume", "success", pipelineID, duration)
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordReconcileOperation(ctx, "resume", "success", pipelineID)
+	})
 
 	log.Info("pipeline resume completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
 func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	start := time.Now()
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline stop", "pipeline_id", pipelineID)
@@ -996,17 +987,15 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	}
 
 	// Record success metrics
-	if r.Meter != nil {
-		duration := time.Since(start).Seconds()
-		r.Meter.RecordReconcileOperation(ctx, "stop", "success", pipelineID, duration)
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordReconcileOperation(ctx, "stop", "success", pipelineID)
+	})
 
 	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
 func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	start := time.Now()
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline edit", "pipeline_id", pipelineID)
@@ -1109,10 +1098,9 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	}
 
 	// Record success metrics
-	if r.Meter != nil {
-		duration := time.Since(start).Seconds()
-		r.Meter.RecordReconcileOperation(ctx, "edit", "success", pipelineID, duration)
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordReconcileOperation(ctx, "edit", "success", pipelineID)
+	})
 
 	log.Info("pipeline edit completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -1121,12 +1109,18 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 // -------------------------------------------------------------------------------------------------------------------
 
 // recordReconcileError records error metrics for reconcile operations
-func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation, pipelineID string, err error, start time.Time) {
+func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation, pipelineID string, err error) {
 	if r.Meter != nil {
-		duration := time.Since(start).Seconds()
 		errorType := observability.ClassifyError(err)
-		r.Meter.RecordReconcileOperation(ctx, operation, "failure", pipelineID, duration)
+		r.Meter.RecordReconcileOperation(ctx, operation, "failure", pipelineID)
 		r.Meter.RecordReconcileError(ctx, operation, errorType, pipelineID)
+	}
+}
+
+// recordMetricsIfEnabled is a helper function to safely record metrics only if the meter is available
+func (r *PipelineReconciler) recordMetricsIfEnabled(ctx context.Context, fn func(*observability.Meter)) {
+	if r.Meter != nil {
+		fn(r.Meter)
 	}
 }
 
@@ -1368,8 +1362,6 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		withAffinity(r.JoinAffinity).
 		build()
 
-	fmt.Println(len(deployment.Spec.Template.Spec.Containers))
-
 	err := r.createDeployment(ctx, deployment)
 	if err != nil {
 		return fmt.Errorf("create join deployment: %w", err)
@@ -1444,14 +1436,14 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 	// create DLQ
 	err := r.NATSClient.CreateOrUpdateStream(ctx, p.Spec.DLQ, 0)
 	if err != nil {
-		if r.Meter != nil {
-			r.Meter.RecordNATSOperation(ctx, "create_stream", "failure")
-		}
+		r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+			m.RecordNATSOperation(ctx, "create_stream", "failure", p.Spec.ID)
+		})
 		return fmt.Errorf("create stream %s: %w", p.Spec.DLQ, err)
 	}
-	if r.Meter != nil {
-		r.Meter.RecordNATSOperation(ctx, "create_stream", "success")
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordNATSOperation(ctx, "create_dlq_stream", "success", p.Spec.ID)
+	})
 
 	// create source streams
 	for _, s := range p.Spec.Ingestor.Streams {
@@ -1520,7 +1512,7 @@ func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 
 // -------------------------------------------------------------------------------------------------------------------
 
-func (r *PipelineReconciler) cleanupNATSPipelineStreams(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	log.Info("cleaning up NATS streams", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
 	if r.NATSClient == nil {
@@ -1534,8 +1526,15 @@ func (r *PipelineReconciler) cleanupNATSPipelineStreams(ctx context.Context, log
 		err := r.deleteNATSStream(ctx, log, p.Spec.DLQ)
 		if err != nil {
 			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", p.Spec.DLQ)
+			r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+				m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
+			})
 			return fmt.Errorf("failed to cleanup NATS DLQ stream: %w", err)
 		}
+
+		r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+			m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
+		})
 		log.Info("NATS DLQ stream deleted successfully", "stream", p.Spec.DLQ)
 	}
 
@@ -1545,9 +1544,15 @@ func (r *PipelineReconciler) cleanupNATSPipelineStreams(ctx context.Context, log
 			log.Info("deleting NATS ingestor output stream", "stream", stream.OutputStream)
 			err := r.deleteNATSStream(ctx, log, stream.OutputStream)
 			if err != nil {
+				r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+					m.RecordNATSOperation(ctx, "delete_ingestor_stream", "failure", p.Spec.ID)
+				})
 				log.Error(err, "failed to cleanup NATS Ingestor Output Stream", "stream", stream)
 				return fmt.Errorf("cleanup NATS Ingestor Output Stream: %w", err)
 			}
+			r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+				m.RecordNATSOperation(ctx, "delete_ingestor_stream", "success", p.Spec.ID)
+			})
 			log.Info("NATS ingestor output stream deleted successfully", "stream", stream.OutputStream)
 		}
 	}
@@ -1558,17 +1563,29 @@ func (r *PipelineReconciler) cleanupNATSPipelineStreams(ctx context.Context, log
 			log.Info("deleting NATS join output stream", "stream", p.Spec.Join.OutputStream)
 			err := r.deleteNATSStream(ctx, log, p.Spec.Join.OutputStream)
 			if err != nil {
+				r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+					m.RecordNATSOperation(ctx, "delete_join_stream", "failure", p.Spec.ID)
+				})
 				log.Error(err, "failed to cleanup join output stream", "stream", p.Spec.Join.OutputStream)
 				return fmt.Errorf("cleanup join output stream: %w", err)
 			}
+			r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+				m.RecordNATSOperation(ctx, "delete_join_stream", "success", p.Spec.ID)
+			})
 			log.Info("NATS join output stream deleted successfully", "stream", p.Spec.Join.OutputStream)
 		}
 
 		err := r.cleanupNATSPipelineJoinKeyValueStore(ctx, log, p)
 		if err != nil {
+			r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+				m.RecordNATSOperation(ctx, "delete_join_kv", "failure", p.Spec.ID)
+			})
 			log.Error(err, "failed to cleanup NATS join KV store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 			return fmt.Errorf("failed cleanup NATS join KV store: %w", err)
 		}
+		r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+			m.RecordNATSOperation(ctx, "delete_join_kv", "success", p.Spec.ID)
+		})
 	}
 
 	return nil
@@ -1678,9 +1695,9 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 	}
 
 	// Record status transition metrics
-	if r.Meter != nil {
-		r.Meter.RecordStatusTransition(ctx, oldStatus, string(newStatus), p.Spec.ID)
-	}
+	r.recordMetricsIfEnabled(ctx, func(m *observability.Meter) {
+		m.RecordStatusTransition(ctx, oldStatus, string(newStatus), p.Spec.ID)
+	})
 
 	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "to", newStatus)
 	return nil
