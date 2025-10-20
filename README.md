@@ -159,8 +159,6 @@ This will:
 - ✅ Remove Pipeline CRD definitions
 - ✅ Remove the operator deployment
 
-For more details, see [HELM_UNINSTALL.md](HELM_UNINSTALL.md).
-
 ### Option 3: Manual Installation
 
 ```bash
