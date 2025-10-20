@@ -595,7 +595,7 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 
 // stopPipelineComponents stops all pipeline components in the correct order with pending message checks
 func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	namespace := "pipeline-" + p.Spec.ID
+	namespace := r.getTargetNamespace(p)
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
@@ -636,14 +636,14 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
 		}
 
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, "join"))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
 		if !deleted {
 			log.Info("deleting join deployment", "namespace", namespace)
 			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "join"}, &deployment)
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "join")}, &deployment)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
 					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
@@ -671,14 +671,14 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
 	}
 
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, "sink"))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
 	if !deleted {
 		log.Info("deleting sink deployment", "namespace", namespace)
 		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "sink"}, &deployment)
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "sink")}, &deployment)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
@@ -701,7 +701,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 
 // terminatePipelineComponents terminates all pipeline components immediately
 func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	namespace := "pipeline-" + p.Spec.ID
+	namespace := r.getTargetNamespace(p)
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
@@ -733,14 +733,14 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 
 	// Step 2: Check join and stop Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, "join")
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, "join"))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
 		if !deleted {
 			log.Info("deleting join deployment", "namespace", namespace)
 			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "join"}, &deployment)
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "join")}, &deployment)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
 					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
@@ -759,14 +759,14 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 	}
 
 	// Step 3: Check sink and stop Sink deployment
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, "sink")
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, "sink"))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
 	if !deleted {
 		log.Info("deleting sink deployment", "namespace", namespace)
 		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "sink"}, &deployment)
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "sink")}, &deployment)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
@@ -790,7 +790,7 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	log.Info("reconciling pipeline resume", "pipeline_id", p.Spec.ID)
 
-	namespace := "pipeline-" + p.Spec.ID
+	namespace := r.getTargetNamespace(p)
 
 	// Check if pipeline is already running or resuming
 	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning) {
@@ -818,7 +818,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Get secret
-	secretName := types.NamespacedName{Namespace: namespace, Name: p.Spec.ID}
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, p.Spec.ID)}
 	var secret v1.Secret
 	err = r.Get(ctx, secretName, &secret)
 	if err != nil {
