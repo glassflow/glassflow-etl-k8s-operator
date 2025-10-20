@@ -1,0 +1,12 @@
+{{- if and (not .Values.global.pipelines.namespace.auto) .Values.global.pipelines.namespace.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.global.pipelines.namespace.name | quote }}
+  labels:
+    {{- include "glassflow-operator.labels" . | nindent 4 }}
+    etl.glassflow.io/managed-by: "helm"
+    etl.glassflow.io/mode: "shared"
+{{- end }}
+
+

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -117,6 +118,9 @@ type PipelineReconciler struct {
 	IngestorImageTag            string
 	JoinImageTag                string
 	SinkImageTag                string
+	// Pipelines namespace configuration
+	PipelinesNamespaceAuto bool
+	PipelinesNamespaceName string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -249,15 +253,16 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 
 	labels := preparePipelineLabels(p)
 
-	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: p.Spec.ID}, labels, p)
+	secretName := r.getResourceName(p, p.Spec.ID)
+	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: secretName}, labels, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
 	}
 
-	namespace := "pipeline-" + p.Spec.ID
+	namespace := r.getTargetNamespace(p)
 
 	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, "sink")
+	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
@@ -275,7 +280,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 
 	// Step 2: Create Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, "join")
+		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
@@ -294,7 +299,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 
 	// Step 3: Create Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
@@ -594,7 +599,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
@@ -700,7 +705,7 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
@@ -823,7 +828,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	labels := preparePipelineLabels(p)
 
 	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, "sink")
+	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
@@ -841,7 +846,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 
 	// Step 2: Create Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, "join")
+		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
@@ -860,7 +865,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 
 	// Step 3: Create Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
@@ -954,23 +959,39 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 // -------------------------------------------------------------------------------------------------------------------
 
 func (r *PipelineReconciler) createNamespace(ctx context.Context, p etlv1alpha1.Pipeline) (zero v1.Namespace, _ error) {
+	targetNamespace := r.getTargetNamespace(p)
+
+	// If auto=false, we don't create namespaces, just return the target namespace
+	if !r.PipelinesNamespaceAuto {
+		var ns v1.Namespace
+		err := r.Get(ctx, types.NamespacedName{Name: targetNamespace}, &ns)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return zero, fmt.Errorf("target namespace %s does not exist and auto=false", targetNamespace)
+			}
+			return zero, fmt.Errorf("get namespace %s: %w", targetNamespace, err)
+		}
+		return ns, nil
+	}
+
+	// Auto=true: create per-pipeline namespace
 	var ns v1.Namespace
-
-	id := "pipeline-" + p.Spec.ID
-
-	err := r.Get(ctx, types.NamespacedName{Name: id}, &ns)
+	err := r.Get(ctx, types.NamespacedName{Name: targetNamespace}, &ns)
 	if err == nil {
 		return ns, nil
 	}
 
 	if !apierrors.IsNotFound(err) {
-		return zero, fmt.Errorf("get namespace %s: %w", id, err)
+		return zero, fmt.Errorf("get namespace %s: %w", targetNamespace, err)
 	}
 
 	ns = v1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      id,
-			Namespace: p.GetNamespace(),
+			Name: targetNamespace,
+			Annotations: map[string]string{
+				"etl.glassflow.io/managed-by": "glassflow-operator",
+				"etl.glassflow.io/mode":       "auto",
+			},
 		},
 	}
 
@@ -980,6 +1001,32 @@ func (r *PipelineReconciler) createNamespace(ctx context.Context, p etlv1alpha1.
 	}
 
 	return ns, nil
+}
+
+// getTargetNamespace determines the target namespace for a pipeline based on configuration
+func (r *PipelineReconciler) getTargetNamespace(p etlv1alpha1.Pipeline) string {
+	if r.PipelinesNamespaceAuto {
+		return "pipeline-" + p.Spec.ID
+	}
+	return r.PipelinesNamespaceName
+}
+
+// isOperatorManagedNamespace checks if a namespace was created by the operator
+func (r *PipelineReconciler) isOperatorManagedNamespace(ns v1.Namespace) bool {
+	// Check if namespace has the operator management annotation
+	if managedBy, exists := ns.Annotations["etl.glassflow.io/managed-by"]; exists {
+		return managedBy == "glassflow-operator"
+	}
+	// Fallback: check if namespace follows the pipeline-<id> pattern
+	return strings.HasPrefix(ns.Name, "pipeline-")
+}
+
+// getResourceName generates a unique resource name for the given pipeline
+func (r *PipelineReconciler) getResourceName(p etlv1alpha1.Pipeline, baseName string) string {
+	if r.PipelinesNamespaceAuto {
+		return baseName
+	}
+	return fmt.Sprintf("gf-pipeline-%s-%s", p.Spec.ID, baseName)
 }
 
 func (r *PipelineReconciler) createDeployment(ctx context.Context, deployment *appsv1.Deployment) error {
@@ -1020,9 +1067,16 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 }
 
 func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("deleting pipeline namespace", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	targetNamespace := r.getTargetNamespace(p)
+	log.Info("deleting pipeline namespace", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "namespace", targetNamespace)
 
-	namespaceName := types.NamespacedName{Name: "pipeline-" + p.Spec.ID}
+	// If auto=false, we don't delete namespaces, just clean up resources
+	if !r.PipelinesNamespaceAuto {
+		log.Info("auto=false, skipping namespace deletion", "namespace", targetNamespace)
+		return nil
+	}
+
+	namespaceName := types.NamespacedName{Name: targetNamespace}
 
 	var namespace v1.Namespace
 	err := r.Get(ctx, namespaceName, &namespace)
@@ -1032,6 +1086,12 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 			return nil
 		}
 		return fmt.Errorf("get namespace %s: %w", namespaceName.Name, err)
+	}
+
+	// Safety check: only delete operator-managed namespaces
+	if !r.isOperatorManagedNamespace(namespace) {
+		log.Info("namespace not managed by operator, skipping deletion", "namespace", namespaceName.Name)
+		return nil
 	}
 
 	err = r.Delete(ctx, &namespace, &client.DeleteOptions{})
@@ -1049,7 +1109,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 	ing := p.Spec.Ingestor
 
 	for i, t := range ing.Streams {
-		resourceRef := fmt.Sprintf("ingestor-%d", i)
+		resourceRef := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
@@ -1075,7 +1135,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "ingestor"},
 				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.IngestorImageTag},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
 					FieldRef: &v1.ObjectFieldSelector{
@@ -1114,7 +1174,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 }
 
 func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	resourceRef := "join"
+	resourceRef := r.getResourceName(p, "join")
 
 	joinLabels := r.getJoinLabels()
 
@@ -1140,7 +1200,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "join"},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.JoinImageTag},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
 				FieldRef: &v1.ObjectFieldSelector{
@@ -1179,7 +1239,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 }
 
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	resourceRef := "sink"
+	resourceRef := r.getResourceName(p, "sink")
 
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
@@ -1204,7 +1264,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "sink"},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.SinkImageTag},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: "pipeline-" + p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
 				FieldRef: &v1.ObjectFieldSelector{

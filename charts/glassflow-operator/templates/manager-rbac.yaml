@@ -9,6 +9,17 @@ rules:
   - ""
   resources:
   - namespaces
+  verbs:
+  {{- if .Values.global.pipelines.namespace.auto }}
+  - create
+  - delete
+  {{- end }}
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create

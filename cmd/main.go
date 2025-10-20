@@ -22,6 +22,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -207,6 +208,22 @@ func main() {
 		"SINK_IMAGE_TAG", "stable"),
 		"Image tag for sink component (used as service version)")
 
+	// Pipelines namespace configuration
+	var pipelinesNamespaceAuto bool
+	var pipelinesNamespaceName string
+
+	flag.StringVar(&pipelinesNamespaceName, "pipelines-namespace-name", getEnvOrDefault(
+		"PIPELINES_NAMESPACE_NAME", "glassflow-pipelines"),
+		"Target namespace name when auto=false (default: glassflow-pipelines)")
+
+	// TODO - before merge set defaults to false, this just for testing before chart-release
+	flag.BoolVar(&pipelinesNamespaceAuto, "pipelines-namespace-auto", func() bool {
+		if b, err := strconv.ParseBool(getEnvOrDefault("PIPELINES_NAMESPACE_AUTO", "false")); err == nil {
+			return b
+		}
+		return false
+	}(), "Enable automatic creation of per-pipeline namespaces (default: true)")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -339,6 +356,8 @@ func main() {
 		IngestorImageTag:            ingestorImageTag,
 		JoinImageTag:                joinImageTag,
 		SinkImageTag:                sinkImageTag,
+		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
+		PipelinesNamespaceName:      pipelinesNamespaceName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)
