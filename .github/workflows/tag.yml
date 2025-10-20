@@ -7,13 +7,13 @@ on:
 
 jobs:
   build-operator-binary:
-    uses: ./.github/workflows/build_binary.yaml
+    uses: ./.github/workflows/build_binary.yml
 
   test-operator:
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
-    needs: [build-operator-binary, test-operator]
+    needs: [test-operator]
     uses: ./.github/workflows/build-image.yml
     with:
       push: true
@@ -44,5 +44,5 @@ jobs:
 
   notify:
     needs: [build-operator-image]
-    uses: ./.github/workflows/notify.yaml
+    uses: ./.github/workflows/notify.yml
     secrets: inherit

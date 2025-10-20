@@ -26,7 +26,7 @@ jobs:
 
   build-operator-binary:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
-    uses: ./.github/workflows/build_binary.yaml
+    uses: ./.github/workflows/build_binary.yml
 
   test-operator:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
