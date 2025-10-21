@@ -14,6 +14,16 @@ global:
       maxAge: 168h
       maxBytes: 100GB
 
+  # Pipelines namespace configuration
+  pipelines:
+    namespace:
+      # When true, operator creates per-pipeline namespaces (pipeline-<id>)
+      auto: true
+      # When auto is false, the fixed namespace to deploy all pipelines into
+      name: glassflow-pipelines
+      # When auto is false, Helm can optionally create the namespace
+      create: true
+
 controllerManager:
   manager:
     containerSecurityContext:
