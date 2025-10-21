@@ -20,10 +20,10 @@ func (m *Meter) RecordReconcileOperation(ctx context.Context, operation, status,
 }
 
 // RecordReconcileError records a reconcile error
-func (m *Meter) RecordReconcileError(ctx context.Context, operation, errorType, pipelineID string) {
+func (m *Meter) RecordReconcileError(ctx context.Context, operation, errMsg, pipelineID string) {
 	attrs := []attribute.KeyValue{
 		attribute.String("operation", operation),
-		attribute.String("error_type", errorType),
+		attribute.String("error_msg", errMsg),
 		attribute.String("pipeline_id", pipelineID),
 	}
 
@@ -51,53 +51,4 @@ func (m *Meter) RecordNATSOperation(ctx context.Context, operation, status, pipe
 	}
 
 	m.NATSOperationsTotal.Add(ctx, 1, metric.WithAttributes(attrs...))
-}
-
-// ClassifyError classifies an error into a category for metrics
-func ClassifyError(err error) string {
-	if err == nil {
-		return "none"
-	}
-
-	errStr := err.Error()
-
-	// Classify common error types
-	switch {
-	case contains(errStr, "not found"):
-		return "not_found"
-	case contains(errStr, "already exists"):
-		return "already_exists"
-	case contains(errStr, "timeout"):
-		return "timeout"
-	case contains(errStr, "connection"):
-		return "connection_error"
-	case contains(errStr, "permission"):
-		return "permission_denied"
-	case contains(errStr, "invalid"):
-		return "invalid_request"
-	case contains(errStr, "conflict"):
-		return "conflict"
-	default:
-		return "unknown"
-	}
-}
-
-// contains checks if a string contains a substring (case-insensitive)
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr ||
-			(len(s) > len(substr) &&
-				(s[:len(substr)] == substr ||
-					s[len(s)-len(substr):] == substr ||
-					containsSubstring(s, substr))))
-}
-
-// containsSubstring is a simple substring check
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -1117,9 +1117,8 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 // recordReconcileError records error metrics for reconcile operations
 func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation, pipelineID string, err error) {
 	if r.Meter != nil {
-		errorType := observability.ClassifyError(err)
 		r.Meter.RecordReconcileOperation(ctx, operation, "failure", pipelineID)
-		r.Meter.RecordReconcileError(ctx, operation, errorType, pipelineID)
+		r.Meter.RecordReconcileError(ctx, operation, err.Error(), pipelineID)
 	}
 }
 
