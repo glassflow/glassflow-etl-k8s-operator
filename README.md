@@ -215,6 +215,53 @@ spec:
 | **Monitoring** | ✅ | Prometheus metrics integration |
 | **Helm Uninstall Cleanup** | ✅ | Automatic pipeline termination and CRD cleanup on uninstall |
 
+## 📊 Pipeline Status Management
+
+The operator manages pipeline lifecycle through a comprehensive state machine that ensures reliable and predictable pipeline operations.
+
+### Pipeline Status States
+
+| Status | Type | Description |
+|--------|------|-------------|
+| **Created** | Core | Pipeline created and ready to start |
+| **Running** | Core | Pipeline is actively processing data |
+| **Stopped** | Core | Pipeline has been stopped |
+| **Resuming** | Transition | Pipeline is being resumed (temporary) |
+| **Stopping** | Transition | Pipeline is being stopped (temporary) |
+| **Terminating** | Transition | Pipeline is being terminated (temporary) |
+
+### State Transition Diagrams
+
+#### States
+```mermaid
+stateDiagram
+  direction LR
+  [*] --> Created
+  Created --> Running
+  Running --> Stopping
+  Stopping --> Stopped
+  Stopped --> Resuming
+  Terminating --> Stopped
+  Resuming --> Running
+  Any --> Terminating
+```
+
+### Key Operations
+
+- **Start**: Created → Running
+- **Stop**: Running → Stopping → Stopped
+- **Resume**: Stopped → Resuming → Running  
+- **Edit**: Stopped → Resuming → Running 
+- **Terminate**: Any → Terminating → Stopped
+- **Delete**: Stopped → [deleted]
+
+### Operation Notes
+
+- **Edit Operation**: Requires pipeline to be in Stopped state, then follows same path as Resume
+- **Transition States**: Temporary states during async operations
+- **Terminate**: Can interrupt any operation and force pipeline to Stopped state
+- **Failed State**: Excluded from diagrams (handled separately in error scenarios)
+
 ## 🛠️ Development Setup
 
 ### Prerequisites

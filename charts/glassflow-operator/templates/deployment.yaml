@@ -90,6 +90,8 @@ spec:
           value: {{ .Values.global.observability.metrics.enabled | quote }}
         - name: OBSERVABILITY_OTEL_ENDPOINT
           value: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}.svc.cluster.local:4318"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}.svc.cluster.local:4318"
         - name: INGESTOR_LOG_LEVEL
           value: {{ .Values.glassflowComponents.ingestor.logLevel | quote }}
         - name: JOIN_LOG_LEVEL
@@ -102,6 +104,16 @@ spec:
           value: {{ .Values.glassflowComponents.join.image.tag | quote }}
         - name: SINK_IMAGE_TAG
           value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
+        - name: OPERATOR_IMAGE_TAG
+          value: {{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion | quote }}
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:
