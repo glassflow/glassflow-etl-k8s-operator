@@ -463,14 +463,15 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 }
 
 func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	log.Info("reconciling pipeline helm uninstall - FORCING cleanup regardless of current status", "pipeline_id", p.Spec.ID, "current_status", p.Status)
+	pipelineID := p.Spec.ID
+	log.Info("reconciling pipeline helm uninstall - FORCING cleanup regardless of current status", "pipeline_id", pipelineID, "current_status", p.Status)
 
 	// FORCE cleanup regardless of current status - this is helm uninstall!
-	log.Info("HELM UNINSTALL: Forcing immediate cleanup of pipeline", "pipeline_id", p.Spec.ID)
+	log.Info("HELM UNINSTALL: Forcing immediate cleanup of pipeline", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already stopped
 	if p.Status == etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped) {
-		log.Info("pipeline already stopped during helm uninstall", "pipeline_id", p.Spec.ID)
+		log.Info("pipeline already stopped during helm uninstall", "pipeline_id", pipelineID)
 		// Remove helm uninstall annotation and finalizer to allow cleanup
 		annotations := p.GetAnnotations()
 		if annotations != nil {
@@ -478,7 +479,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 			p.SetAnnotations(annotations)
 			err := r.Update(ctx, &p)
 			if err != nil {
-				log.Error(err, "failed to remove helm uninstall annotation", "pipeline_id", p.Spec.ID)
+				log.Error(err, "failed to remove helm uninstall annotation", "pipeline_id", pipelineID)
 			}
 		}
 		err := r.removeFinalizer(ctx, &p)
@@ -493,30 +494,30 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	}
 
 	// FORCE cleanup - skip normal termination process for helm uninstall
-	log.Info("HELM UNINSTALL: Force deleting pipeline namespace and resources", "pipeline_id", p.Spec.ID)
+	log.Info("HELM UNINSTALL: Force deleting pipeline namespace and resources", "pipeline_id", pipelineID)
 
 	// Force delete namespace for this pipeline (this will delete all deployments)
 	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
-		log.Error(err, "failed to delete pipeline namespace during helm uninstall", "pipeline_id", p.Spec.ID)
+		log.Error(err, "failed to delete pipeline namespace during helm uninstall", "pipeline_id", pipelineID)
 		// Continue anyway - we're in force cleanup mode
 	}
 
 	// Clean up NATS streams but keep the pipeline configuration
 	err = r.cleanupNATSPipelineResources(ctx, log, p)
 	if err != nil {
-		log.Info("failed to cleanup NATS resources during helm uninstall", "pipeline_id", p.Spec.ID)
+		log.Info("failed to cleanup NATS resources during helm uninstall", "pipeline_id", pipelineID)
 		// Don't return error here - we're in force cleanup mode
 	}
 
 	// Clean up pipeline configuration from NATS KV store
 	if r.NATSClient != nil {
-		err = r.NATSClient.DeletePipeline(ctx, p.Spec.ID)
+		err = r.NATSClient.DeletePipeline(ctx, pipelineID)
 		if err != nil {
-			log.Info("failed to delete pipeline configuration from NATS KV store", "pipeline_id", p.Spec.ID)
+			log.Info("failed to delete pipeline configuration from NATS KV store", "pipeline_id", pipelineID)
 			// Don't return error here - we're in force cleanup mode
 		} else {
-			log.Info("successfully deleted pipeline configuration from NATS KV store", "pipeline_id", p.Spec.ID)
+			log.Info("successfully deleted pipeline configuration from NATS KV store", "pipeline_id", pipelineID)
 		}
 	}
 
@@ -536,7 +537,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		p.SetAnnotations(annotations)
 		err = r.Update(ctx, &p)
 		if err != nil {
-			log.Error(err, "failed to remove annotations during helm uninstall", "pipeline_id", p.Spec.ID)
+			log.Error(err, "failed to remove annotations during helm uninstall", "pipeline_id", pipelineID)
 		}
 	}
 
@@ -552,7 +553,12 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
-	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	// Record success metrics
+	r.recordMetricsIfEnabled(func(m *observability.Meter) {
+		m.RecordReconcileOperation(ctx, "uninstall", "success", pipelineID)
+	})
+
+	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", pipelineID)
 	return ctrl.Result{}, nil
 }
 
