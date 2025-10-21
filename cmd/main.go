@@ -220,12 +220,11 @@ func main() {
 		"PIPELINES_NAMESPACE_NAME", "glassflow-pipelines"),
 		"Target namespace name when auto=false (default: glassflow-pipelines)")
 
-	// TODO - before merge set defaults to false, this just for testing before chart-release
 	flag.BoolVar(&pipelinesNamespaceAuto, "pipelines-namespace-auto", func() bool {
-		if b, err := strconv.ParseBool(getEnvOrDefault("PIPELINES_NAMESPACE_AUTO", "false")); err == nil {
+		if b, err := strconv.ParseBool(getEnvOrDefault("PIPELINES_NAMESPACE_AUTO", "true")); err == nil {
 			return b
 		}
-		return false
+		return true
 	}(), "Enable automatic creation of per-pipeline namespaces (default: true)")
 
 	opts := zap.Options{

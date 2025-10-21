@@ -1011,11 +1011,11 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	log.Info("reconciling pipeline edit", "pipeline_id", pipelineID)
 
-	namespace := "pipeline-" + p.Spec.ID
+	namespace := r.getTargetNamespace(p)
 
 	// Update the pipeline config secret with new config
 	labels := preparePipelineLabels(p)
-	secretName := types.NamespacedName{Namespace: namespace, Name: p.Spec.ID}
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, p.Spec.ID)}
 	_, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)
@@ -1041,7 +1041,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	}
 
 	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, "sink")
+	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
@@ -1057,7 +1057,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	// Step 2: Create Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, "join")
+		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
@@ -1074,7 +1074,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	// Step 3: Create Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := fmt.Sprintf("ingestor-%d", i)
+		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
