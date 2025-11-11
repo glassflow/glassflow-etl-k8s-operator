@@ -33,7 +33,7 @@ controllerManager:
         - ALL
     image:
       repository: glassflow-etl-k8s-operator
-      tag: v1.2.1
+      tag: v1.3.0
       pullPolicy: Always
     resources:
       limits:
@@ -60,7 +60,7 @@ glassflowComponents:
   ingestor:
     image:
       repository: glassflow-etl-ingestor
-      tag: stable
+      tag: v2.4.0
     logLevel: "INFO"
     resources:
       requests:
@@ -74,7 +74,7 @@ glassflowComponents:
   join:
     image:
       repository: glassflow-etl-join
-      tag: stable
+      tag: v2.4.0
     logLevel: "INFO"
     resources:
       requests:
@@ -88,7 +88,7 @@ glassflowComponents:
   sink:
     image:
       repository: glassflow-etl-sink
-      tag: stable
+      tag: v2.4.0
     logLevel: "INFO"
     resources:
       requests:
