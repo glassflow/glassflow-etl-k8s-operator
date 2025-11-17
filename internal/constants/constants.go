@@ -22,3 +22,14 @@ const (
 	// ReconcileTimeout is the maximum duration a reconcile operation can run before timing out
 	ReconcileTimeout = 10 * time.Minute
 )
+
+// Pipeline operation type constants
+const (
+	OperationCreate        = "create"
+	OperationResume        = "resume"
+	OperationStop          = "stop"
+	OperationEdit          = "edit"
+	OperationDelete        = "delete"
+	OperationTerminate     = "terminate"
+	OperationHelmUninstall = "helm-uninstall"
+)

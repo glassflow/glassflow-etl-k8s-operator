@@ -171,37 +171,37 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// Helm uninstall has highest priority - it interrupts any ongoing operation
 		var operation string
 		if _, hasHelmUninstall := annotations[constants.PipelineHelmUninstallAnnotation]; hasHelmUninstall {
-			operation = "helm-uninstall"
+			operation = constants.OperationHelmUninstall
 			log.Info("HELM UNINSTALL detected - interrupting any ongoing operations", "pipeline_id", p.Spec.ID)
 		} else if _, hasTerminate := annotations[constants.PipelineDeleteAnnotation]; hasTerminate {
-			operation = "delete"
+			operation = constants.OperationDelete
 		} else if _, hasTerminate := annotations[constants.PipelineTerminateAnnotation]; hasTerminate {
-			operation = "terminate"
+			operation = constants.OperationTerminate
 		} else if _, hasCreate := annotations[constants.PipelineCreateAnnotation]; hasCreate {
-			operation = "create"
+			operation = constants.OperationCreate
 		} else if _, hasStop := annotations[constants.PipelineStopAnnotation]; hasStop {
-			operation = "stop"
+			operation = constants.OperationStop
 		} else if _, hasResume := annotations[constants.PipelineResumeAnnotation]; hasResume {
-			operation = "resume"
+			operation = constants.OperationResume
 		} else if _, hasEdit := annotations[constants.PipelineEditAnnotation]; hasEdit {
-			operation = "edit"
+			operation = constants.OperationEdit
 		}
 
 		// Execute the appropriate operation
 		switch operation {
-		case "helm-uninstall":
+		case constants.OperationHelmUninstall:
 			return r.reconcileHelmUninstall(ctx, log, p)
-		case "create":
+		case constants.OperationCreate:
 			return r.createPipeline(ctx, p)
-		case "resume":
+		case constants.OperationResume:
 			return r.reconcileResume(ctx, log, p)
-		case "stop":
+		case constants.OperationStop:
 			return r.reconcileStop(ctx, log, p)
-		case "edit":
+		case constants.OperationEdit:
 			return r.reconcileEdit(ctx, log, p)
-		case "terminate":
+		case constants.OperationTerminate:
 			return r.reconcileTerminate(ctx, log, p)
-		case "delete":
+		case constants.OperationDelete:
 			return r.reconcileDelete(ctx, log, p)
 		}
 	}
@@ -238,7 +238,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(ctx, log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, "create")
+		return r.handleOperationTimeout(ctx, log, &p, constants.OperationCreate)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -372,7 +372,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		delete(annotations, constants.PipelineCreateAnnotation)
-		r.clearOperationStartTime(ctx, &p)
+		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
@@ -679,7 +679,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(ctx, log, p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, p, "stop")
+				return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 			}
 
 			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
@@ -707,7 +707,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for timeout before checking pending messages
 		timedOut, _ := r.checkOperationTimeout(ctx, log, p)
 		if timedOut {
-			return r.handleOperationTimeout(ctx, log, p, "stop")
+			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 		}
 
 		// Check for pending messages first
@@ -727,7 +727,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(ctx, log, p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, p, "stop")
+				return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 			}
 
 			log.Info("deleting join deployment", "namespace", namespace)
@@ -774,7 +774,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for timeout before requeuing
 		timedOut, _ := r.checkOperationTimeout(ctx, log, p)
 		if timedOut {
-			return r.handleOperationTimeout(ctx, log, p, "stop")
+			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 		}
 
 		log.Info("deleting sink deployment", "namespace", namespace)
@@ -904,7 +904,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(ctx, log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, "resume")
+		return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -957,7 +957,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		// Check for timeout before requeuing
 		timedOut, _ := r.checkOperationTimeout(ctx, log, &p)
 		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, "resume")
+			return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
 		}
 
 		log.Info("creating sink deployment", "namespace", namespace)
@@ -981,7 +981,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(ctx, log, &p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "resume")
+				return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
 			}
 
 			log.Info("creating join deployment", "namespace", namespace)
@@ -1007,7 +1007,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(ctx, log, &p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "resume")
+				return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
 			}
 
 			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
@@ -1032,7 +1032,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		delete(annotations, constants.PipelineResumeAnnotation)
-		r.clearOperationStartTime(ctx, &p)
+		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
@@ -1064,7 +1064,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(ctx, log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, "stop")
+		return r.handleOperationTimeout(ctx, log, &p, constants.OperationStop)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -1108,7 +1108,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		delete(annotations, constants.PipelineStopAnnotation)
-		r.clearOperationStartTime(ctx, &p)
+		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusStopped)
 		err = r.Update(ctx, &p)
@@ -1136,7 +1136,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(ctx, log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, "edit")
+		return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -1185,7 +1185,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		// Check for timeout before requeuing
 		timedOut, _ := r.checkOperationTimeout(ctx, log, &p)
 		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, "edit")
+			return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
 		}
 
 		log.Info("creating sink deployment", "namespace", namespace)
@@ -1207,7 +1207,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(ctx, log, &p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "edit")
+				return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
 			}
 
 			log.Info("creating join deployment", "namespace", namespace)
@@ -1231,7 +1231,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(ctx, log, &p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "edit")
+				return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
 			}
 
 			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
@@ -1254,7 +1254,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		delete(annotations, constants.PipelineEditAnnotation)
-		r.clearOperationStartTime(ctx, &p)
+		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
@@ -1306,7 +1306,7 @@ func (r *PipelineReconciler) checkOperationTimeout(ctx context.Context, log logr
 	if err != nil {
 		log.Error(err, "failed to parse operation start time", "pipeline_id", p.Spec.ID, "start_time", startTimeStr)
 		// If we can't parse the time, clear it and continue
-		r.clearOperationStartTime(ctx, p)
+		r.clearOperationStartTime(p)
 		return false, 0
 	}
 
@@ -1337,7 +1337,7 @@ func (r *PipelineReconciler) setOperationStartTime(ctx context.Context, p *etlv1
 }
 
 // clearOperationStartTime clears the operation start time annotation
-func (r *PipelineReconciler) clearOperationStartTime(ctx context.Context, p *etlv1alpha1.Pipeline) {
+func (r *PipelineReconciler) clearOperationStartTime(p *etlv1alpha1.Pipeline) {
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		delete(annotations, constants.PipelineOperationStartTimeAnnotation)
@@ -1359,19 +1359,19 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 	}
 
 	// Clear operation start time
-	r.clearOperationStartTime(ctx, p)
+	r.clearOperationStartTime(p)
 
 	// Clear the operation annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
 		switch operation {
-		case "create":
+		case constants.OperationCreate:
 			delete(annotations, constants.PipelineCreateAnnotation)
-		case "resume":
+		case constants.OperationResume:
 			delete(annotations, constants.PipelineResumeAnnotation)
-		case "stop":
+		case constants.OperationStop:
 			delete(annotations, constants.PipelineStopAnnotation)
-		case "edit":
+		case constants.OperationEdit:
 			delete(annotations, constants.PipelineEditAnnotation)
 		}
 		p.SetAnnotations(annotations)
