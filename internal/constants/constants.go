@@ -1,5 +1,7 @@
 package constants
 
+import "time"
+
 // Kubernetes annotation constants for pipeline operations
 const (
 	// PipelineFinalizerName is the name of the finalizer added to Pipeline resources
@@ -13,4 +15,21 @@ const (
 	PipelineDeleteAnnotation        = "pipeline.etl.glassflow.io/delete"
 	PipelineEditAnnotation          = "pipeline.etl.glassflow.io/edit"
 	PipelineHelmUninstallAnnotation = "pipeline.etl.glassflow.io/helm-uninstall"
+
+	// Pipeline operation start time annotation - tracks when an operation started
+	PipelineOperationStartTimeAnnotation = "pipeline.etl.glassflow.io/operation-start-time"
+
+	// ReconcileTimeout is the maximum duration a reconcile operation can run before timing out
+	ReconcileTimeout = 10 * time.Minute
+)
+
+// Pipeline operation type constants
+const (
+	OperationCreate        = "create"
+	OperationResume        = "resume"
+	OperationStop          = "stop"
+	OperationEdit          = "edit"
+	OperationDelete        = "delete"
+	OperationTerminate     = "terminate"
+	OperationHelmUninstall = "helm-uninstall"
 )
