@@ -37,6 +37,7 @@ import (
 )
 
 // stopPipelineComponents stops all pipeline components in the correct order with pending message checks
+// nolint:gocyclo
 func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(*p)
 
