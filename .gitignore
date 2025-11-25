@@ -31,3 +31,4 @@ generated
 
 # Go vendor directory
 vendor
+.DS_Store

@@ -26,7 +26,17 @@ rules:
   - delete
   - get
   - list
-  - watch 
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
 - apiGroups:
   - apps
   resources:
@@ -39,6 +49,16 @@ rules:
   - watch
   - patch
   - update
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
 - apiGroups:
   - etl.glassflow.io
   resources:

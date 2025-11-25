@@ -53,6 +53,28 @@ func (r *PipelineReconciler) getSinkLabels() map[string]string {
 	return labels
 }
 
+// getDedupLabels returns labels for dedup components
+func (r *PipelineReconciler) getDedupLabels(topic string) map[string]string {
+	labels := map[string]string{
+		"etl.glassflow.io/component": "dedup",
+		"etl.glassflow.io/topic":     topic,
+	}
+
+	return labels
+}
+
+// getEffectiveOutputStream returns the effective output stream name for a source stream,
+// accounting for deduplication. If dedup is enabled and has an output stream configured,
+// returns the dedup output stream. Otherwise returns the stream's standard output stream.
+func getEffectiveOutputStream(stream etlv1alpha1.SourceStream) string {
+	if stream.Deduplication != nil &&
+		stream.Deduplication.Enabled &&
+		stream.Deduplication.OutputStream != "" {
+		return stream.Deduplication.OutputStream
+	}
+	return stream.OutputStream
+}
+
 // preparePipelineLabels returns labels for pipeline resources
 func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 	return map[string]string{"etl.glassflow.io/glassflow-etl-k8s-operator-id": p.Spec.ID}
