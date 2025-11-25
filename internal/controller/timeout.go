@@ -116,6 +116,13 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 			delete(annotations, constants.PipelineEditAnnotation)
 		}
 		p.SetAnnotations(annotations)
+
+		// Terminate all pipeline components
+		result, err := r.terminatePipelineComponents(ctx, log, *p)
+		if err != nil || result.Requeue {
+			return result, err
+		}
+
 		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusFailed)
 		err = r.Update(ctx, p)
 		if err != nil {
