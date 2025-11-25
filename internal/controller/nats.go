@@ -51,19 +51,8 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 	rightConsumerName := p.Spec.Join.NATSRightConsumerName
 
 	// Use dedup output stream if dedup enabled, otherwise ingestor output
-	leftStreamName := p.Spec.Ingestor.Streams[0].OutputStream
-	if p.Spec.Ingestor.Streams[0].Deduplication != nil &&
-		p.Spec.Ingestor.Streams[0].Deduplication.Enabled &&
-		p.Spec.Ingestor.Streams[0].Deduplication.OutputStream != "" {
-		leftStreamName = p.Spec.Ingestor.Streams[0].Deduplication.OutputStream
-	}
-
-	rightStreamName := p.Spec.Ingestor.Streams[1].OutputStream
-	if p.Spec.Ingestor.Streams[1].Deduplication != nil &&
-		p.Spec.Ingestor.Streams[1].Deduplication.Enabled &&
-		p.Spec.Ingestor.Streams[1].Deduplication.OutputStream != "" {
-		rightStreamName = p.Spec.Ingestor.Streams[1].Deduplication.OutputStream
-	}
+	leftStreamName := getEffectiveOutputStream(p.Spec.Ingestor.Streams[0])
+	rightStreamName := getEffectiveOutputStream(p.Spec.Ingestor.Streams[1])
 
 	// Check left stream
 	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
@@ -90,15 +79,7 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 	if p.Spec.Join.Enabled {
 		sinkStreamName = p.Spec.Join.OutputStream
 	} else {
-		stream := p.Spec.Ingestor.Streams[0]
-		// Use dedup output if enabled, otherwise ingestor output
-		if stream.Deduplication != nil &&
-			stream.Deduplication.Enabled &&
-			stream.Deduplication.OutputStream != "" {
-			sinkStreamName = stream.Deduplication.OutputStream
-		} else {
-			sinkStreamName = stream.OutputStream
-		}
+		sinkStreamName = getEffectiveOutputStream(p.Spec.Ingestor.Streams[0])
 	}
 
 	// Check sink stream
