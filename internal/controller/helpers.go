@@ -53,6 +53,16 @@ func (r *PipelineReconciler) getSinkLabels() map[string]string {
 	return labels
 }
 
+// getDedupLabels returns labels for dedup components
+func (r *PipelineReconciler) getDedupLabels(topic string) map[string]string {
+	labels := map[string]string{
+		"etl.glassflow.io/component": "dedup",
+		"etl.glassflow.io/topic":     topic,
+	}
+
+	return labels
+}
+
 // preparePipelineLabels returns labels for pipeline resources
 func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 	return map[string]string{"etl.glassflow.io/glassflow-etl-k8s-operator-id": p.Spec.ID}

@@ -88,6 +88,7 @@ type PipelineReconciler struct {
 	IngestorImage string
 	JoinImage     string
 	SinkImage     string
+	DedupImage    string
 	// Component resource configurations
 	IngestorCPURequest    string
 	IngestorCPULimit      string
@@ -101,10 +102,15 @@ type PipelineReconciler struct {
 	SinkCPULimit          string
 	SinkMemoryRequest     string
 	SinkMemoryLimit       string
+	DedupCPURequest       string
+	DedupCPULimit         string
+	DedupMemoryRequest    string
+	DedupMemoryLimit      string
 	// Component affinity configurations
 	IngestorAffinity string
 	JoinAffinity     string
 	SinkAffinity     string
+	DedupAffinity    string
 	// Observability configurations
 	ObservabilityLogsEnabled    string
 	ObservabilityMetricsEnabled string
@@ -112,9 +118,11 @@ type PipelineReconciler struct {
 	IngestorLogLevel            string
 	JoinLogLevel                string
 	SinkLogLevel                string
+	DedupLogLevel               string
 	IngestorImageTag            string
 	JoinImageTag                string
 	SinkImageTag                string
+	DedupImageTag               string
 	// Pipelines namespace configuration
 	PipelinesNamespaceAuto bool
 	PipelinesNamespaceName string
@@ -331,7 +339,54 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		}
 	}
 
-	// Step 3: Create Ingestor deployments
+	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
+	anyDedupEnabled := false
+	for _, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication != nil && stream.Deduplication.Enabled {
+			anyDedupEnabled = true
+			break
+		}
+	}
+
+	if anyDedupEnabled {
+		// Check if all dedup StatefulSets are ready
+		allDedupReady := true
+		for i, stream := range p.Spec.Ingestor.Streams {
+			if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+				continue
+			}
+
+			dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+			ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
+			}
+			if !ready {
+				allDedupReady = false
+				break
+			}
+		}
+
+		if !allDedupReady {
+			// Check for timeout before requeuing
+			timedOut, _ := r.checkOperationTimeout(log, &p)
+			if timedOut {
+				return r.handleOperationTimeout(ctx, log, &p, "create")
+			}
+
+			log.Info("creating dedup statefulsets", "namespace", namespace)
+			err := r.createDedups(ctx, log, ns, labels, secret, p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create dedup statefulsets: %w", err)
+			}
+			log.Info("waiting for dedup statefulsets to be ready", "namespace", namespace)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("dedup statefulsets are ready", "namespace", namespace)
+		}
+	}
+
+	// Step 4: Create Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
 		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
@@ -451,6 +506,13 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		log.Info("failed to cleanup NATS resources during termination", "pipeline_id", p.Spec.ID)
 		// Don't return error here as namespace is already deleted
 		// Just log and continue
+	}
+
+	// Clean up PVCs for dedup StatefulSets
+	err = r.cleanupDedupPVCs(ctx, log, p)
+	if err != nil {
+		log.Error(err, "failed to cleanup dedup PVCs")
+		// Don't fail the deletion, just log
 	}
 
 	// Clean up pipeline configuration from NATS KV store
@@ -705,7 +767,48 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		}
 	}
 
-	// Step 3: Create Ingestor deployments
+	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
+	anyDedupEnabled := false
+	for _, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication != nil && stream.Deduplication.Enabled {
+			anyDedupEnabled = true
+			break
+		}
+	}
+
+	if anyDedupEnabled {
+		// Check if all dedup StatefulSets are ready
+		allDedupReady := true
+		for i, stream := range p.Spec.Ingestor.Streams {
+			if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+				continue
+			}
+
+			dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+			ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
+			}
+			if !ready {
+				allDedupReady = false
+				break
+			}
+		}
+
+		if !allDedupReady {
+			log.Info("creating dedup statefulsets", "namespace", namespace)
+			err := r.createDedups(ctx, log, ns, labels, secret, p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create dedup statefulsets: %w", err)
+			}
+			log.Info("waiting for dedup statefulsets to be ready", "namespace", namespace)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("dedup statefulsets are ready", "namespace", namespace)
+		}
+	}
+
+	// Step 4: Create Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
 		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
@@ -929,7 +1032,48 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		}
 	}
 
-	// Step 3: Create Ingestor deployments
+	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
+	anyDedupEnabled := false
+	for _, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication != nil && stream.Deduplication.Enabled {
+			anyDedupEnabled = true
+			break
+		}
+	}
+
+	if anyDedupEnabled {
+		// Check if all dedup StatefulSets are ready
+		allDedupReady := true
+		for i, stream := range p.Spec.Ingestor.Streams {
+			if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+				continue
+			}
+
+			dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+			ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
+			}
+			if !ready {
+				allDedupReady = false
+				break
+			}
+		}
+
+		if !allDedupReady {
+			log.Info("creating dedup statefulsets", "namespace", namespace)
+			err := r.createDedups(ctx, log, ns, labels, secret, p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create dedup statefulsets: %w", err)
+			}
+			log.Info("waiting for dedup statefulsets to be ready", "namespace", namespace)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("dedup statefulsets are ready", "namespace", namespace)
+		}
+	}
+
+	// Step 4: Create Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
 		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
 		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
