@@ -646,36 +646,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			return fmt.Errorf("create dedup-%d statefulset: %w", i, err)
 		}
 
-		// Create headless service for StatefulSet
-		err = r.createDedupService(ctx, ns, resourceRef, dedupLabels)
-		if err != nil {
-			return fmt.Errorf("create dedup-%d service: %w", i, err)
-		}
 	}
 
-	return nil
-}
-
-// createDedupService creates a headless service for dedup StatefulSet
-func (r *PipelineReconciler) createDedupService(ctx context.Context, ns v1.Namespace, name string, labels map[string]string) error {
-	service := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns.Name,
-			Labels:    labels,
-		},
-		Spec: v1.ServiceSpec{
-			ClusterIP: "None",
-			Selector:  labels,
-			Ports: []v1.ServicePort{
-				{Name: "metrics", Port: 8080, Protocol: v1.ProtocolTCP},
-			},
-		},
-	}
-
-	err := r.Create(ctx, service)
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create service: %w", err)
-	}
 	return nil
 }
