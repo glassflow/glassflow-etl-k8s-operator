@@ -41,4 +41,11 @@ data:
   JOIN_IMAGE_TAG: {{ .Values.glassflowComponents.join.image.tag | quote }}
   SINK_IMAGE_TAG: {{ .Values.glassflowComponents.sink.image.tag | quote }}
   OPERATOR_IMAGE_TAG: {{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion | quote }}
+  DEDUP_IMAGE_TAG: {{ .Values.glassflowComponents.dedup.image.tag | quote }}
+  DEDUP_CPU_REQUEST: {{ .Values.glassflowComponents.dedup.resources.requests.cpu | quote }}
+  DEDUP_CPU_LIMIT: {{ .Values.glassflowComponents.dedup.resources.limits.cpu | quote }}
+  DEDUP_MEMORY_REQUEST: {{ .Values.glassflowComponents.dedup.resources.requests.memory | quote }}
+  DEDUP_MEMORY_LIMIT: {{ .Values.glassflowComponents.dedup.resources.limits.memory | quote }}
+  DEDUP_AFFINITY: {{ .Values.glassflowComponents.dedup.affinity | toJson | quote }}
+  DEDUP_LOG_LEVEL: {{ .Values.glassflowComponents.dedup.logLevel | quote }}
 

@@ -108,6 +108,23 @@ spec:
                             largest representable duration to approximately 290 years.
                           format: int64
                           type: integer
+                        deduplication:
+                          description: Operator-specific dedup configuration
+                          properties:
+                            enabled:
+                              type: boolean
+                            nats_consumer_name:
+                              type: string
+                            storage_class:
+                              type: string
+                            storage_size:
+                              type: string
+                            stream:
+                              type: string
+                          required:
+                          - enabled
+                          - stream
+                          type: object
                         replicas:
                           minimum: 1
                           type: integer

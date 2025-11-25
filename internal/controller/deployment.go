@@ -43,7 +43,7 @@ func (c *componentContainer) withEnv(env []v1.EnvVar) containerBuilder {
 // withImage implements containerBuilder.
 func (c *componentContainer) withImage(image string) containerBuilder {
 	c.con.Image = image
-	c.con.ImagePullPolicy = v1.PullAlways
+	c.con.ImagePullPolicy = v1.PullIfNotPresent
 	return c
 }
 
@@ -87,7 +87,7 @@ func (c *componentContainer) build() *v1.Container {
 		},
 	}
 	// TODO: Make it configurable may be?
-	c.con.ImagePullPolicy = v1.PullAlways
+	c.con.ImagePullPolicy = v1.PullIfNotPresent
 
 	return c.con
 }
@@ -189,4 +189,116 @@ func (c *componentDeployment) build() *appsv1.Deployment {
 	c.dep.Spec.Template.GetObjectMeta().SetLabels(c.dep.GetLabels())
 
 	return c.dep
+}
+
+// -------------------------------------------------------------------------------------------------------------------
+// StatefulSet Builder
+// -------------------------------------------------------------------------------------------------------------------
+
+type statefulSetBuilder interface {
+	withResourceName(name string) statefulSetBuilder
+	withNamespace(namespace v1.Namespace) statefulSetBuilder
+	withServiceName(serviceName string) statefulSetBuilder
+	withLabels(labels map[string]string) statefulSetBuilder
+	withVolume(volume v1.Volume) statefulSetBuilder
+	withContainer(container v1.Container) statefulSetBuilder
+	withReplicas(replicas int) statefulSetBuilder
+	withAffinity(affinityJSON string) statefulSetBuilder
+	withVolumeClaimTemplate(pvc v1.PersistentVolumeClaim) statefulSetBuilder
+	build() *appsv1.StatefulSet
+}
+
+type componentStatefulSet struct {
+	sts *appsv1.StatefulSet
+}
+
+func newComponentStatefulSetBuilder() *componentStatefulSet {
+	return &componentStatefulSet{
+		sts: &appsv1.StatefulSet{},
+	}
+}
+
+var _ statefulSetBuilder = (*componentStatefulSet)(nil)
+
+// withNamespace implements statefulSetBuilder.
+func (c *componentStatefulSet) withNamespace(namespace v1.Namespace) statefulSetBuilder {
+	c.sts.SetNamespace(namespace.GetName())
+	return c
+}
+
+// withResourceName implements statefulSetBuilder.
+func (c *componentStatefulSet) withResourceName(name string) statefulSetBuilder {
+	c.sts.SetName(name)
+	return c
+}
+
+// withServiceName implements statefulSetBuilder.
+func (c *componentStatefulSet) withServiceName(serviceName string) statefulSetBuilder {
+	c.sts.Spec.ServiceName = serviceName
+	return c
+}
+
+// withLabels implements statefulSetBuilder.
+func (c *componentStatefulSet) withLabels(labels map[string]string) statefulSetBuilder {
+	c.sts.SetLabels(labels)
+	return c
+}
+
+// withVolume implements statefulSetBuilder.
+func (c *componentStatefulSet) withVolume(volume v1.Volume) statefulSetBuilder {
+	c.sts.Spec.Template.Spec.Volumes = append(c.sts.Spec.Template.Spec.Volumes, volume)
+	c.sts.Spec.Template.Spec.SecurityContext = &v1.PodSecurityContext{
+		RunAsUser:  ptrInt64(1001),
+		RunAsGroup: ptrInt64(1001),
+		FSGroup:    ptrInt64(1001),
+	}
+	return c
+}
+
+// withContainer implements statefulSetBuilder.
+func (c *componentStatefulSet) withContainer(container v1.Container) statefulSetBuilder {
+	c.sts.Spec.Template.Spec.Containers = append(c.sts.Spec.Template.Spec.Containers, container)
+	return c
+}
+
+// withReplicas implements statefulSetBuilder.
+func (c *componentStatefulSet) withReplicas(replicas int) statefulSetBuilder {
+	if replicas > 0 {
+		c.sts.Spec.Replicas = ptrInt32(int32(replicas))
+	}
+	return c
+}
+
+// withAffinity implements statefulSetBuilder.
+func (c *componentStatefulSet) withAffinity(affinityJSON string) statefulSetBuilder {
+	if affinityJSON == "" {
+		return c
+	}
+
+	var affinity v1.Affinity
+	if err := json.Unmarshal([]byte(affinityJSON), &affinity); err != nil {
+		return c
+	}
+
+	c.sts.Spec.Template.Spec.Affinity = &affinity
+	return c
+}
+
+// withVolumeClaimTemplate implements statefulSetBuilder.
+func (c *componentStatefulSet) withVolumeClaimTemplate(pvc v1.PersistentVolumeClaim) statefulSetBuilder {
+	c.sts.Spec.VolumeClaimTemplates = append(c.sts.Spec.VolumeClaimTemplates, pvc)
+	return c
+}
+
+// build implements statefulSetBuilder.
+func (c *componentStatefulSet) build() *appsv1.StatefulSet {
+	if c.sts.Spec.Replicas == nil {
+		c.sts.Spec.Replicas = ptrInt32(1)
+	}
+	c.sts.Spec.Selector = &metav1.LabelSelector{
+		MatchLabels: c.sts.GetLabels(),
+	}
+	c.sts.Spec.Template.GetObjectMeta().SetLabels(c.sts.GetLabels())
+
+	return c.sts
 }
