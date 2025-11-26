@@ -49,8 +49,10 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 	// Get consumer names and stream names directly from spec
 	leftConsumerName := p.Spec.Join.NATSLeftConsumerName
 	rightConsumerName := p.Spec.Join.NATSRightConsumerName
-	leftStreamName := p.Spec.Ingestor.Streams[0].OutputStream
-	rightStreamName := p.Spec.Ingestor.Streams[1].OutputStream
+
+	// Use dedup output stream if dedup enabled, otherwise ingestor output
+	leftStreamName := getEffectiveOutputStream(p.Spec.Ingestor.Streams[0])
+	rightStreamName := getEffectiveOutputStream(p.Spec.Ingestor.Streams[1])
 
 	// Check left stream
 	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
@@ -77,13 +79,31 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 	if p.Spec.Join.Enabled {
 		sinkStreamName = p.Spec.Join.OutputStream
 	} else {
-		sinkStreamName = p.Spec.Ingestor.Streams[0].OutputStream
+		sinkStreamName = getEffectiveOutputStream(p.Spec.Ingestor.Streams[0])
 	}
 
 	// Check sink stream
 	err := r.checkConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
 	if err != nil {
 		return fmt.Errorf("sink consumer: %w", err)
+	}
+
+	return nil
+}
+
+// checkDedupPendingMessages checks if a specific dedup consumer has pending messages
+func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
+	stream := p.Spec.Ingestor.Streams[streamIndex]
+	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+		return nil
+	}
+
+	consumerName := stream.Deduplication.NATSConsumerName
+	inputStreamName := stream.OutputStream // Dedup reads from ingestor output
+
+	err := r.checkConsumerPendingMessages(ctx, inputStreamName, consumerName)
+	if err != nil {
+		return fmt.Errorf("dedup-%d consumer: %w", streamIndex, err)
 	}
 
 	return nil
@@ -105,9 +125,23 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 
 	// create source streams
 	for _, s := range p.Spec.Ingestor.Streams {
-		err := r.NATSClient.CreateOrUpdateStream(ctx, s.OutputStream, s.DedupWindow)
+		// Don't use NATS dedup if we have a separate dedup service
+		dedupWindow := time.Duration(0)
+		if s.Deduplication == nil || !s.Deduplication.Enabled {
+			dedupWindow = s.DedupWindow // Fall back to NATS dedup
+		}
+
+		err := r.NATSClient.CreateOrUpdateStream(ctx, s.OutputStream, dedupWindow)
 		if err != nil {
 			return fmt.Errorf("create stream %s: %w", s.OutputStream, err)
+		}
+
+		// Create dedup output stream if dedup service is enabled
+		if s.Deduplication != nil && s.Deduplication.Enabled && s.Deduplication.OutputStream != "" {
+			err := r.NATSClient.CreateOrUpdateStream(ctx, s.Deduplication.OutputStream, 0)
+			if err != nil {
+				return fmt.Errorf("create dedup output stream %s: %w", s.Deduplication.OutputStream, err)
+			}
 		}
 	}
 
@@ -129,9 +163,15 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 				ttl = p.Spec.Join.RightBufferTTL
 			}
 
-			err := r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, stream.OutputStream, ttl)
+			// Use dedup output stream as input to join if dedup enabled
+			kvStreamName := stream.OutputStream
+			if stream.Deduplication != nil && stream.Deduplication.Enabled && stream.Deduplication.OutputStream != "" {
+				kvStreamName = stream.Deduplication.OutputStream
+			}
+
+			err := r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStreamName, ttl)
 			if err != nil {
-				return fmt.Errorf("create join KV store %s: %w", stream.OutputStream, err)
+				return fmt.Errorf("create join KV store %s: %w", kvStreamName, err)
 			}
 		}
 	}
@@ -182,6 +222,19 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 				m.RecordNATSOperation(ctx, "delete_ingestor_stream", "success", p.Spec.ID)
 			})
 			log.Info("NATS ingestor output stream deleted successfully", "stream", stream.OutputStream)
+		}
+
+		// Delete dedup output stream if it exists
+		if stream.Deduplication != nil &&
+			stream.Deduplication.Enabled &&
+			stream.Deduplication.OutputStream != "" {
+			log.Info("deleting NATS dedup output stream", "stream", stream.Deduplication.OutputStream)
+			err := r.deleteNATSStream(ctx, log, stream.Deduplication.OutputStream)
+			if err != nil {
+				log.Error(err, "failed to cleanup dedup output stream", "stream", stream.Deduplication.OutputStream)
+				return fmt.Errorf("cleanup dedup output stream: %w", err)
+			}
+			log.Info("NATS dedup output stream deleted successfully", "stream", stream.Deduplication.OutputStream)
 		}
 	}
 
