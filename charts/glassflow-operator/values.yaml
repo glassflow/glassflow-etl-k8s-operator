@@ -99,3 +99,17 @@ glassflowComponents:
         memory: 1.5Gi
     # Node affinity for sink component (optional)
     affinity: {}
+  dedup:
+    image:
+      repository: glassflow-etl-dedup
+      tag: v2.4.0
+    logLevel: "INFO"
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 1.5Gi
+    # Node affinity for dedup component (optional)
+    affinity: {}

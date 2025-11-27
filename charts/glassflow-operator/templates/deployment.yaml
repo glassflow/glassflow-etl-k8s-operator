@@ -54,6 +54,8 @@ spec:
           value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.join.image.repository }}:{{ .Values.glassflowComponents.join.image.tag }}"
         - name: SINK_IMAGE
           value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.sink.image.repository }}:{{ .Values.glassflowComponents.sink.image.tag }}"
+        - name: DEDUP_IMAGE
+          value: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.glassflowComponents.dedup.image.repository }}:{{ .Values.glassflowComponents.dedup.image.tag }}"
         - name: INGESTOR_CPU_REQUEST
           value: {{ .Values.glassflowComponents.ingestor.resources.requests.cpu | quote }}
         - name: INGESTOR_CPU_LIMIT
@@ -78,12 +80,22 @@ spec:
           value: {{ .Values.glassflowComponents.sink.resources.requests.memory | quote }}
         - name: SINK_MEMORY_LIMIT
           value: {{ .Values.glassflowComponents.sink.resources.limits.memory | quote }}
+        - name: DEDUP_CPU_REQUEST
+          value: {{ .Values.glassflowComponents.dedup.resources.requests.cpu | quote }}
+        - name: DEDUP_CPU_LIMIT
+          value: {{ .Values.glassflowComponents.dedup.resources.limits.cpu | quote }}
+        - name: DEDUP_MEMORY_REQUEST
+          value: {{ .Values.glassflowComponents.dedup.resources.requests.memory | quote }}
+        - name: DEDUP_MEMORY_LIMIT
+          value: {{ .Values.glassflowComponents.dedup.resources.limits.memory | quote }}
         - name: INGESTOR_AFFINITY
           value: {{ .Values.glassflowComponents.ingestor.affinity | toJson | quote }}
         - name: JOIN_AFFINITY
           value: {{ .Values.glassflowComponents.join.affinity | toJson | quote }}
         - name: SINK_AFFINITY
           value: {{ .Values.glassflowComponents.sink.affinity | toJson | quote }}
+        - name: DEDUP_AFFINITY
+          value: {{ .Values.glassflowComponents.dedup.affinity | toJson | quote }}
         - name: OBSERVABILITY_LOGS_ENABLED
           value: {{ .Values.global.observability.logs.enabled | quote }}
         - name: OBSERVABILITY_METRICS_ENABLED
@@ -98,10 +110,14 @@ spec:
           value: {{ .Values.glassflowComponents.join.logLevel | quote }}
         - name: SINK_LOG_LEVEL
           value: {{ .Values.glassflowComponents.sink.logLevel | quote }}
+        - name: DEDUP_LOG_LEVEL
+          value: {{ .Values.glassflowComponents.dedup.logLevel | quote }}
         - name: INGESTOR_IMAGE_TAG
           value: {{ .Values.glassflowComponents.ingestor.image.tag | quote }}
         - name: JOIN_IMAGE_TAG
           value: {{ .Values.glassflowComponents.join.image.tag | quote }}
+        - name: DEDUP_IMAGE_TAG
+          value: {{ .Values.glassflowComponents.dedup.image.tag | quote }}
         - name: SINK_IMAGE_TAG
           value: {{ .Values.glassflowComponents.sink.image.tag | quote }}
         - name: OPERATOR_IMAGE_TAG

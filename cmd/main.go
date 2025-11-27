@@ -182,6 +182,15 @@ func main() {
 		"DEDUP_MEMORY_LIMIT", "512Mi"),
 		"Memory limit for dedup component")
 
+	// Dedup storage configuration
+	var dedupDefaultStorageSize, dedupDefaultStorageClass string
+	flag.StringVar(&dedupDefaultStorageSize, "dedup-default-storage-size", getEnvOrDefault(
+		"DEDUP_DEFAULT_STORAGE_SIZE", "10Gi"),
+		"Default storage size for dedup component")
+	flag.StringVar(&dedupDefaultStorageClass, "dedup-default-storage-class", getEnvOrDefault(
+		"DEDUP_DEFAULT_STORAGE_CLASS", ""),
+		"Default storage class for dedup component")
+
 	// Component affinity configuration
 	var ingestorAffinity, joinAffinity, sinkAffinity, dedupAffinity string
 	flag.StringVar(&ingestorAffinity, "ingestor-affinity", getEnvOrDefault(
@@ -425,6 +434,8 @@ func main() {
 		DedupCPULimit:               dedupCPULimit,
 		DedupMemoryRequest:          dedupMemoryRequest,
 		DedupMemoryLimit:            dedupMemoryLimit,
+		DedupDefaultStorageSize:     dedupDefaultStorageSize,
+		DedupDefaultStorageClass:    dedupDefaultStorageClass,
 		IngestorAffinity:            ingestorAffinity,
 		JoinAffinity:                joinAffinity,
 		SinkAffinity:                sinkAffinity,

@@ -43,7 +43,7 @@ func (c *componentContainer) withEnv(env []v1.EnvVar) containerBuilder {
 // withImage implements containerBuilder.
 func (c *componentContainer) withImage(image string) containerBuilder {
 	c.con.Image = image
-	c.con.ImagePullPolicy = v1.PullAlways
+	c.con.ImagePullPolicy = v1.PullNever
 	return c
 }
 
@@ -87,7 +87,7 @@ func (c *componentContainer) build() *v1.Container {
 		},
 	}
 	// TODO: Make it configurable may be?
-	c.con.ImagePullPolicy = v1.PullAlways
+	c.con.ImagePullPolicy = v1.PullNever
 
 	return c.con
 }

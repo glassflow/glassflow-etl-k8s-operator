@@ -555,10 +555,16 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			replicas = stream.Deduplication.Replicas
 		}
 
-		// Determine storage size (default to 10Gi)
-		storageSize := "10Gi"
+		// Determine storage size (use pipeline config, fallback to Helm default)
+		storageSize := r.DedupDefaultStorageSize
 		if stream.Deduplication.StorageSize != "" {
 			storageSize = stream.Deduplication.StorageSize
+		}
+
+		// Determine storage class (use pipeline config, fallback to Helm default)
+		storageClass := r.DedupDefaultStorageClass
+		if stream.Deduplication.StorageClass != "" {
+			storageClass = stream.Deduplication.StorageClass
 		}
 
 		container := newComponentContainerBuilder().
@@ -617,8 +623,8 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			},
 		}
 
-		if stream.Deduplication.StorageClass != "" {
-			pvcTemplate.Spec.StorageClassName = &stream.Deduplication.StorageClass
+		if storageClass != "" {
+			pvcTemplate.Spec.StorageClassName = &storageClass
 		}
 
 		// Build StatefulSet

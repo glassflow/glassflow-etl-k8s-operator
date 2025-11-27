@@ -106,6 +106,9 @@ type PipelineReconciler struct {
 	DedupCPULimit         string
 	DedupMemoryRequest    string
 	DedupMemoryLimit      string
+	// Dedup storage configurations
+	DedupDefaultStorageSize  string
+	DedupDefaultStorageClass string
 	// Component affinity configurations
 	IngestorAffinity string
 	JoinAffinity     string
