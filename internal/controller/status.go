@@ -46,6 +46,13 @@ func (r *PipelineReconciler) recordMetricsIfEnabled(fn func(*observability.Meter
 
 // updatePipelineStatus updates PostgreSQL and CRD status (validation handled by backend API)
 func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus postgresstorage.PipelineStatus, errors []string) error {
+	// Check if status is already the same - avoid duplicate updates and history entries
+	currentStatus := postgresstorage.PipelineStatus(p.Status)
+	if currentStatus == newStatus {
+		log.V(1).Info("pipeline status unchanged, skipping update", "pipeline_id", p.Spec.ID, "status", newStatus)
+		return nil
+	}
+
 	// Status validation is now handled by the backend API, so we trust the status update
 
 	// Update PostgreSQL storage
