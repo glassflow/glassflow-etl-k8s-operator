@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"time"
 
+	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 )
 
@@ -92,8 +92,9 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 	pipelineID := p.Spec.ID
 	log.Error(fmt.Errorf("operation timed out after %v", constants.ReconcileTimeout), "operation timed out", "pipeline_id", pipelineID, "operation", operation)
 
-	// Update status to Failed
-	err := r.updatePipelineStatus(ctx, log, p, nats.PipelineStatusFailed)
+	// Update status to Failed with error message
+	errorMsg := fmt.Sprintf("operation timed out after %v", constants.ReconcileTimeout)
+	err := r.updatePipelineStatus(ctx, log, p, postgresstorage.PipelineStatusFailed, []string{errorMsg})
 	if err != nil {
 		log.Error(err, "failed to update pipeline status to Failed", "pipeline_id", pipelineID)
 		// Continue anyway to clear annotations
@@ -123,7 +124,7 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 			return result, err
 		}
 
-		p.Status = etlv1alpha1.PipelineStatus(nats.PipelineStatusFailed)
+		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusFailed)
 		err = r.Update(ctx, p)
 		if err != nil {
 			log.Error(err, "failed to clear operation annotation after timeout", "pipeline_id", pipelineID)
