@@ -2,7 +2,6 @@ package nats
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -22,41 +21,6 @@ const (
 	NATSMaxRetryDelay     = 30 * time.Second
 	NATSMaxConnectionWait = 2 * time.Minute
 )
-
-// PipelineStatus represents the overall status of a pipeline
-type PipelineStatus string
-
-// Pipeline status constants - must match the main API constants
-const (
-	PipelineStatusCreated     PipelineStatus = "Created"
-	PipelineStatusRunning     PipelineStatus = "Running"
-	PipelineStatusResuming    PipelineStatus = "Resuming"
-	PipelineStatusStopping    PipelineStatus = "Stopping"
-	PipelineStatusStopped     PipelineStatus = "Stopped"
-	PipelineStatusTerminating PipelineStatus = "Terminating"
-	PipelineStatusFailed      PipelineStatus = "Failed"
-)
-
-// PipelineHealth represents the health status of a pipeline and its components
-type PipelineHealth struct {
-	PipelineID    string         `json:"pipeline_id"`
-	PipelineName  string         `json:"pipeline_name"`
-	OverallStatus PipelineStatus `json:"overall_status"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-}
-
-// PipelineConfig represents the pipeline configuration stored in NATS KV
-type PipelineConfig struct {
-	ID        string                 `json:"pipeline_id"`
-	Name      string                 `json:"name"`
-	Mapper    map[string]interface{} `json:"mapper"`
-	Ingestor  map[string]interface{} `json:"ingestor"`
-	Join      map[string]interface{} `json:"join"`
-	Sink      map[string]interface{} `json:"sink"`
-	CreatedAt time.Time              `json:"created_at"`
-	Status    PipelineHealth         `json:"status,omitempty"`
-}
 
 type NATSClient struct {
 	nc       *nats.Conn
@@ -196,80 +160,5 @@ func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamNam
 
 func (n *NATSClient) Close() error {
 	n.nc.Close()
-	return nil
-}
-
-// UpdatePipelineStatus updates the status of a pipeline in NATS KV store
-func (n *NATSClient) UpdatePipelineStatus(ctx context.Context, pipelineID string, status PipelineStatus) error {
-	kv, err := n.JetStream().KeyValue(ctx, "glassflow-pipelines")
-	if err != nil {
-		return fmt.Errorf("failed to get glassflow pipelines key-value store: %w", err)
-	}
-
-	// Get the current pipeline configuration
-	entry, err := kv.Get(ctx, pipelineID)
-	if err != nil {
-		return fmt.Errorf("failed to get pipeline %s from KV store: %w", pipelineID, err)
-	}
-
-	// Unmarshal the current configuration
-	var pipelineConfig PipelineConfig
-	err = json.Unmarshal(entry.Value(), &pipelineConfig)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal pipeline configuration: %w", err)
-	}
-
-	// Update the status
-	pipelineConfig.Status.OverallStatus = status
-	pipelineConfig.Status.UpdatedAt = time.Now().UTC()
-
-	// Marshal the updated configuration
-	updatedConfig, err := json.Marshal(pipelineConfig)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated pipeline configuration: %w", err)
-	}
-
-	// Update the KV store
-	_, err = kv.Update(ctx, pipelineID, updatedConfig, entry.Revision())
-	if err != nil {
-		return fmt.Errorf("failed to update pipeline status in KV store: %w", err)
-	}
-
-	return nil
-}
-
-// GetPipelineConfig retrieves a pipeline configuration from NATS KV store
-func (n *NATSClient) GetPipelineConfig(ctx context.Context, pipelineID string) (*PipelineConfig, error) {
-	kv, err := n.JetStream().KeyValue(ctx, "glassflow-pipelines")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get glassflow pipelines key-value store: %w", err)
-	}
-
-	entry, err := kv.Get(ctx, pipelineID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pipeline %s from KV store: %w", pipelineID, err)
-	}
-
-	var pipelineConfig PipelineConfig
-	err = json.Unmarshal(entry.Value(), &pipelineConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal pipeline configuration: %w", err)
-	}
-
-	return &pipelineConfig, nil
-}
-
-// DeletePipeline removes a pipeline configuration from NATS KV store
-func (n *NATSClient) DeletePipeline(ctx context.Context, pipelineID string) error {
-	kv, err := n.JetStream().KeyValue(ctx, "glassflow-pipelines")
-	if err != nil {
-		return fmt.Errorf("failed to get glassflow pipelines key-value store: %w", err)
-	}
-
-	err = kv.Delete(ctx, pipelineID)
-	if err != nil {
-		return fmt.Errorf("failed to delete pipeline %s from KV store: %w", pipelineID, err)
-	}
-
 	return nil
 }

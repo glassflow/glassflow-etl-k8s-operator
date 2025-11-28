@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -42,6 +43,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
+	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 	// +kubebuilder:scaffold:imports
 )
@@ -104,6 +106,12 @@ func main() {
 	flag.StringVar(&natsMaxStreamBytes, "nats-max-stream-bytes", getEnvOrDefault(
 		"NATS_MAX_STREAM_BYTES", "107374182400"),
 		"Maximum bytes for NATS streams (default: 100GB)")
+
+	// PostgreSQL configuration
+	var postgresDSN string
+	flag.StringVar(&postgresDSN, "postgres-dsn", getEnvOrDefault(
+		"POSTGRES_DSN", ""),
+		"PostgreSQL connection string (DSN) for pipeline storage")
 
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage string
@@ -370,11 +378,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize PostgreSQL storage (required)
+	if postgresDSN == "" {
+		setupLog.Error(errors.New("postgres DSN is required"), "postgres DSN not provided")
+		os.Exit(1)
+	}
+
+	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresDSN, logger)
+	if err != nil {
+		setupLog.Error(err, "unable to connect to postgres")
+		os.Exit(1)
+	}
+	setupLog.Info("postgres storage initialized")
+
 	if err = (&controller.PipelineReconciler{
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),
 		Meter:                       meter,
 		NATSClient:                  natsClient,
+		PostgresStorage:             postgresStorage,
 		ComponentNATSAddr:           natsAddr,
 		NATSMaxStreamAge:            natsMaxStreamAge,
 		NATSMaxStreamBytes:          natsMaxStreamBytes,
