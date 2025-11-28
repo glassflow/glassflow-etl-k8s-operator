@@ -398,6 +398,22 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 		return ctrl.Result{}, nil
 	}
 
+	// Check for timeout before proceeding
+	timedOut, elapsed := r.checkOperationTimeout(log, &p)
+	if timedOut {
+		return r.handleOperationTimeout(ctx, log, &p, constants.OperationTerminate)
+	}
+	if elapsed > 0 {
+		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	}
+
+	// Set operation start time if not already set (for timeout tracking)
+	err := r.setOperationStartTime(ctx, &p)
+	if err != nil {
+		log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
+		// Continue anyway - this is not critical
+	}
+
 	// Stop all pipeline components
 	result, err := r.terminatePipelineComponents(ctx, log, p)
 	if err != nil || result.Requeue {
@@ -861,17 +877,22 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)
 	}
 
-	// Transition status to Resuming
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusResuming, nil)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
-	}
+	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning) {
+		log.Info("pipeline is already being resumed", "pipeline_id", p.Spec.ID)
+		// Continue with the resume process
+	} else {
+		// Transition status to Resuming
+		err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusResuming, nil)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
+		}
 
-	// Set operation start time when transitioning to Resuming status
-	err = r.setOperationStartTime(ctx, &p)
-	if err != nil {
-		log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-		// Continue anyway - this is not critical
+		// Set operation start time when transitioning to Resuming status
+		err = r.setOperationStartTime(ctx, &p)
+		if err != nil {
+			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
+			// Continue anyway - this is not critical
+		}
 	}
 
 	// Get namespace and secret for deployment creation
