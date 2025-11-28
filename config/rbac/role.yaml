@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - namespaces
+  - persistentvolumeclaims
   - secrets
   verbs:
   - create
@@ -19,6 +20,16 @@ rules:
   - apps
   resources:
   - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
   verbs:
   - create
   - delete
