@@ -50,7 +50,7 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 
 	// Update PostgreSQL storage
 	if r.PostgresStorage != nil {
-		pgStatus := postgresstorage.PipelineStatus(newStatus)
+		pgStatus := newStatus
 		err := r.PostgresStorage.UpdatePipelineStatus(ctx, p.Spec.ID, pgStatus, errors)
 		if err != nil {
 			log.Info("failed to update pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus, "error", err)

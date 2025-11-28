@@ -93,7 +93,12 @@ func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID s
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func(tx pgx.Tx, ctx context.Context) {
+		err := tx.Rollback(ctx)
+		if err != nil {
+			s.logger.Error(err, "failed to rollback transaction")
+		}
+	}(tx, ctx)
 
 	// Update pipeline status
 	statusStr := string(status)
@@ -195,7 +200,12 @@ func (s *PostgresStorage) DeletePipeline(ctx context.Context, pipelineID string)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func(tx pgx.Tx, ctx context.Context) {
+		err := tx.Rollback(ctx)
+		if err != nil {
+			s.logger.Error(err, "failed to rollback transaction")
+		}
+	}(tx, ctx)
 
 	// 1. Delete transformations (no foreign key constraints)
 	if len(transformationIDs) > 0 {
