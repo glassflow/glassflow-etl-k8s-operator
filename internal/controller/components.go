@@ -549,11 +549,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		dedupLabels := r.getDedupLabels(stream.TopicName)
 		maps.Copy(dedupLabels, labels)
 
-		// Determine replicas (default to 1)
 		replicas := 1
-		if stream.Deduplication.Replicas > 0 {
-			replicas = stream.Deduplication.Replicas
-		}
 
 		// Determine storage size (use pipeline config, fallback to Helm default)
 		storageSize := r.DedupDefaultStorageSize
