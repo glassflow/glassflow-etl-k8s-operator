@@ -5,6 +5,7 @@ go 1.23.0
 godebug default=go1.23
 
 require (
+	github.com/avast/retry-go/v4 v4.7.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
