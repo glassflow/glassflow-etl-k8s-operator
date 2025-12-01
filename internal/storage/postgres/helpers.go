@@ -9,15 +9,6 @@ import (
 // ErrPipelineNotExists is returned when a pipeline is not found
 var ErrPipelineNotExists = fmt.Errorf("pipeline not found")
 
-// parsePipelineID parses a pipeline ID string into a UUID
-func parsePipelineID(id string) (uuid.UUID, error) {
-	pipelineID, err := uuid.Parse(id)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("invalid pipeline ID format: %w", err)
-	}
-	return pipelineID, nil
-}
-
 // checkRowsAffected checks if any rows were affected and returns ErrPipelineNotExists if none
 func checkRowsAffected(rowsAffected int64) error {
 	if rowsAffected == 0 {

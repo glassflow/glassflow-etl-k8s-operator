@@ -27,7 +27,7 @@ const (
 
 // pipelineRow represents a row from the pipelines table
 type pipelineRow struct {
-	pipelineID           uuid.UUID
+	pipelineID           string
 	name                 string
 	status               string
 	sourceID             uuid.UUID
@@ -39,7 +39,7 @@ type pipelineRow struct {
 }
 
 // loadPipelineRow loads a pipeline row from the database
-func (s *PostgresStorage) loadPipelineRow(ctx context.Context, pipelineID uuid.UUID) (*pipelineRow, error) {
+func (s *PostgresStorage) loadPipelineRow(ctx context.Context, pipelineID string) (*pipelineRow, error) {
 	var row pipelineRow
 	var transformationIDsArray pgtype.Array[pgtype.UUID]
 
@@ -60,10 +60,10 @@ func (s *PostgresStorage) loadPipelineRow(ctx context.Context, pipelineID uuid.U
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			s.logger.V(1).Info("pipeline not found", "pipeline_id", pipelineID.String())
+			s.logger.V(1).Info("pipeline not found", "pipeline_id", pipelineID)
 			return nil, ErrPipelineNotExists
 		}
-		s.logger.Error(err, "failed to load pipeline row", "pipeline_id", pipelineID.String())
+		s.logger.Error(err, "failed to load pipeline row", "pipeline_id", pipelineID)
 		return nil, fmt.Errorf("get pipeline: %w", err)
 	}
 
@@ -83,10 +83,6 @@ func (s *PostgresStorage) loadPipelineRow(ctx context.Context, pipelineID uuid.U
 
 // UpdatePipelineStatus updates the pipeline status and creates a history event
 func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID string, status PipelineStatus, errors []string) error {
-	id, err := parsePipelineID(pipelineID)
-	if err != nil {
-		return err
-	}
 
 	// Begin transaction
 	tx, err := s.pool.Begin(ctx)
@@ -110,7 +106,7 @@ func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID s
 		UPDATE pipelines
 		SET status = $1, updated_at = $2
 		WHERE id = $3
-	`, statusStr, now, id)
+	`, statusStr, now, pipelineID)
 	if err != nil {
 		return fmt.Errorf("update pipeline status: %w", err)
 	}
@@ -120,7 +116,7 @@ func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID s
 	}
 
 	// Create history event with type "status" or "error" (depending on errors parameter)
-	err = s.insertPipelineHistoryEvent(ctx, tx, id, statusStr, errors)
+	err = s.insertPipelineHistoryEvent(ctx, tx, pipelineID, statusStr, errors)
 	if err != nil {
 		// Log but don't fail the status update
 		s.logger.Info("failed to insert pipeline history event", "pipeline_id", pipelineID, "error", err)
@@ -145,7 +141,7 @@ type HistoryEntry struct {
 }
 
 // insertPipelineHistoryEvent inserts a pipeline history event
-func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx.Tx, pipelineID uuid.UUID, status string, errors []string) error {
+func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx.Tx, pipelineID string, status string, errors []string) error {
 	// Determine event type: "error" if errors present, otherwise "status"
 	eventType := "status"
 	if len(errors) > 0 {
@@ -181,15 +177,10 @@ func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx
 
 // DeletePipeline deletes a pipeline and all associated entities
 func (s *PostgresStorage) DeletePipeline(ctx context.Context, pipelineID string) error {
-	id, err := parsePipelineID(pipelineID)
-	if err != nil {
-		return err
-	}
-
 	s.logger.Info("deleting pipeline", "pipeline_id", pipelineID)
 
 	// Get pipeline row to find associated entity IDs
-	row, err := s.loadPipelineRow(ctx, id)
+	row, err := s.loadPipelineRow(ctx, pipelineID)
 	if err != nil {
 		if err == ErrPipelineNotExists {
 			return err
@@ -243,7 +234,7 @@ func (s *PostgresStorage) DeletePipeline(ctx context.Context, pipelineID string)
 	// 2. Delete pipeline (CASCADE will delete schemas and pipeline_history)
 	commandTag, err := tx.Exec(ctx, `
 		DELETE FROM pipelines WHERE id = $1
-	`, id)
+	`, pipelineID)
 	if err != nil {
 		return fmt.Errorf("delete pipeline: %w", err)
 	}
