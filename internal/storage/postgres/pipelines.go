@@ -119,7 +119,7 @@ func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID s
 		return err
 	}
 
-	// Create history event with only status and errors (not full pipeline JSON)
+	// Create history event with type "status" or "error" (depending on errors parameter)
 	err = s.insertPipelineHistoryEvent(ctx, tx, id, statusStr, errors)
 	if err != nil {
 		// Log but don't fail the status update
@@ -137,12 +137,30 @@ func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID s
 	return nil
 }
 
-// insertPipelineHistoryEvent inserts a pipeline history event with only status and errors
+// HistoryEntry represents a pipeline history entry
+type HistoryEntry struct {
+	Type     string          `json:"type"`     // "history", "error", or "status"
+	Pipeline json.RawMessage `json:"pipeline"` // Full pipeline JSON
+	Errors   []string        `json:"errors"`   // Array of error messages (for error type)
+}
+
+// insertPipelineHistoryEvent inserts a pipeline history event
 func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx.Tx, pipelineID uuid.UUID, status string, errors []string) error {
-	// Build event object with only status and errors (no full pipeline JSON)
-	event := map[string]interface{}{
-		"status": status,
-		"errors": errors,
+	// Determine event type: "error" if errors present, otherwise "status"
+	eventType := "status"
+	if len(errors) > 0 {
+		eventType = "error"
+	}
+
+	// Build minimal pipeline JSON with just status (operator doesn't have full pipeline config readily available)
+	// The status can be extracted from pipeline_history->event->'pipeline'->'status'->'overall_status' in queries
+	pipelineJSON := json.RawMessage(fmt.Sprintf(`{"status":{"overall_status":"%s"}}`, status))
+
+	// Build event object matching HistoryEntry structure
+	event := HistoryEntry{
+		Type:     eventType,
+		Pipeline: pipelineJSON,
+		Errors:   errors,
 	}
 
 	eventJSON, err := json.Marshal(event)
@@ -151,9 +169,9 @@ func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO pipeline_history (pipeline_id, event)
-		VALUES ($1, $2)
-	`, pipelineID, eventJSON)
+		INSERT INTO pipeline_history (pipeline_id, type, event)
+		VALUES ($1, $2, $3)
+	`, pipelineID, eventType, eventJSON)
 	if err != nil {
 		return fmt.Errorf("insert pipeline history event: %w", err)
 	}
