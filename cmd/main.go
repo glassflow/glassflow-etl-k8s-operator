@@ -185,10 +185,10 @@ func main() {
 	// Dedup storage configuration
 	var dedupDefaultStorageSize, dedupDefaultStorageClass string
 	flag.StringVar(&dedupDefaultStorageSize, "dedup-default-storage-size", getEnvOrDefault(
-		"DEDUP_DEFAULT_STORAGE_SIZE", "10Gi"),
+		"DEDUP_STORAGE_SIZE", "10Gi"),
 		"Default storage size for dedup component")
 	flag.StringVar(&dedupDefaultStorageClass, "dedup-default-storage-class", getEnvOrDefault(
-		"DEDUP_DEFAULT_STORAGE_CLASS", ""),
+		"DEDUP_STORAGE_CLASS", ""),
 		"Default storage class for dedup component")
 
 	// Component affinity configuration
