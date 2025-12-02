@@ -114,7 +114,9 @@ glassflowComponents:
         cpu: 1000m
         memory: 1Gi
       limits:
-        cpu: 1500m
-        memory: 1.5Gi
-    # Node affinity for dedup component (optional)
+        cpu: 1000m
+        memory: 4Gi
+    storage:
+      size: "40Gi"
+      className: ""
     affinity: {}
