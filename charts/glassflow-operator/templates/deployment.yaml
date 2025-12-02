@@ -29,6 +29,21 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if not .Values.global.postgres_connection_url }}
+      initContainers:
+        - name: wait-for-postgres
+          image: "busybox:1.35"
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL to be ready..."
+              until nc -z {{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local 5432; do
+                echo "PostgreSQL not ready, waiting..."
+                sleep 2
+              done
+              echo "PostgreSQL is ready!"
+      {{- end }}
       containers:
       - args:
         - --leader-elect
@@ -47,6 +62,16 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        {{- if .Values.global.postgres_connection_url }}
+        - name: GLASSFLOW_DATABASE_URL
+          value: {{ .Values.global.postgres_connection_url | quote }}
+        {{- else }}
+        - name: GLASSFLOW_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: glassflow-postgresql
+              key: connection-url
+        {{- end }}
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:
