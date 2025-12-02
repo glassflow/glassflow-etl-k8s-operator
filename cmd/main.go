@@ -116,16 +116,16 @@ func main() {
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage, dedupImage string
 	flag.StringVar(&ingestorImage, "ingestor-image", getEnvOrDefault(
-		"INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:latest"),
+		"INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:main"),
 		"Image for the ingestor component")
 	flag.StringVar(&joinImage, "join-image", getEnvOrDefault(
-		"JOIN_IMAGE", "ghcr.io/glassflow/glassflow-etl-join:latest"),
+		"JOIN_IMAGE", "ghcr.io/glassflow/glassflow-etl-join:main"),
 		"Image for the join component")
 	flag.StringVar(&sinkImage, "sink-image", getEnvOrDefault(
-		"SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:latest"),
+		"SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:main"),
 		"Image for the sink component")
 	flag.StringVar(&dedupImage, "dedup-image", getEnvOrDefault(
-		"DEDUP_IMAGE", "ghcr.io/glassflow/glassflow-etl-dedup:latest"),
+		"DEDUP_IMAGE", "ghcr.io/glassflow/glassflow-etl-dedup:main"),
 		"Image for the dedup component")
 
 	// Component resource configuration
