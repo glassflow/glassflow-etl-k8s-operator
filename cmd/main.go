@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -42,6 +43,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
+	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 	// +kubebuilder:scaffold:imports
 )
@@ -105,19 +107,25 @@ func main() {
 		"NATS_MAX_STREAM_BYTES", "107374182400"),
 		"Maximum bytes for NATS streams (default: 100GB)")
 
+	// PostgreSQL configuration
+	var postgresDSN string
+	flag.StringVar(&postgresDSN, "glassflow-database-url", getEnvOrDefault(
+		"GLASSFLOW_DATABASE_URL", ""),
+		"PostgreSQL connection string (DSN) for pipeline storage")
+
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage, dedupImage string
 	flag.StringVar(&ingestorImage, "ingestor-image", getEnvOrDefault(
-		"INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:latest"),
+		"INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:main"),
 		"Image for the ingestor component")
 	flag.StringVar(&joinImage, "join-image", getEnvOrDefault(
-		"JOIN_IMAGE", "ghcr.io/glassflow/glassflow-etl-join:latest"),
+		"JOIN_IMAGE", "ghcr.io/glassflow/glassflow-etl-join:main"),
 		"Image for the join component")
 	flag.StringVar(&sinkImage, "sink-image", getEnvOrDefault(
-		"SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:latest"),
+		"SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:main"),
 		"Image for the sink component")
 	flag.StringVar(&dedupImage, "dedup-image", getEnvOrDefault(
-		"DEDUP_IMAGE", "ghcr.io/glassflow/glassflow-etl-dedup:latest"),
+		"DEDUP_IMAGE", "ghcr.io/glassflow/glassflow-etl-dedup:main"),
 		"Image for the dedup component")
 
 	// Component resource configuration
@@ -406,11 +414,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize PostgreSQL storage (required)
+	if postgresDSN == "" {
+		setupLog.Error(errors.New("postgres DSN is required"), "postgres DSN not provided")
+		os.Exit(1)
+	}
+
+	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresDSN, logger)
+	if err != nil {
+		setupLog.Error(err, "unable to connect to postgres")
+		os.Exit(1)
+	}
+	setupLog.Info("postgres storage initialized")
+
 	if err = (&controller.PipelineReconciler{
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),
 		Meter:                       meter,
 		NATSClient:                  natsClient,
+		PostgresStorage:             postgresStorage,
 		ComponentNATSAddr:           natsAddr,
 		NATSMaxStreamAge:            natsMaxStreamAge,
 		NATSMaxStreamBytes:          natsMaxStreamBytes,

@@ -25,8 +25,8 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
+	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 )
 
 // recordReconcileError records error metrics for reconcile operations
@@ -44,18 +44,26 @@ func (r *PipelineReconciler) recordMetricsIfEnabled(fn func(*observability.Meter
 	}
 }
 
-// updatePipelineStatus updates both NATS KV and CRD status (validation handled by backend API)
-func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus nats.PipelineStatus) error {
+// updatePipelineStatus updates PostgreSQL and CRD status (validation handled by backend API)
+func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus postgresstorage.PipelineStatus, errors []string) error {
+	// Check if status is already the same - avoid duplicate updates and history entries
+	currentStatus := postgresstorage.PipelineStatus(p.Status)
+	if currentStatus == newStatus {
+		log.V(1).Info("pipeline status unchanged, skipping update", "pipeline_id", p.Spec.ID, "status", newStatus)
+		return nil
+	}
+
 	// Status validation is now handled by the backend API, so we trust the status update
 
-	// Update NATS KV store status
-	if r.NATSClient != nil {
-		err := r.NATSClient.UpdatePipelineStatus(ctx, p.Spec.ID, newStatus)
+	// Update PostgreSQL storage
+	if r.PostgresStorage != nil {
+		pgStatus := newStatus
+		err := r.PostgresStorage.UpdatePipelineStatus(ctx, p.Spec.ID, pgStatus, errors)
 		if err != nil {
-			log.Info("failed to update pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
-			// Don't fail the reconciliation if NATS update fails, just log the error
+			log.Info("failed to update pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus, "error", err)
+			// Don't fail the reconciliation if PostgreSQL update fails, just log the error
 		} else {
-			log.Info("successfully updated pipeline status in NATS KV store", "pipeline_id", p.Spec.ID, "status", newStatus)
+			log.Info("successfully updated pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus)
 		}
 	}
 
