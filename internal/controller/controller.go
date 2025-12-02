@@ -488,18 +488,17 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		// Just log and continue
 	}
 
-
 	// Clean up PVCs for dedup StatefulSets
 	err = r.cleanupDedupPVCs(ctx, log, p)
 	if err != nil {
 		log.Error(err, "failed to cleanup dedup PVCs")
 		// Don't fail the deletion, just log
 	}
-  
+
 	// Clean up pipeline configuration from PostgreSQL
 	if r.PostgresStorage != nil {
 		err = r.PostgresStorage.DeletePipeline(ctx, p.Spec.ID)
-    if err != nil {
+		if err != nil {
 			log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID, "error", err)
 			// Don't return error here - we're in force cleanup mode
 		} else {
