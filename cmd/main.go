@@ -109,8 +109,8 @@ func main() {
 
 	// PostgreSQL configuration
 	var postgresDSN string
-	flag.StringVar(&postgresDSN, "postgres-dsn", getEnvOrDefault(
-		"POSTGRES_DSN", ""),
+	flag.StringVar(&postgresDSN, "glassflow-database-url", getEnvOrDefault(
+		"GLASSFLOW_DATABASE_URL", ""),
 		"PostgreSQL connection string (DSN) for pipeline storage")
 
 	// Component image configuration
