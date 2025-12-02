@@ -220,3 +220,96 @@ func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *a
 	}
 	return nil
 }
+
+// -------------------------------------------------------------------------------------------------------------------
+// StatefulSet Operations
+// -------------------------------------------------------------------------------------------------------------------
+
+// createStatefulSet creates a StatefulSet
+func (r *PipelineReconciler) createStatefulSet(ctx context.Context, sts *appsv1.StatefulSet) error {
+	err := r.Create(ctx, sts)
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("create statefulset: %w", err)
+	}
+	return nil
+}
+
+// isStatefulSetReady checks if a StatefulSet is ready
+func (r *PipelineReconciler) isStatefulSetReady(ctx context.Context, namespace, name string) (bool, error) {
+	var sts appsv1.StatefulSet
+	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &sts)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if sts.Spec.Replicas == nil {
+		return false, nil
+	}
+
+	return sts.Status.ReadyReplicas == *sts.Spec.Replicas && *sts.Spec.Replicas > 0, nil
+}
+
+// isStatefulSetAbsent checks if a StatefulSet is absent
+func (r *PipelineReconciler) isStatefulSetAbsent(ctx context.Context, namespace, name string) (bool, error) {
+	var sts appsv1.StatefulSet
+	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &sts)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+// deleteStatefulSet deletes a StatefulSet
+func (r *PipelineReconciler) deleteStatefulSet(ctx context.Context, sts *appsv1.StatefulSet) error {
+	err := r.Delete(ctx, sts)
+	if err != nil {
+		return fmt.Errorf("delete statefulset: %w", err)
+	}
+	return nil
+}
+
+// cleanupDedupPVCs deletes PVCs associated with dedup StatefulSets
+func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	namespace := r.getTargetNamespace(p)
+
+	for i, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+			continue
+		}
+
+		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+
+		replicas := 1
+
+		// StatefulSet PVCs have format: data-{statefulset-name}-{ordinal}
+		for replica := 0; replica < replicas; replica++ {
+			pvcName := fmt.Sprintf("data-%s-%d", dedupName, replica)
+
+			var pvc v1.PersistentVolumeClaim
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: pvcName}, &pvc)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return fmt.Errorf("get pvc %s: %w", pvcName, err)
+			}
+
+			log.Info("deleting dedup PVC", "pvc", pvcName, "namespace", namespace)
+			err = r.Delete(ctx, &pvc)
+			if err != nil {
+				return fmt.Errorf("delete pvc %s: %w", pvcName, err)
+			}
+		}
+	}
+
+	return nil
+}

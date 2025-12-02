@@ -114,7 +114,7 @@ func main() {
 		"PostgreSQL connection string (DSN) for pipeline storage")
 
 	// Component image configuration
-	var ingestorImage, joinImage, sinkImage string
+	var ingestorImage, joinImage, sinkImage, dedupImage string
 	flag.StringVar(&ingestorImage, "ingestor-image", getEnvOrDefault(
 		"INGESTOR_IMAGE", "ghcr.io/glassflow/glassflow-etl-ingestor:latest"),
 		"Image for the ingestor component")
@@ -124,11 +124,15 @@ func main() {
 	flag.StringVar(&sinkImage, "sink-image", getEnvOrDefault(
 		"SINK_IMAGE", "ghcr.io/glassflow/glassflow-etl-sink:latest"),
 		"Image for the sink component")
+	flag.StringVar(&dedupImage, "dedup-image", getEnvOrDefault(
+		"DEDUP_IMAGE", "ghcr.io/glassflow/glassflow-etl-dedup:latest"),
+		"Image for the dedup component")
 
 	// Component resource configuration
 	var ingestorCPURequest, ingestorCPULimit, ingestorMemoryRequest, ingestorMemoryLimit string
 	var joinCPURequest, joinCPULimit, joinMemoryRequest, joinMemoryLimit string
 	var sinkCPURequest, sinkCPULimit, sinkMemoryRequest, sinkMemoryLimit string
+	var dedupCPURequest, dedupCPULimit, dedupMemoryRequest, dedupMemoryLimit string
 
 	// Ingestor resources
 	flag.StringVar(&ingestorCPURequest, "ingestor-cpu-request", getEnvOrDefault(
@@ -172,8 +176,31 @@ func main() {
 		"SINK_MEMORY_LIMIT", "256Mi"),
 		"Memory limit for sink component")
 
+	// Dedup resources
+	flag.StringVar(&dedupCPURequest, "dedup-cpu-request", getEnvOrDefault(
+		"DEDUP_CPU_REQUEST", "100m"),
+		"CPU request for dedup component")
+	flag.StringVar(&dedupCPULimit, "dedup-cpu-limit", getEnvOrDefault(
+		"DEDUP_CPU_LIMIT", "200m"),
+		"CPU limit for dedup component")
+	flag.StringVar(&dedupMemoryRequest, "dedup-memory-request", getEnvOrDefault(
+		"DEDUP_MEMORY_REQUEST", "256Mi"),
+		"Memory request for dedup component")
+	flag.StringVar(&dedupMemoryLimit, "dedup-memory-limit", getEnvOrDefault(
+		"DEDUP_MEMORY_LIMIT", "512Mi"),
+		"Memory limit for dedup component")
+
+	// Dedup storage configuration
+	var dedupDefaultStorageSize, dedupDefaultStorageClass string
+	flag.StringVar(&dedupDefaultStorageSize, "dedup-default-storage-size", getEnvOrDefault(
+		"DEDUP_DEFAULT_STORAGE_SIZE", "10Gi"),
+		"Default storage size for dedup component")
+	flag.StringVar(&dedupDefaultStorageClass, "dedup-default-storage-class", getEnvOrDefault(
+		"DEDUP_DEFAULT_STORAGE_CLASS", ""),
+		"Default storage class for dedup component")
+
 	// Component affinity configuration
-	var ingestorAffinity, joinAffinity, sinkAffinity string
+	var ingestorAffinity, joinAffinity, sinkAffinity, dedupAffinity string
 	flag.StringVar(&ingestorAffinity, "ingestor-affinity", getEnvOrDefault(
 		"INGESTOR_AFFINITY", ""),
 		"Node affinity for ingestor component (JSON)")
@@ -183,11 +210,14 @@ func main() {
 	flag.StringVar(&sinkAffinity, "sink-affinity", getEnvOrDefault(
 		"SINK_AFFINITY", ""),
 		"Node affinity for sink component (JSON)")
+	flag.StringVar(&dedupAffinity, "dedup-affinity", getEnvOrDefault(
+		"DEDUP_AFFINITY", ""),
+		"Affinity configuration for dedup component (JSON)")
 
 	// Observability configuration
 	var observabilityLogsEnabled, observabilityMetricsEnabled, observabilityOTelEndpoint string
-	var ingestorLogLevel, joinLogLevel, sinkLogLevel string
-	var ingestorImageTag, joinImageTag, sinkImageTag, operatorImageTag string
+	var ingestorLogLevel, joinLogLevel, sinkLogLevel, dedupLogLevel string
+	var ingestorImageTag, joinImageTag, sinkImageTag, dedupImageTag, operatorImageTag string
 
 	flag.StringVar(&observabilityLogsEnabled, "observability-logs-enabled", getEnvOrDefault(
 		"OBSERVABILITY_LOGS_ENABLED", "false"),
@@ -207,6 +237,9 @@ func main() {
 	flag.StringVar(&sinkLogLevel, "sink-log-level", getEnvOrDefault(
 		"SINK_LOG_LEVEL", "info"),
 		"Log level for sink component")
+	flag.StringVar(&dedupLogLevel, "dedup-log-level", getEnvOrDefault(
+		"DEDUP_LOG_LEVEL", "info"),
+		"Log level for dedup component")
 	flag.StringVar(&ingestorImageTag, "ingestor-image-tag", getEnvOrDefault(
 		"INGESTOR_IMAGE_TAG", "stable"),
 		"Image tag for ingestor component (used as service version)")
@@ -216,6 +249,9 @@ func main() {
 	flag.StringVar(&sinkImageTag, "sink-image-tag", getEnvOrDefault(
 		"SINK_IMAGE_TAG", "stable"),
 		"Image tag for sink component (used as service version)")
+	flag.StringVar(&dedupImageTag, "dedup-image-tag", getEnvOrDefault(
+		"DEDUP_IMAGE_TAG", "stable"),
+		"Image tag for dedup component (used as service version)")
 	flag.StringVar(&operatorImageTag, "operator-image-tag", getEnvOrDefault(
 		"OPERATOR_IMAGE_TAG", "dev"),
 		"Image tag for operator (used as service version)")
@@ -403,6 +439,7 @@ func main() {
 		IngestorImage:               ingestorImage,
 		JoinImage:                   joinImage,
 		SinkImage:                   sinkImage,
+		DedupImage:                  dedupImage,
 		IngestorCPURequest:          ingestorCPURequest,
 		IngestorCPULimit:            ingestorCPULimit,
 		IngestorMemoryRequest:       ingestorMemoryRequest,
@@ -415,18 +452,27 @@ func main() {
 		SinkCPULimit:                sinkCPULimit,
 		SinkMemoryRequest:           sinkMemoryRequest,
 		SinkMemoryLimit:             sinkMemoryLimit,
+		DedupCPURequest:             dedupCPURequest,
+		DedupCPULimit:               dedupCPULimit,
+		DedupMemoryRequest:          dedupMemoryRequest,
+		DedupMemoryLimit:            dedupMemoryLimit,
+		DedupDefaultStorageSize:     dedupDefaultStorageSize,
+		DedupDefaultStorageClass:    dedupDefaultStorageClass,
 		IngestorAffinity:            ingestorAffinity,
 		JoinAffinity:                joinAffinity,
 		SinkAffinity:                sinkAffinity,
+		DedupAffinity:               dedupAffinity,
 		ObservabilityLogsEnabled:    observabilityLogsEnabled,
 		ObservabilityMetricsEnabled: observabilityMetricsEnabled,
 		ObservabilityOTelEndpoint:   observabilityOTelEndpoint,
 		IngestorLogLevel:            ingestorLogLevel,
 		JoinLogLevel:                joinLogLevel,
 		SinkLogLevel:                sinkLogLevel,
+		DedupLogLevel:               dedupLogLevel,
 		IngestorImageTag:            ingestorImageTag,
 		JoinImageTag:                joinImageTag,
 		SinkImageTag:                sinkImageTag,
+		DedupImageTag:               dedupImageTag,
 		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
 		PipelinesNamespaceName:      pipelinesNamespaceName,
 	}).SetupWithManager(mgr); err != nil {
