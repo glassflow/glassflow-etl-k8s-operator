@@ -20,6 +20,10 @@ spec:
       {{- include "glassflow-operator.selectorLabels" . | nindent 8 }}
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.controllerManager.manager.nodeSelector }}
       nodeSelector:
@@ -32,18 +36,53 @@ spec:
       {{- if not .Values.global.postgres_connection_url }}
       initContainers:
         - name: wait-for-postgres
-          image: "busybox:1.35"
+          image: postgres:{{ .Values.postgresql.image.tag | default "17-alpine" }}
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy | default "IfNotPresent" }}
           command:
-            - sh
+            - /bin/sh
             - -c
             - |
+              set -e
               echo "Waiting for PostgreSQL to be ready..."
-              until nc -z {{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local 5432; do
-                echo "PostgreSQL not ready, waiting..."
-                sleep 2
-              done
+
+              # Get connection details from secret
+              POSTGRES_HOST="${POSTGRES_HOST:-{{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local}"
+              POSTGRES_PORT="${POSTGRES_PORT:-{{ .Values.postgresql.service.port | default 5432 }}}"
+              POSTGRES_USER="${POSTGRES_USER}"
+              POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
+              POSTGRES_ADMIN_DB="${POSTGRES_ADMIN_DB:-postgres}"
+
+              # Retry logic - check indefinitely until Postgres is ready
+              RETRY_DELAY=2
+              ATTEMPT=1
+
+              while true; do
+              echo "Attempt $ATTEMPT: Checking PostgreSQL connection..."
+              if PGPASSWORD="$POSTGRES_PASSWORD" pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_ADMIN_DB" > /dev/null 2>&1; then
               echo "PostgreSQL is ready!"
-      {{- end }}
+              exit 0
+              fi
+              echo "PostgreSQL not ready yet, waiting ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+              ATTEMPT=$((ATTEMPT + 1))
+              done
+          env:
+            - name: POSTGRES_HOST
+              value: "{{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local"
+            - name: POSTGRES_PORT
+              value: "{{ .Values.postgresql.service.port | default 5432 | toString }}"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: glassflow-postgresql
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: glassflow-postgresql
+                  key: password
+            - name: POSTGRES_ADMIN_DB
+              value: "postgres"
       containers:
       - args:
         - --leader-elect
