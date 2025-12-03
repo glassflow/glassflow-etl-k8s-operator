@@ -23,10 +23,11 @@ global:
       name: glassflow-pipelines
       # When auto is false, Helm can optionally create the namespace
       create: true
-  
+
   # PostgreSQL connection URL
-  # Only used when external postgres is used by the user. By default, operator uses postgres deployed by the glassflow-etl chart.
-  # Format: postgresql://username:password@host:port/database  
+  # Only used when external postgres is used by the user.
+  # By default, operator uses postgres deployed by the glassflow-etl chart.
+  # Format: postgresql://username:password@host:port/database
   # postgres_connection_url: ""
 
 controllerManager:
@@ -35,7 +36,7 @@ controllerManager:
       allowPrivilegeEscalation: false
       capabilities:
         drop:
-        - ALL
+          - ALL
     image:
       repository: glassflow-etl-k8s-operator
       tag: v1.4.0
