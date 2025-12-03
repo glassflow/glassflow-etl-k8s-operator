@@ -38,7 +38,7 @@ controllerManager:
         - ALL
     image:
       repository: glassflow-etl-k8s-operator
-      tag: v1.3.2
+      tag: v1.4.0
       pullPolicy: Always
     resources:
       limits:
