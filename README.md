@@ -56,11 +56,12 @@ The **GlassFlow ETL Kubernetes Operator** is a production-ready Kubernetes opera
 ### ✨ Key Features
 
 - 🔄 **Pipeline Lifecycle Management** - Create, pause, resume, and terminate data pipelines
-- 🎯 **Advanced Deduplication** - Built-in deduplication with configurable time windows
+- 🎯 **Advanced Deduplication** - Dedicated dedup component with persistent storage and configurable time windows
 - 🔗 **Stream Joins** - Seamless joining of multiple data streams
 - ⚡ **Kubernetes Native** - Full CRD-based pipeline management
 - 🛡️ **Production Ready** - Enterprise-grade reliability and monitoring
 - 📊 **Scalable Ingestor** - Efficiently reads from multiple Kafka partitions with horizontal scaling
+- 💾 **Stateful Deduplication** - StatefulSet-based dedup components with persistent BadgerDB storage
 - 🔧 **Helm Charts** - Easy deployment and configuration management
 
 ## 🏗️ Architecture
@@ -78,6 +79,7 @@ graph LR
             
             subgraph "Data Pipeline"
                 ING[Ingestor Pods]
+                DEDUP[Dedup StatefulSets]
                 JOIN[Join Pod]
                 SINK[Sink Pod]
             end
@@ -99,10 +101,12 @@ graph LR
     API --> CRD
     CRD --> OP
     OP --> ING
+    OP --> DEDUP
     OP --> JOIN
     OP --> SINK
     
     ING <--> NATS_JETSTREAM
+    DEDUP <--> NATS_JETSTREAM
     JOIN <--> NATS_JETSTREAM
     SINK <--> NATS_JETSTREAM
     
@@ -194,11 +198,20 @@ spec:
       - topic_name: "user-events"
         stream: "users"
         dedup_window: 60000000000  # 1 minute in nanoseconds
+        replicas: 2
+        deduplication:
+          enabled: true
+          stream: "users-deduped"  # NATS stream after deduplication
+          storage_size: "10Gi"      # Persistent storage for BadgerDB
+          storage_class: "standard" # Optional: storage class name
   join:
     type: "temporal"
     stream: "joined-users"
     enabled: true
-  sink: "clickhouse"
+    replicas: 1
+  sink:
+    type: "clickhouse"
+    replicas: 1
 ```
 
 ### Current Capabilities
@@ -209,11 +222,20 @@ spec:
 | **Pipeline Termination** | ✅ | Graceful shutdown and cleanup |
 | **Pipeline Pausing** | ✅ | Temporarily halt data processing |
 | **Pipeline Resuming** | ✅ | Resume paused pipelines |
-| **Deduplication** | ✅ | Configurable time-window deduplication |
+| **Deduplication Component** | ✅ | StatefulSet-based dedup with persistent storage and configurable time windows |
 | **Stream Joins** | ✅ | Multi-stream data joining |
 | **Auto-scaling** | ✅ | Horizontal pod autoscaling / ingestor replicas support |
 | **Monitoring** | ✅ | Prometheus metrics integration |
 | **Helm Uninstall Cleanup** | ✅ | Automatic pipeline termination and CRD cleanup on uninstall |
+
+### Pipeline Components
+
+The operator manages several components for each pipeline:
+
+- **Ingestor**: Reads data from Kafka topics and publishes to NATS streams. Supports horizontal scaling with multiple replicas.
+- **Dedup** (Optional): StatefulSet-based component that performs deduplication using BadgerDB for persistent storage. Created per ingestor stream when deduplication is enabled. Configurable storage size and storage class.
+- **Join** (Optional): Joins multiple data streams using temporal join logic. Supports configurable buffer TTLs.
+- **Sink**: Writes processed data to ClickHouse. Supports multiple replicas for high availability.
 
 ## 📊 Pipeline Status Management
 
