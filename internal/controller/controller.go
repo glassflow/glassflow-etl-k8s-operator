@@ -699,6 +699,12 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 
 	labels := preparePipelineLabels(p)
 
+	err = r.createNATSStreams(ctx, p)
+	if err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+	}
+
 	// Step 1: Create Sink deployment
 	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
 	if err != nil {
@@ -936,6 +942,12 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	err = r.Get(ctx, secretName, &secret)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
+	}
+
+	err = r.createNATSStreams(ctx, p)
+	if err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
 	// Step 1: Create Sink deployment
