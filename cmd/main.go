@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	uberzap "go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -45,6 +47,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/tracking"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -321,6 +324,28 @@ func main() {
 	logger := observability.ConfigureLogger(obsConfig)
 	meter := observability.ConfigureMeter(obsConfig, logger)
 
+	trackingEnabled := getEnvOrDefault("GLASSFLOW_TRACKING_ENABLED", "false") == "true"
+	trackingEndpoint := getEnvOrDefault("GLASSFLOW_TRACKING_ENDPOINT", "")
+	trackingUsername := getEnvOrDefault("GLASSFLOW_TRACKING_USERNAME", "")
+	trackingPassword := getEnvOrDefault("GLASSFLOW_TRACKING_PASSWORD", "")
+	trackingInstallationID := getEnvOrDefault("GLASSFLOW_TRACKING_INSTALLATION_ID", "")
+	clusterProvider := getEnvOrDefault("CLUSTER_PROVIDER", "unknown")
+
+	// Create a zap logger for tracking client
+	zapLogger, err := uberzap.NewProduction()
+	if err != nil {
+		zapLogger, _ = uberzap.NewDevelopment()
+	}
+
+	trackingClient := tracking.NewClient(
+		trackingEndpoint,
+		trackingUsername,
+		trackingPassword,
+		trackingInstallationID,
+		trackingEnabled,
+		zapLogger,
+	)
+
 	// Set global logger for controller-runtime
 	ctrl.SetLogger(logger)
 
@@ -475,6 +500,8 @@ func main() {
 		DedupImageTag:               dedupImageTag,
 		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
 		PipelinesNamespaceName:      pipelinesNamespaceName,
+		TrackingClient:              trackingClient,
+		ClusterProvider:             clusterProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)
@@ -489,11 +516,20 @@ func main() {
 		}
 	}
 
+	healthCheckFunc := func(req *http.Request) error {
+		if trackingClient != nil && trackingClient.IsEnabled() {
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+			trackingClient.SendEvent(ctx, "readiness_ping", "operator", map[string]interface{}{})
+		}
+		return nil
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err := mgr.AddReadyzCheck("readyz", healthCheckFunc); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
