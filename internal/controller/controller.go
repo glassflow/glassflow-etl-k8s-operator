@@ -39,6 +39,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/tracking"
 )
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -131,6 +132,10 @@ type PipelineReconciler struct {
 	// Pipelines namespace configuration
 	PipelinesNamespaceAuto bool
 	PipelinesNamespaceName string
+	// Tracking client
+	TrackingClient *tracking.Client
+	// Cluster provider (e.g., GKE, EKS, IBM, etc.)
+	ClusterProvider string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -400,6 +405,9 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		m.RecordReconcileOperation(ctx, "create", "success", pipelineID)
 	})
 
+	// Send tracking event for reconcile success
+	r.sendReconcileSuccessEvent(ctx, "create", pipelineID)
+
 	log.Info("pipeline creation completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
@@ -459,6 +467,9 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordReconcileOperation(ctx, "terminate", "success", pipelineID)
 	})
+
+	// Send tracking event for reconcile success
+	r.sendReconcileSuccessEvent(ctx, "terminate", pipelineID)
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -534,6 +545,9 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordReconcileOperation(ctx, "delete", "success", pipelineID)
 	})
+
+	// Send tracking event for reconcile success
+	r.sendReconcileSuccessEvent(ctx, "delete", pipelineID)
 
 	log.Info("pipeline deletion completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -634,6 +648,9 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordReconcileOperation(ctx, "uninstall", "success", pipelineID)
 	})
+
+	// Send tracking event for reconcile success
+	r.sendReconcileSuccessEvent(ctx, "helm-uninstall", pipelineID)
 
 	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", pipelineID)
 	return ctrl.Result{}, nil
@@ -809,6 +826,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		m.RecordReconcileOperation(ctx, "resume", "success", pipelineID)
 	})
 
+	// Send tracking event for reconcile success
+	r.sendReconcileSuccessEvent(ctx, "resume", pipelineID)
+
 	log.Info("pipeline resume completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
@@ -884,6 +904,9 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordReconcileOperation(ctx, "stop", "success", pipelineID)
 	})
+
+	// Send tracking event for reconcile success
+	r.sendReconcileSuccessEvent(ctx, "stop", pipelineID)
 
 	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -1047,6 +1070,9 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordReconcileOperation(ctx, "edit", "success", pipelineID)
 	})
+
+	// Send tracking event for reconcile success
+	r.sendReconcileSuccessEvent(ctx, "edit", pipelineID)
 
 	log.Info("pipeline edit completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
