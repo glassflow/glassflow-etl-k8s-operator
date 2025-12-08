@@ -312,6 +312,7 @@ func main() {
 	}
 
 	// Configure observability
+	//nolint:goconst
 	obsConfig := &observability.Config{
 		LogsEnabled:       observabilityLogsEnabled == "true",
 		MetricsEnabled:    observabilityMetricsEnabled == "true",
@@ -324,6 +325,7 @@ func main() {
 	logger := observability.ConfigureLogger(obsConfig)
 	meter := observability.ConfigureMeter(obsConfig, logger)
 
+	//nolint:goconst
 	trackingEnabled := getEnvOrDefault("GLASSFLOW_TRACKING_ENABLED", "false") == "true"
 	trackingEndpoint := getEnvOrDefault("GLASSFLOW_TRACKING_ENDPOINT", "")
 	trackingUsername := getEnvOrDefault("GLASSFLOW_TRACKING_USERNAME", "")

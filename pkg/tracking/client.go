@@ -96,7 +96,11 @@ func (c *Client) authenticate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("auth request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+			c.log.Debug("failed to close response body", zap.Error(closeErr))
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -149,7 +153,11 @@ func (c *Client) SendEvent(ctx context.Context, eventName, eventSource string, p
 	}()
 }
 
-func (c *Client) sendEventSync(ctx context.Context, eventName, eventSource string, properties map[string]interface{}) error {
+func (c *Client) sendEventSync(
+	ctx context.Context,
+	eventName, eventSource string,
+	properties map[string]interface{},
+) error {
 	token, err := c.getToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get token: %w", err)
@@ -191,7 +199,9 @@ func (c *Client) sendEventSync(ctx context.Context, eventName, eventSource strin
 		}
 
 		if resp.StatusCode == http.StatusUnauthorized {
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+				c.log.Debug("failed to close response body", zap.Error(closeErr))
+			}
 
 			if err := c.authenticate(ctx); err != nil {
 				return fmt.Errorf("re-authenticate: %w", err)
@@ -213,10 +223,11 @@ func (c *Client) sendEventSync(ctx context.Context, eventName, eventSource strin
 			}
 		}
 
-		defer resp.Body.Close()
-
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
+			if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+				c.log.Debug("failed to close response body", zap.Error(closeErr))
+			}
 			if attempt < maxRetries {
 				time.Sleep(time.Duration(attempt) * time.Second)
 				continue
@@ -226,7 +237,14 @@ func (c *Client) sendEventSync(ctx context.Context, eventName, eventSource strin
 
 		var trackResp TrackResponse
 		if err := json.NewDecoder(resp.Body).Decode(&trackResp); err != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+				c.log.Debug("failed to close response body", zap.Error(closeErr))
+			}
 			return fmt.Errorf("decode response: %w", err)
+		}
+
+		if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+			c.log.Debug("failed to close response body", zap.Error(closeErr))
 		}
 
 		return nil
