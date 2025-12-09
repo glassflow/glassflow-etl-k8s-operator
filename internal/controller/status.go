@@ -38,27 +38,23 @@ func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation
 	}
 
 	// Send tracking event for reconcile failure
-	if r.TrackingClient != nil && r.TrackingClient.IsEnabled() {
-		r.TrackingClient.SendEvent(ctx, "reconcile_operation", "operator", map[string]interface{}{
-			"pipeline_id_hash": tracking.HashPipelineID(pipelineID),
-			"operation":        operation,
-			"status":           "failure",
-			"error":            err.Error(),
-			"cluster_provider": r.ClusterProvider,
-		})
-	}
+	r.TrackingClient.SendEvent(ctx, "reconcile_error", "operator", map[string]interface{}{
+		"pipeline_id_hash": tracking.HashPipelineID(pipelineID),
+		"operation":        operation,
+		"status":           "failure",
+		"error":            err.Error(),
+		"cluster_provider": r.ClusterProvider,
+	})
 }
 
 // sendReconcileSuccessEvent sends a tracking event for successful reconcile operations
 func (r *PipelineReconciler) sendReconcileSuccessEvent(ctx context.Context, operation, pipelineID string) {
-	if r.TrackingClient != nil && r.TrackingClient.IsEnabled() {
-		r.TrackingClient.SendEvent(ctx, "reconcile_operation", "operator", map[string]interface{}{
-			"pipeline_id_hash": tracking.HashPipelineID(pipelineID),
-			"operation":        operation,
-			"status":           "success",
-			"cluster_provider": r.ClusterProvider,
-		})
-	}
+	r.TrackingClient.SendEvent(ctx, "reconcile_success", "operator", map[string]interface{}{
+		"pipeline_id_hash": tracking.HashPipelineID(pipelineID),
+		"operation":        operation,
+		"status":           "success",
+		"cluster_provider": r.ClusterProvider,
+	})
 }
 
 // recordMetricsIfEnabled is a helper function to safely record metrics only if the meter is available
@@ -104,33 +100,12 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 		m.RecordStatusTransition(ctx, oldStatus, string(newStatus), p.Spec.ID)
 	})
 
-	if r.TrackingClient != nil && r.TrackingClient.IsEnabled() {
-		operation := "unknown"
-		switch newStatus {
-		case postgresstorage.PipelineStatusRunning:
-			if oldStatus == string(postgresstorage.PipelineStatusResuming) {
-				operation = "Resume"
-			} else if oldStatus == string(postgresstorage.PipelineStatusCreated) {
-				operation = "Create"
-			}
-		case postgresstorage.PipelineStatusStopped:
-			operation = "Stop"
-		case postgresstorage.PipelineStatusTerminating:
-			operation = "Terminate"
-		case postgresstorage.PipelineStatusResuming:
-			operation = "Edit"
-		}
-
-		if operation != "unknown" {
-			r.TrackingClient.SendEvent(ctx, "pipeline_status_change", "operator", map[string]interface{}{
-				"pipeline_id_hash": tracking.HashPipelineID(p.Spec.ID),
-				"operation":        operation,
-				"old_status":       oldStatus,
-				"new_status":       string(newStatus),
-				"cluster_provider": r.ClusterProvider,
-			})
-		}
-	}
+	// Send tracking event for status change
+	r.TrackingClient.SendEvent(ctx, "pipeline_status_change", "operator", map[string]interface{}{
+		"pipeline_id_hash": tracking.HashPipelineID(p.Spec.ID),
+		"status":           string(newStatus),
+		"cluster_provider": r.ClusterProvider,
+	})
 
 	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "to", newStatus)
 	return nil

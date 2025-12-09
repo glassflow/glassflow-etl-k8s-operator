@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -523,25 +522,25 @@ func main() {
 		}
 	}
 
-	healthCheckFunc := func(req *http.Request) error {
-		if trackingClient != nil && trackingClient.IsEnabled() {
-			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
-			defer cancel()
-			trackingClient.SendEvent(ctx, "readiness_ping", "operator", map[string]interface{}{})
-		}
-		return nil
-	}
-
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthCheckFunc); err != nil {
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
 
 	setupLog.Info("starting manager")
+
+	// Send readiness ping after manager starts (in a goroutine since mgr.Start() is blocking)
+	go func() {
+		time.Sleep(2 * time.Second) // small delay to wait for manager to start
+		pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		trackingClient.SendEvent(pingCtx, "readiness_ping", "operator", nil)
+		cancel()
+	}()
+
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
