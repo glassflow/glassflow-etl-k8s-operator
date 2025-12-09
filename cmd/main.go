@@ -503,6 +503,11 @@ func main() {
 		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
 		PipelinesNamespaceName:      pipelinesNamespaceName,
 		TrackingClient:              trackingClient,
+		TrackingEnabled:             trackingEnabled,
+		TrackingEndpoint:            trackingEndpoint,
+		TrackingUsername:            trackingUsername,
+		TrackingPassword:            trackingPassword,
+		TrackingInstallationID:      trackingInstallationID,
 		ClusterProvider:             clusterProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")

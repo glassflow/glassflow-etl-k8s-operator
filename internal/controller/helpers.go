@@ -120,3 +120,45 @@ func ptrInt64(i int64) *int64 {
 func ptrBool(v bool) *bool {
 	return &v
 }
+
+// getTrackingEnvVars returns environment variables for tracking configuration
+// Values are passed directly (not from secrets)
+func (r *PipelineReconciler) getTrackingEnvVars() []v1.EnvVar {
+	if !r.TrackingEnabled {
+		return []v1.EnvVar{}
+	}
+
+	envVars := []v1.EnvVar{
+		{Name: "GLASSFLOW_TRACKING_ENABLED", Value: "true"},
+	}
+
+	if r.TrackingEndpoint != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_TRACKING_ENDPOINT",
+			Value: r.TrackingEndpoint,
+		})
+	}
+
+	if r.TrackingUsername != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_TRACKING_USERNAME",
+			Value: r.TrackingUsername,
+		})
+	}
+
+	if r.TrackingPassword != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_TRACKING_PASSWORD",
+			Value: r.TrackingPassword,
+		})
+	}
+
+	if r.TrackingInstallationID != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_TRACKING_INSTALLATION_ID",
+			Value: r.TrackingInstallationID,
+		})
+	}
+
+	return envVars
+}

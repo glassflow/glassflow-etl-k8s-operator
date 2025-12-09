@@ -355,7 +355,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				ReadOnly:  true,
 				MountPath: "/config",
 			}).
-			withEnv([]v1.EnvVar{
+			withEnv(append([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
@@ -375,7 +375,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 						FieldPath: "metadata.name",
 					},
 				}},
-			}).
+			}, r.getTrackingEnvVars()...)).
 			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit).
 			build()
 
@@ -422,7 +422,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv([]v1.EnvVar{
+		withEnv(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
@@ -441,7 +441,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}).
+		}, r.getTrackingEnvVars()...)).
 		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit).
 		build()
 
@@ -485,7 +485,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv([]v1.EnvVar{
+		withEnv(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
@@ -504,7 +504,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}).
+		}, r.getTrackingEnvVars()...)).
 		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
 		build()
 
@@ -575,7 +575,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				Name:      "data",
 				MountPath: "/data/badger",
 			}).
-			withEnv([]v1.EnvVar{
+			withEnv(append([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
@@ -599,7 +599,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 						FieldPath: "metadata.name",
 					},
 				}},
-			}).
+			}, r.getTrackingEnvVars()...)).
 			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit).
 			build()
 

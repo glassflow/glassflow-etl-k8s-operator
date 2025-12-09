@@ -134,6 +134,12 @@ type PipelineReconciler struct {
 	PipelinesNamespaceName string
 	// Tracking client
 	TrackingClient *tracking.Client
+	// Tracking configuration (values passed directly to components)
+	TrackingEnabled        bool
+	TrackingEndpoint       string
+	TrackingUsername       string
+	TrackingPassword       string
+	TrackingInstallationID string
 	// Cluster provider (e.g., GKE, EKS, IBM, etc.)
 	ClusterProvider string
 }
