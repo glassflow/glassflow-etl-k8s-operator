@@ -110,30 +110,6 @@ spec:
               name: glassflow-postgresql
               key: connection-url
         {{- end }}
-        {{- if .Values.global.tracking.enabled }}
-        - name: GLASSFLOW_TRACKING_ENABLED
-          value: "true"
-        - name: GLASSFLOW_TRACKING_ENDPOINT
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Release.Name }}-tracking-config
-              key: tracking_endpoint
-        - name: GLASSFLOW_TRACKING_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Release.Name }}-tracking-config
-              key: tracking_username
-        - name: GLASSFLOW_TRACKING_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Release.Name }}-tracking-config
-              key: tracking_password
-        - name: GLASSFLOW_TRACKING_INSTALLATION_ID
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Release.Name }}-tracking-config
-              key: installation_id
-        {{- end }}
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:
