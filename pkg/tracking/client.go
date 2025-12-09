@@ -88,7 +88,9 @@ func (c *Client) authenticate(ctx context.Context) error {
 	}
 
 	if c.log != nil {
-		c.log.Debug("tracking auth: sending authentication request", zap.String("url", url), zap.String("endpoint", c.endpoint))
+		c.log.Debug("tracking auth: sending authentication request",
+			zap.String("url", url),
+			zap.String("endpoint", c.endpoint))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
@@ -119,7 +121,10 @@ func (c *Client) authenticate(ctx context.Context) error {
 		body, _ := io.ReadAll(resp.Body)
 		err := fmt.Errorf("auth failed with status %d: %s", resp.StatusCode, string(body))
 		if c.log != nil {
-			c.log.Debug("tracking auth: authentication failed", zap.Int("status", resp.StatusCode), zap.String("response", string(body)), zap.Error(err))
+			c.log.Debug("tracking auth: authentication failed",
+				zap.Int("status", resp.StatusCode),
+				zap.String("response", string(body)),
+				zap.Error(err))
 		}
 		return err
 	}
@@ -178,22 +183,32 @@ func (c *Client) getToken(ctx context.Context) (string, error) {
 func (c *Client) SendEvent(ctx context.Context, eventName, eventSource string, properties map[string]interface{}) {
 	if !c.enabled {
 		if c.log != nil {
-			c.log.Debug("tracking: event not sent, tracking disabled", zap.String("event", eventName), zap.String("source", eventSource))
+			c.log.Debug("tracking: event not sent, tracking disabled",
+				zap.String("event", eventName),
+				zap.String("source", eventSource))
 		}
 		return
 	}
 
 	if c.log != nil {
-		c.log.Debug("tracking: sending event", zap.String("event", eventName), zap.String("source", eventSource), zap.Any("properties", properties))
+		c.log.Debug("tracking: sending event",
+			zap.String("event", eventName),
+			zap.String("source", eventSource),
+			zap.Any("properties", properties))
 	}
 
 	go func() {
 		if err := c.sendEventSync(ctx, eventName, eventSource, properties); err != nil {
 			if c.log != nil {
-				c.log.Debug("tracking event send failed", zap.String("event", eventName), zap.String("source", eventSource), zap.Error(err))
+				c.log.Debug("tracking event send failed",
+					zap.String("event", eventName),
+					zap.String("source", eventSource),
+					zap.Error(err))
 			}
 		} else if c.log != nil {
-			c.log.Debug("tracking: event sent successfully", zap.String("event", eventName), zap.String("source", eventSource))
+			c.log.Debug("tracking: event sent successfully",
+				zap.String("event", eventName),
+				zap.String("source", eventSource))
 		}
 	}()
 }
@@ -230,127 +245,198 @@ func (c *Client) sendEventSync(
 	url := fmt.Sprintf("%s/track", c.endpoint)
 
 	if c.log != nil {
-		c.log.Debug("tracking: sending event request", zap.String("url", url), zap.String("event", eventName), zap.String("installation_id", c.installationID), zap.Int("payload_size", len(jsonData)))
+		c.log.Debug("tracking: sending event request",
+			zap.String("url", url),
+			zap.String("event", eventName),
+			zap.String("installation_id", c.installationID),
+			zap.Int("payload_size", len(jsonData)))
 	}
 
 	maxRetries := 3
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 && c.log != nil {
-			c.log.Debug("tracking: retrying event send", zap.String("event", eventName), zap.Int("attempt", attempt), zap.Int("max_retries", maxRetries))
+			c.log.Debug("tracking: retrying event send",
+				zap.String("event", eventName),
+				zap.Int("attempt", attempt),
+				zap.Int("max_retries", maxRetries))
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-		if err != nil {
-			if c.log != nil {
-				c.log.Debug("tracking: failed to create request", zap.String("event", eventName), zap.Error(err))
-			}
-			return fmt.Errorf("create request: %w", err)
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("accept", "application/json")
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.makeTrackRequest(ctx, url, jsonData, token, eventName)
 		if err != nil {
 			if attempt < maxRetries {
 				if c.log != nil {
-					c.log.Debug("tracking: request failed, will retry", zap.String("event", eventName), zap.Int("attempt", attempt), zap.Error(err), zap.Int("retry_after", attempt))
+					c.log.Debug("tracking: request failed, will retry",
+						zap.String("event", eventName),
+						zap.Int("attempt", attempt),
+						zap.Error(err),
+						zap.Int("retry_after", attempt))
 				}
 				time.Sleep(time.Duration(attempt) * time.Second)
 				continue
 			}
 			if c.log != nil {
-				c.log.Debug("tracking: request failed after max retries", zap.String("event", eventName), zap.Int("attempt", attempt), zap.Error(err))
+				c.log.Debug("tracking: request failed after max retries",
+					zap.String("event", eventName),
+					zap.Int("attempt", attempt),
+					zap.Error(err))
 			}
 			return fmt.Errorf("request failed: %w", err)
 		}
 
 		if resp.StatusCode == http.StatusUnauthorized {
-			if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
-				c.log.Debug("failed to close response body", zap.Error(closeErr))
-			}
-
-			if c.log != nil {
-				c.log.Debug("tracking: received unauthorized, re-authenticating", zap.String("event", eventName), zap.Int("attempt", attempt))
-			}
-
-			if err := c.authenticate(ctx); err != nil {
-				if c.log != nil {
-					c.log.Debug("tracking: re-authentication failed", zap.String("event", eventName), zap.Error(err))
-				}
-				return fmt.Errorf("re-authenticate: %w", err)
-			}
-
-			token, err = c.getToken(ctx)
-			if err != nil {
-				if c.log != nil {
-					c.log.Debug("tracking: failed to get new token after re-auth", zap.String("event", eventName), zap.Error(err))
-				}
-				return fmt.Errorf("get new token: %w", err)
-			}
-
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-			resp, err = c.httpClient.Do(req)
+			token, resp, err = c.handleUnauthorized(ctx, url, jsonData, eventName, attempt)
 			if err != nil {
 				if attempt < maxRetries {
-					if c.log != nil {
-						c.log.Debug("tracking: retry request failed, will retry again", zap.String("event", eventName), zap.Int("attempt", attempt), zap.Error(err))
-					}
 					time.Sleep(time.Duration(attempt) * time.Second)
 					continue
 				}
-				if c.log != nil {
-					c.log.Debug("tracking: retry request failed after max retries", zap.String("event", eventName), zap.Int("attempt", attempt), zap.Error(err))
-				}
-				return fmt.Errorf("retry request failed: %w", err)
+				return err
 			}
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
-				c.log.Debug("failed to close response body", zap.Error(closeErr))
-			}
-			if attempt < maxRetries {
-				if c.log != nil {
-					c.log.Debug("tracking: non-OK status, will retry", zap.String("event", eventName), zap.Int("status", resp.StatusCode), zap.String("response", string(body)), zap.Int("attempt", attempt))
-				}
+			shouldRetry := c.handleNonOKStatus(resp, eventName, attempt, maxRetries)
+			if shouldRetry {
 				time.Sleep(time.Duration(attempt) * time.Second)
 				continue
 			}
-			if c.log != nil {
-				c.log.Debug("tracking: failed after max retries", zap.String("event", eventName), zap.Int("status", resp.StatusCode), zap.String("response", string(body)), zap.Int("attempt", attempt))
-			}
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
 			return fmt.Errorf("tracking failed with status %d: %s", resp.StatusCode, string(body))
 		}
 
-		var trackResp TrackResponse
-		if err := json.NewDecoder(resp.Body).Decode(&trackResp); err != nil {
-			if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
-				c.log.Debug("failed to close response body", zap.Error(closeErr))
-			}
-			if c.log != nil {
-				c.log.Debug("tracking: failed to decode response", zap.String("event", eventName), zap.Error(err))
-			}
-			return fmt.Errorf("decode response: %w", err)
-		}
-
-		if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
-			c.log.Debug("failed to close response body", zap.Error(closeErr))
-		}
-
-		if c.log != nil {
-			c.log.Debug("tracking: event sent successfully", zap.String("event", eventName), zap.Any("response", trackResp), zap.Int("status", resp.StatusCode))
-		}
-
-		return nil
+		return c.handleSuccessResponse(resp, eventName)
 	}
 
 	if c.log != nil {
 		c.log.Debug("tracking: max retries exceeded", zap.String("event", eventName), zap.Int("max_retries", maxRetries))
 	}
 	return fmt.Errorf("max retries exceeded")
+}
+
+func (c *Client) makeTrackRequest(
+	ctx context.Context,
+	url string,
+	jsonData []byte,
+	token string,
+	eventName string,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		if c.log != nil {
+			c.log.Debug("tracking: failed to create request", zap.String("event", eventName), zap.Error(err))
+		}
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("accept", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	return resp, nil
+}
+
+func (c *Client) handleUnauthorized(
+	ctx context.Context,
+	url string,
+	jsonData []byte,
+	eventName string,
+	attempt int,
+) (string, *http.Response, error) {
+	if c.log != nil {
+		c.log.Debug("tracking: received unauthorized, re-authenticating",
+			zap.String("event", eventName),
+			zap.Int("attempt", attempt))
+	}
+
+	if err := c.authenticate(ctx); err != nil {
+		if c.log != nil {
+			c.log.Debug("tracking: re-authentication failed", zap.String("event", eventName), zap.Error(err))
+		}
+		return "", nil, fmt.Errorf("re-authenticate: %w", err)
+	}
+
+	token, err := c.getToken(ctx)
+	if err != nil {
+		if c.log != nil {
+			c.log.Debug("tracking: failed to get new token after re-auth", zap.String("event", eventName), zap.Error(err))
+		}
+		return "", nil, fmt.Errorf("get new token: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", nil, fmt.Errorf("create retry request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("accept", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("retry request failed: %w", err)
+	}
+
+	return token, resp, nil
+}
+
+func (c *Client) handleNonOKStatus(resp *http.Response, eventName string, attempt, maxRetries int) bool {
+	body, _ := io.ReadAll(resp.Body)
+	if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+		c.log.Debug("failed to close response body", zap.Error(closeErr))
+	}
+
+	if attempt < maxRetries {
+		if c.log != nil {
+			c.log.Debug("tracking: non-OK status, will retry",
+				zap.String("event", eventName),
+				zap.Int("status", resp.StatusCode),
+				zap.String("response", string(body)),
+				zap.Int("attempt", attempt))
+		}
+		return true
+	}
+
+	if c.log != nil {
+		c.log.Debug("tracking: failed after max retries",
+			zap.String("event", eventName),
+			zap.Int("status", resp.StatusCode),
+			zap.String("response", string(body)),
+			zap.Int("attempt", attempt))
+	}
+	return false
+}
+
+func (c *Client) handleSuccessResponse(resp *http.Response, eventName string) error {
+	var trackResp TrackResponse
+	if err := json.NewDecoder(resp.Body).Decode(&trackResp); err != nil {
+		if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+			c.log.Debug("failed to close response body", zap.Error(closeErr))
+		}
+		if c.log != nil {
+			c.log.Debug("tracking: failed to decode response", zap.String("event", eventName), zap.Error(err))
+		}
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	if closeErr := resp.Body.Close(); closeErr != nil && c.log != nil {
+		c.log.Debug("failed to close response body", zap.Error(closeErr))
+	}
+
+	if c.log != nil {
+		c.log.Debug("tracking: event sent successfully",
+			zap.String("event", eventName),
+			zap.Any("response", trackResp),
+			zap.Int("status", resp.StatusCode))
+	}
+
+	return nil
 }
 
 func HashPipelineID(pipelineID string) string {
