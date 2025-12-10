@@ -350,6 +350,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		container := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.IngestorImage).
+			withImagePullPolicy(r.IngestorPullPolicy).
 			withVolumeMount(v1.VolumeMount{
 				Name:      "config",
 				ReadOnly:  true,
@@ -417,6 +418,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.JoinImage).
+		withImagePullPolicy(r.JoinPullPolicy).
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
@@ -480,6 +482,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.SinkImage).
+		withImagePullPolicy(r.SinkPullPolicy).
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
@@ -566,6 +569,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		container := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.DedupImage).
+			withImagePullPolicy(r.DedupPullPolicy).
 			withVolumeMount(v1.VolumeMount{
 				Name:      "config",
 				ReadOnly:  true,

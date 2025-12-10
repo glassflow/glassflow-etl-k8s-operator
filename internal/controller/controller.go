@@ -92,6 +92,11 @@ type PipelineReconciler struct {
 	JoinImage     string
 	SinkImage     string
 	DedupImage    string
+	// Component image pull policy configurations
+	IngestorPullPolicy string
+	JoinPullPolicy     string
+	SinkPullPolicy     string
+	DedupPullPolicy    string
 	// Component resource configurations
 	IngestorCPURequest    string
 	IngestorCPULimit      string
