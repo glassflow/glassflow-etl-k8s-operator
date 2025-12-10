@@ -15,6 +15,7 @@ data:
   INGESTOR_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.ingestor.image.repository .Values.glassflowComponents.ingestor.image.tag | quote }}
   JOIN_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.join.image.repository .Values.glassflowComponents.join.image.tag | quote }}
   SINK_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.sink.image.repository .Values.glassflowComponents.sink.image.tag | quote }}
+  DEDUP_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.dedup.image.repository .Values.glassflowComponents.dedup.image.tag | quote }}
   INGESTOR_CPU_REQUEST: {{ .Values.glassflowComponents.ingestor.resources.requests.cpu | quote }}
   INGESTOR_CPU_LIMIT: {{ .Values.glassflowComponents.ingestor.resources.limits.cpu | quote }}
   INGESTOR_MEMORY_REQUEST: {{ .Values.glassflowComponents.ingestor.resources.requests.memory | quote }}
