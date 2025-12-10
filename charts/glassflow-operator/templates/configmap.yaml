@@ -15,6 +15,7 @@ data:
   INGESTOR_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.ingestor.image.repository .Values.glassflowComponents.ingestor.image.tag | quote }}
   JOIN_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.join.image.repository .Values.glassflowComponents.join.image.tag | quote }}
   SINK_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.sink.image.repository .Values.glassflowComponents.sink.image.tag | quote }}
+  DEDUP_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.dedup.image.repository .Values.glassflowComponents.dedup.image.tag | quote }}
   INGESTOR_CPU_REQUEST: {{ .Values.glassflowComponents.ingestor.resources.requests.cpu | quote }}
   INGESTOR_CPU_LIMIT: {{ .Values.glassflowComponents.ingestor.resources.limits.cpu | quote }}
   INGESTOR_MEMORY_REQUEST: {{ .Values.glassflowComponents.ingestor.resources.requests.memory | quote }}
@@ -42,6 +43,10 @@ data:
   SINK_IMAGE_TAG: {{ .Values.glassflowComponents.sink.image.tag | quote }}
   OPERATOR_IMAGE_TAG: {{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion | quote }}
   DEDUP_IMAGE_TAG: {{ .Values.glassflowComponents.dedup.image.tag | quote }}
+  INGESTOR_PULL_POLICY: {{ .Values.glassflowComponents.ingestor.image.pullPolicy | default "IfNotPresent" | quote }}
+  JOIN_PULL_POLICY: {{ .Values.glassflowComponents.join.image.pullPolicy | default "IfNotPresent" | quote }}
+  SINK_PULL_POLICY: {{ .Values.glassflowComponents.sink.image.pullPolicy | default "IfNotPresent" | quote }}
+  DEDUP_PULL_POLICY: {{ .Values.glassflowComponents.dedup.image.pullPolicy | default "IfNotPresent" | quote }}
   DEDUP_CPU_REQUEST: {{ .Values.glassflowComponents.dedup.resources.requests.cpu | quote }}
   DEDUP_CPU_LIMIT: {{ .Values.glassflowComponents.dedup.resources.limits.cpu | quote }}
   DEDUP_MEMORY_REQUEST: {{ .Values.glassflowComponents.dedup.resources.requests.memory | quote }}
