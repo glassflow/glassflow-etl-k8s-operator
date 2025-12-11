@@ -128,6 +128,21 @@ func main() {
 		"DEDUP_IMAGE", "ghcr.io/glassflow/glassflow-etl-dedup:main"),
 		"Image for the dedup component")
 
+	// Component image pull policy configuration
+	var ingestorPullPolicy, joinPullPolicy, sinkPullPolicy, dedupPullPolicy string
+	flag.StringVar(&ingestorPullPolicy, "ingestor-pull-policy", getEnvOrDefault(
+		"INGESTOR_PULL_POLICY", "IfNotPresent"),
+		"Image pull policy for ingestor component")
+	flag.StringVar(&joinPullPolicy, "join-pull-policy", getEnvOrDefault(
+		"JOIN_PULL_POLICY", "IfNotPresent"),
+		"Image pull policy for join component")
+	flag.StringVar(&sinkPullPolicy, "sink-pull-policy", getEnvOrDefault(
+		"SINK_PULL_POLICY", "IfNotPresent"),
+		"Image pull policy for sink component")
+	flag.StringVar(&dedupPullPolicy, "dedup-pull-policy", getEnvOrDefault(
+		"DEDUP_PULL_POLICY", "IfNotPresent"),
+		"Image pull policy for dedup component")
+
 	// Component resource configuration
 	var ingestorCPURequest, ingestorCPULimit, ingestorMemoryRequest, ingestorMemoryLimit string
 	var joinCPURequest, joinCPULimit, joinMemoryRequest, joinMemoryLimit string
@@ -440,6 +455,10 @@ func main() {
 		JoinImage:                   joinImage,
 		SinkImage:                   sinkImage,
 		DedupImage:                  dedupImage,
+		IngestorPullPolicy:          ingestorPullPolicy,
+		JoinPullPolicy:              joinPullPolicy,
+		SinkPullPolicy:              sinkPullPolicy,
+		DedupPullPolicy:             dedupPullPolicy,
 		IngestorCPURequest:          ingestorCPURequest,
 		IngestorCPULimit:            ingestorCPULimit,
 		IngestorMemoryRequest:       ingestorMemoryRequest,

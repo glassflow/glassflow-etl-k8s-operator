@@ -12,6 +12,7 @@ import (
 type containerBuilder interface {
 	withName(name string) containerBuilder
 	withImage(image string) containerBuilder
+	withImagePullPolicy(pullPolicy string) containerBuilder
 	withVolumeMount(mount v1.VolumeMount) containerBuilder
 	withEnv(env []v1.EnvVar) containerBuilder
 	withResources(cpuRequest, cpuLimit, memoryRequest, memoryLimit string) containerBuilder
@@ -24,6 +25,7 @@ type componentContainer struct {
 	cpuLimit      string
 	memoryRequest string
 	memoryLimit   string
+	pullPolicy    string
 }
 
 func newComponentContainerBuilder() *componentContainer {
@@ -43,7 +45,12 @@ func (c *componentContainer) withEnv(env []v1.EnvVar) containerBuilder {
 // withImage implements containerBuilder.
 func (c *componentContainer) withImage(image string) containerBuilder {
 	c.con.Image = image
-	c.con.ImagePullPolicy = v1.PullIfNotPresent
+	return c
+}
+
+// withImagePullPolicy implements containerBuilder.
+func (c *componentContainer) withImagePullPolicy(pullPolicy string) containerBuilder {
+	c.pullPolicy = pullPolicy
 	return c
 }
 
@@ -86,8 +93,24 @@ func (c *componentContainer) build() *v1.Container {
 			v1.ResourceMemory: memoryRequest,
 		},
 	}
-	// TODO: Make it configurable may be?
-	c.con.ImagePullPolicy = v1.PullIfNotPresent
+
+	// Parse and set image pull policy
+	if c.pullPolicy != "" {
+		switch c.pullPolicy {
+		case "Always":
+			c.con.ImagePullPolicy = v1.PullAlways
+		case "Never":
+			c.con.ImagePullPolicy = v1.PullNever
+		case "IfNotPresent":
+			c.con.ImagePullPolicy = v1.PullIfNotPresent
+		default:
+			// Default to IfNotPresent if invalid value
+			c.con.ImagePullPolicy = v1.PullIfNotPresent
+		}
+	} else {
+		// Default to IfNotPresent if not specified
+		c.con.ImagePullPolicy = v1.PullIfNotPresent
+	}
 
 	return c.con
 }
