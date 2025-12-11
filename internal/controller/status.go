@@ -27,19 +27,19 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
-	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/tracking"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
-// recordReconcileError records error metrics and sends tracking event for reconcile operations
+// recordReconcileError records error metrics and sends usage stats event for reconcile operations
 func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation, pipelineID string, err error) {
 	if r.Meter != nil {
 		r.Meter.RecordReconcileOperation(ctx, operation, "failure", pipelineID)
 		r.Meter.RecordReconcileError(ctx, operation, err.Error(), pipelineID)
 	}
 
-	// Send tracking event for reconcile failure
-	r.TrackingClient.SendEvent(ctx, "reconcile_error", "operator", map[string]interface{}{
-		"pipeline_id_hash": tracking.HashPipelineID(pipelineID),
+	// Send usage stats event for reconcile failure
+	r.UsageStatsClient.SendEvent(ctx, "reconcile_error", "operator", map[string]interface{}{
+		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
 		"operation":        operation,
 		"status":           "failure",
 		"error":            err.Error(),
@@ -47,10 +47,10 @@ func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation
 	})
 }
 
-// sendReconcileSuccessEvent sends a tracking event for successful reconcile operations
+// sendReconcileSuccessEvent sends a usage stats event for successful reconcile operations
 func (r *PipelineReconciler) sendReconcileSuccessEvent(ctx context.Context, operation, pipelineID string) {
-	r.TrackingClient.SendEvent(ctx, "reconcile_success", "operator", map[string]interface{}{
-		"pipeline_id_hash": tracking.HashPipelineID(pipelineID),
+	r.UsageStatsClient.SendEvent(ctx, "reconcile_success", "operator", map[string]interface{}{
+		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
 		"operation":        operation,
 		"status":           "success",
 		"cluster_provider": r.ClusterProvider,
@@ -100,9 +100,9 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 		m.RecordStatusTransition(ctx, oldStatus, string(newStatus), p.Spec.ID)
 	})
 
-	// Send tracking event for status change
-	r.TrackingClient.SendEvent(ctx, "pipeline_status_change", "operator", map[string]interface{}{
-		"pipeline_id_hash": tracking.HashPipelineID(p.Spec.ID),
+	// Send usage stats event for status change
+	r.UsageStatsClient.SendEvent(ctx, "pipeline_status_change", "operator", map[string]interface{}{
+		"pipeline_id_hash": usagestats.HashPipelineID(p.Spec.ID),
 		"status":           string(newStatus),
 		"cluster_provider": r.ClusterProvider,
 	})

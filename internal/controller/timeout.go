@@ -28,7 +28,7 @@ import (
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
-	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/tracking"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
 // checkOperationTimeout checks if an operation has exceeded the timeout duration
@@ -137,9 +137,9 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 		m.RecordReconcileOperation(ctx, operation, "timeout", pipelineID)
 	})
 
-	// Send tracking event for reconcile timeout
-	r.TrackingClient.SendEvent(ctx, "reconcile_timeout", "operator", map[string]interface{}{
-		"pipeline_id_hash": tracking.HashPipelineID(pipelineID),
+	// Send usageStat event for reconcile timeout
+	r.UsageStatsClient.SendEvent(ctx, "reconcile_timeout", "operator", map[string]interface{}{
+		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
 		"operation":        operation,
 		"status":           "timeout",
 		"error":            errorMsg,

@@ -376,7 +376,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 						FieldPath: "metadata.name",
 					},
 				}},
-			}, r.getTrackingEnvVars()...)).
+			}, r.getUsageStatsEnvVars()...)).
 			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit).
 			build()
 
@@ -443,7 +443,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}, r.getTrackingEnvVars()...)).
+		}, r.getUsageStatsEnvVars()...)).
 		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit).
 		build()
 
@@ -507,7 +507,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}, r.getTrackingEnvVars()...)).
+		}, r.getUsageStatsEnvVars()...)).
 		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
 		build()
 
@@ -603,7 +603,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 						FieldPath: "metadata.name",
 					},
 				}},
-			}, r.getTrackingEnvVars()...)).
+			}, r.getUsageStatsEnvVars()...)).
 			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit).
 			build()
 

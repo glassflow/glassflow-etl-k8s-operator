@@ -46,7 +46,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
-	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/tracking"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -340,25 +340,25 @@ func main() {
 	meter := observability.ConfigureMeter(obsConfig, logger)
 
 	//nolint:goconst
-	trackingEnabled := getEnvOrDefault("GLASSFLOW_TRACKING_ENABLED", "false") == "true"
-	trackingEndpoint := getEnvOrDefault("GLASSFLOW_TRACKING_ENDPOINT", "")
-	trackingUsername := getEnvOrDefault("GLASSFLOW_TRACKING_USERNAME", "")
-	trackingPassword := getEnvOrDefault("GLASSFLOW_TRACKING_PASSWORD", "")
-	trackingInstallationID := getEnvOrDefault("GLASSFLOW_TRACKING_INSTALLATION_ID", "")
+	usageStatsEnabled := getEnvOrDefault("GLASSFLOW_USAGE_STATS_ENABLED", "false") == "true"
+	usageStatsEndpoint := getEnvOrDefault("GLASSFLOW_USAGE_STATS_ENDPOINT", "")
+	usageStatsUsername := getEnvOrDefault("GLASSFLOW_USAGE_STATS_USERNAME", "")
+	usageStatsPassword := getEnvOrDefault("GLASSFLOW_USAGE_STATS_PASSWORD", "")
+	usageStatsInstallationID := getEnvOrDefault("GLASSFLOW_USAGE_STATS_INSTALLATION_ID", "")
 	clusterProvider := getEnvOrDefault("CLUSTER_PROVIDER", "unknown")
 
-	// Create a zap logger for tracking client
+	// Create a zap logger for usage stats client
 	zapLogger, err := uberzap.NewProduction()
 	if err != nil {
 		zapLogger, _ = uberzap.NewDevelopment()
 	}
 
-	trackingClient := tracking.NewClient(
-		trackingEndpoint,
-		trackingUsername,
-		trackingPassword,
-		trackingInstallationID,
-		trackingEnabled,
+	usageStatsClient := usagestats.NewClient(
+		usageStatsEndpoint,
+		usageStatsUsername,
+		usageStatsPassword,
+		usageStatsInstallationID,
+		usageStatsEnabled,
 		zapLogger,
 	)
 
@@ -520,12 +520,12 @@ func main() {
 		DedupImageTag:               dedupImageTag,
 		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
 		PipelinesNamespaceName:      pipelinesNamespaceName,
-		TrackingClient:              trackingClient,
-		TrackingEnabled:             trackingEnabled,
-		TrackingEndpoint:            trackingEndpoint,
-		TrackingUsername:            trackingUsername,
-		TrackingPassword:            trackingPassword,
-		TrackingInstallationID:      trackingInstallationID,
+		UsageStatsClient:            usageStatsClient,
+		UsageStatsEnabled:           usageStatsEnabled,
+		UsageStatsEndpoint:          usageStatsEndpoint,
+		UsageStatsUsername:          usageStatsUsername,
+		UsageStatsPassword:          usageStatsPassword,
+		UsageStatsInstallationID:    usageStatsInstallationID,
 		ClusterProvider:             clusterProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
@@ -555,7 +555,7 @@ func main() {
 	// Send readiness ping after manager starts
 	go func() {
 		time.Sleep(2 * time.Second) // small delay to wait for manager to start
-		trackingClient.SendEvent(context.Background(), "readiness_ping", "operator", nil)
+		usageStatsClient.SendEvent(context.Background(), "readiness_ping", "operator", nil)
 	}()
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

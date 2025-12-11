@@ -121,42 +121,42 @@ func ptrBool(v bool) *bool {
 	return &v
 }
 
-// getTrackingEnvVars returns environment variables for tracking configuration
+// getUsageStatsEnvVars returns environment variables for usage stats configuration
 // Values are passed directly (not from secrets)
-func (r *PipelineReconciler) getTrackingEnvVars() []v1.EnvVar {
-	if !r.TrackingEnabled {
+func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {
+	if !r.UsageStatsEnabled {
 		return []v1.EnvVar{}
 	}
 
 	envVars := []v1.EnvVar{
-		{Name: "GLASSFLOW_TRACKING_ENABLED", Value: "true"},
+		{Name: "GLASSFLOW_USAGE_STATS_ENABLED", Value: "true"},
 	}
 
-	if r.TrackingEndpoint != "" {
+	if r.UsageStatsEndpoint != "" {
 		envVars = append(envVars, v1.EnvVar{
-			Name:  "GLASSFLOW_TRACKING_ENDPOINT",
-			Value: r.TrackingEndpoint,
+			Name:  "GLASSFLOW_USAGE_STATS_ENDPOINT",
+			Value: r.UsageStatsEndpoint,
 		})
 	}
 
-	if r.TrackingUsername != "" {
+	if r.UsageStatsUsername != "" {
 		envVars = append(envVars, v1.EnvVar{
-			Name:  "GLASSFLOW_TRACKING_USERNAME",
-			Value: r.TrackingUsername,
+			Name:  "GLASSFLOW_USAGE_STATS_USERNAME",
+			Value: r.UsageStatsUsername,
 		})
 	}
 
-	if r.TrackingPassword != "" {
+	if r.UsageStatsPassword != "" {
 		envVars = append(envVars, v1.EnvVar{
-			Name:  "GLASSFLOW_TRACKING_PASSWORD",
-			Value: r.TrackingPassword,
+			Name:  "GLASSFLOW_USAGE_STATS_PASSWORD",
+			Value: r.UsageStatsPassword,
 		})
 	}
 
-	if r.TrackingInstallationID != "" {
+	if r.UsageStatsInstallationID != "" {
 		envVars = append(envVars, v1.EnvVar{
-			Name:  "GLASSFLOW_TRACKING_INSTALLATION_ID",
-			Value: r.TrackingInstallationID,
+			Name:  "GLASSFLOW_USAGE_STATS_INSTALLATION_ID",
+			Value: r.UsageStatsInstallationID,
 		})
 	}
 
