@@ -193,7 +193,10 @@ func (c *Client) SendEvent(ctx context.Context, eventName, eventSource string, p
 	}
 
 	go func() {
-		if err := c.sendEventSync(ctx, eventName, eventSource, properties); err != nil {
+		trackingCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := c.sendEventSync(trackingCtx, eventName, eventSource, properties); err != nil {
 			if c.log != nil {
 				c.log.Debug("tracking event send failed",
 					zap.String("event", eventName),

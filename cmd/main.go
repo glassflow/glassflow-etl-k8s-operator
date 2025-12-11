@@ -552,12 +552,10 @@ func main() {
 
 	setupLog.Info("starting manager")
 
-	// Send readiness ping after manager starts (in a goroutine since mgr.Start() is blocking)
+	// Send readiness ping after manager starts
 	go func() {
 		time.Sleep(2 * time.Second) // small delay to wait for manager to start
-		pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		trackingClient.SendEvent(pingCtx, "readiness_ping", "operator", nil)
-		cancel()
+		trackingClient.SendEvent(context.Background(), "readiness_ping", "operator", nil)
 	}()
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
