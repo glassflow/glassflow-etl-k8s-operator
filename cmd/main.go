@@ -30,7 +30,6 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	uberzap "go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -347,19 +346,13 @@ func main() {
 	usageStatsInstallationID := getEnvOrDefault("GLASSFLOW_USAGE_STATS_INSTALLATION_ID", "")
 	clusterProvider := getEnvOrDefault("CLUSTER_PROVIDER", "unknown")
 
-	// Create a zap logger for usage stats client
-	zapLogger, err := uberzap.NewProduction()
-	if err != nil {
-		zapLogger, _ = uberzap.NewDevelopment()
-	}
-
 	usageStatsClient := usagestats.NewClient(
 		usageStatsEndpoint,
 		usageStatsUsername,
 		usageStatsPassword,
 		usageStatsInstallationID,
 		usageStatsEnabled,
-		zapLogger,
+		logger,
 	)
 
 	// Set global logger for controller-runtime
