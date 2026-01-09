@@ -27,8 +27,13 @@ global:
   # PostgreSQL connection URL
   # Only used when external postgres is used by the user.
   # By default, operator uses postgres deployed by the glassflow-etl chart.
-  # Format: postgresql://username:password@host:port/database
-  # postgres_connection_url: ""
+  postgres:
+    # Format: postgresql://username:password@host:port/database
+    connection_url: ""
+    # Alternatively, source the connection URL from a Kubernetes secret
+    secret:
+      name: ""
+      key: ""
 
 controllerManager:
   manager:
