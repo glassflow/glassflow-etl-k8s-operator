@@ -630,7 +630,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 
 	err = r.createNATSStreams(ctx, p)
 	if err != nil {
-		r.recordReconcileError(ctx, "resume", pipelineID, err)
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
