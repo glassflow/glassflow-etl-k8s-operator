@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -136,6 +137,8 @@ type PipelineReconciler struct {
 	// Pipelines namespace configuration
 	PipelinesNamespaceAuto bool
 	PipelinesNamespaceName string
+
+	GlassflowNamespace string // currently the same as operator namespace
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -296,6 +299,10 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	secretName := r.getResourceName(p, p.Spec.ID)
 	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: secretName}, labels, p)
 	if err != nil {
+		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
+			log.Info("pipeline config secret not found, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
 	}
 
@@ -699,7 +706,20 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	var secret v1.Secret
 	err = r.Get(ctx, secretName, &secret)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
+		if apierrors.IsNotFound(err) {
+
+			labels := preparePipelineLabels(p)
+			secret, err = r.createSecret(ctx, secretName, labels, p)
+			if err != nil {
+				if errors.Is(err, ErrPipelineConfigSecretNotFound) {
+					log.Info("pipeline config secret not found during resume, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+					return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
+				}
+				return ctrl.Result{}, fmt.Errorf("create secret for resume: %w", err)
+			}
+		} else {
+			return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
+		}
 	}
 
 	labels := preparePipelineLabels(p)
@@ -915,6 +935,10 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, p.Spec.ID)}
 	_, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
+		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
+			log.Info("pipeline config secret not found during edit, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)
 	}
 
