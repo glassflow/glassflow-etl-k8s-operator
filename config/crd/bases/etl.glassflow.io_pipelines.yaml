@@ -41,7 +41,7 @@ spec:
             properties:
               config:
                 description: |-
-                  Config is deprecated. Pipeline configuration is now stored in a Kubernetes Secret
+                  Config will be deprecated. Initial Pipeline configuration is now read from a Kubernetes Secret
                   in the glassflow namespace (pipeline-config-{pipeline_id}). This field is kept for
                   backward compatibility and will be used as a fallback if the secret is not found.
                 type: string

@@ -154,7 +154,6 @@ spec:
                 - type
                 type: object
             required:
-            - config
             - dlq
             - join
             - pipeline_id
