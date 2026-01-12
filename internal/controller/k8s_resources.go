@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -30,6 +31,8 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 )
+
+var ErrPipelineConfigSecretNotFound = errors.New("pipeline config secret not found")
 
 // createNamespace creates or gets a namespace for the pipeline
 func (r *PipelineReconciler) createNamespace(ctx context.Context, p etlv1alpha1.Pipeline) (zero v1.Namespace, _ error) {
@@ -129,8 +132,59 @@ func (r *PipelineReconciler) createDeployment(ctx context.Context, deployment *a
 	return nil
 }
 
+// getPipelineConfigFromSecret reads the pipeline configuration from the secret in glassflow namespace
+func (r *PipelineReconciler) getPipelineConfigFromSecret(ctx context.Context, pipelineID string) (string, error) {
+	secretName := fmt.Sprintf("pipeline-config-%s", pipelineID)
+	secretNamespacedName := types.NamespacedName{
+		Name:      secretName,
+		Namespace: r.GlassflowNamespace,
+	}
+
+	var secret v1.Secret
+	err := r.Get(ctx, secretNamespacedName, &secret)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("%w: %s in namespace %s (may need to wait for API to create it)", ErrPipelineConfigSecretNotFound, secretName, r.GlassflowNamespace)
+		}
+		return "", fmt.Errorf("get pipeline config secret %s: %w", secretNamespacedName, err)
+	}
+
+	// Extract pipeline.json from the secret
+	pipelineJSON, exists := secret.Data["pipeline.json"]
+	if !exists {
+		return "", fmt.Errorf("pipeline.json not found in secret %s", secretName)
+	}
+
+	return string(pipelineJSON), nil
+}
+
 // createSecret creates a secret for pipeline configuration
 func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
+	// Check if a secret already exists
+	var existingSecret v1.Secret
+	err := r.Get(ctx, namespacedName, &existingSecret)
+	if err == nil {
+		return existingSecret, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return zero, fmt.Errorf("get existing secret %s: %w", namespacedName, err)
+	}
+
+	var pipelineConfig string
+	// Read from secret created by Glassflow API
+	pipelineConfig, err = r.getPipelineConfigFromSecret(ctx, p.Spec.ID)
+	if err != nil {
+		if p.Spec.Config != "" {
+			pipelineConfig = p.Spec.Config
+		} else {
+			return zero, err
+		}
+	}
+
+	if pipelineConfig == "" {
+		return zero, fmt.Errorf("pipeline config is empty for pipeline %s, cannot create secret", p.Spec.ID)
+	}
+
 	s := v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      namespacedName.Name,
@@ -139,14 +193,18 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 		},
 		Immutable: ptrBool(true),
 		StringData: map[string]string{
-			"pipeline.json": p.Spec.Config,
+			"pipeline.json": pipelineConfig,
 		},
 		Type: v1.SecretTypeOpaque,
 	}
-	err := r.Create(ctx, &s, &client.CreateOptions{})
+	err = r.Create(ctx, &s, &client.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			return s, nil
+			err = r.Get(ctx, namespacedName, &existingSecret)
+			if err != nil {
+				return zero, fmt.Errorf("secret was created concurrently, but failed to get it: %w", err)
+			}
+			return existingSecret, nil
 		}
 		return zero, fmt.Errorf("create secret %s: %w", namespacedName, err)
 	}
@@ -156,26 +214,55 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 
 // updateSecret updates a secret by deleting and recreating it (since secrets are immutable)
 func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
-	// First, try to get the existing secret
+	// Check if a secret already exists
 	var existingSecret v1.Secret
 	err := r.Get(ctx, namespacedName, &existingSecret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// Secret doesn't exist, create it
 			return r.createSecret(ctx, namespacedName, labels, p)
 		}
 		return zero, fmt.Errorf("get existing secret %s: %w", namespacedName, err)
 	}
 
-	// Delete the existing secret since it's immutable and cannot be updated
-	// We need to recreate it with the new configuration
+	// Read from secret updated by Glassflow API
+	var pipelineConfig string
+	pipelineConfig, err = r.getPipelineConfigFromSecret(ctx, p.Spec.ID)
+	if err != nil {
+		if p.Spec.Config != "" {
+			pipelineConfig = p.Spec.Config
+		} else {
+			return zero, err
+		}
+	}
+
+	if pipelineConfig == "" {
+		return zero, fmt.Errorf("pipeline config is empty for pipeline %s, cannot update secret", p.Spec.ID)
+	}
+
+	// recreate new secret
 	err = r.Delete(ctx, &existingSecret)
 	if err != nil {
 		return zero, fmt.Errorf("delete existing secret %s: %w", namespacedName, err)
 	}
 
-	// Create a new secret with the updated config
-	return r.createSecret(ctx, namespacedName, labels, p)
+	s := v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      namespacedName.Name,
+			Namespace: namespacedName.Namespace,
+			Labels:    labels,
+		},
+		Immutable: ptrBool(true),
+		StringData: map[string]string{
+			"pipeline.json": pipelineConfig,
+		},
+		Type: v1.SecretTypeOpaque,
+	}
+	err = r.Create(ctx, &s, &client.CreateOptions{})
+	if err != nil {
+		return zero, fmt.Errorf("create updated secret %s: %w", namespacedName, err)
+	}
+
+	return s, nil
 }
 
 // isDeploymentAbsent checks if a deployment is fully deleted
