@@ -299,86 +299,10 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
 	}
 
-	namespace := r.getTargetNamespace(p)
-
-	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
-	}
-	if !ready {
-		// Check for timeout before requeuing
-		timedOut, _ := r.checkOperationTimeout(log, &p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, "create")
-		}
-
-		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret, p)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
-		}
-		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	} else {
-		log.Info("sink deployment is ready", "namespace", namespace)
-	}
-
-	// Step 2: Create Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "create")
-			}
-
-			log.Info("creating join deployment", "namespace", namespace)
-			err := r.createJoin(ctx, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("join deployment is already created", "namespace", namespace)
-		}
-	}
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret, "create")
+	// Ensure all deployments are ready
+	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationCreate)
 	if err != nil || result.Requeue {
 		return result, err
-	}
-
-	// Step 4: Create Ingestor deployments
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "create")
-			}
-
-			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("ingestor deployment is already created", "namespace", namespace)
-		}
 	}
 
 	// All deployments are ready, update status to Running
@@ -710,84 +634,10 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
-	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
-	}
-	if !ready {
-		// Check for timeout before requeuing
-		timedOut, _ := r.checkOperationTimeout(log, &p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
-		}
-
-		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret, p)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
-		}
-		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	} else {
-		log.Info("sink deployment is already created", "namespace", namespace)
-	}
-
-	// Step 2: Create Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
-			}
-
-			log.Info("creating join deployment", "namespace", namespace)
-			err = r.createJoin(ctx, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("join deployment is already created", "namespace", namespace)
-		}
-	}
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret, constants.OperationResume)
+	// Ensure all deployments are ready
+	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationResume)
 	if err != nil || result.Requeue {
 		return result, err
-	}
-
-	// Step 4: Create Ingestor deployments
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
-			}
-
-			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("ingestor deployment is already created", "namespace", namespace)
-		}
 	}
 
 	// All deployments are ready, update status to Running
@@ -955,78 +805,10 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
-	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
-	}
-	if !ready {
-		// Check for timeout before requeuing
-		timedOut, _ := r.checkOperationTimeout(log, &p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
-		}
-
-		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret, p)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
-		}
-		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
-
-	// Step 2: Create Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
-			}
-
-			log.Info("creating join deployment", "namespace", namespace)
-			err = r.createJoin(ctx, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
-	}
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret, constants.OperationEdit)
+	// Ensure all deployments are ready
+	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationEdit)
 	if err != nil || result.Requeue {
 		return result, err
-	}
-
-	// Step 4: Create Ingestor deployments
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
-			}
-
-			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
 	}
 
 	// All deployments are ready, update status to Running
@@ -1122,6 +904,108 @@ func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
 		} else {
 			log.Info("dedup statefulsets are ready", "namespace", namespace)
 		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// ensureDeploymentReady checks if a deployment is ready, creates it if not, and handles timeouts.
+func (r *PipelineReconciler) ensureDeploymentReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace,
+	deploymentName,
+	operationName string,
+	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (bool, error) {
+	ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+	if err != nil {
+		return false, fmt.Errorf("check %s deployment: %w", deploymentName, err)
+	}
+	if ready {
+		log.Info(fmt.Sprintf("%s deployment is already ready", deploymentName), "namespace", namespace)
+		return false, nil
+	}
+
+	// Check for timeout before creating
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		_, err := r.handleOperationTimeout(ctx, log, p, operationName)
+		return false, err
+	}
+
+	log.Info(fmt.Sprintf("creating %s deployment", deploymentName), "namespace", namespace)
+	err = createFn(ctx, ns, labels, secret, *p)
+	if err != nil {
+		return false, fmt.Errorf("create %s deployment: %w", deploymentName, err)
+	}
+	return true, nil
+}
+
+// ensureAllDeploymentsReady ensures all required deployments (sink, join, dedup, ingestor) are ready.
+func (r *PipelineReconciler) ensureAllDeploymentsReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+	operationName string,
+) (ctrl.Result, error) {
+	namespace := r.getTargetNamespace(*p)
+
+	// Step 1: Ensure Sink deployment is ready
+	requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, "sink"), operationName, r.createSink, ns, labels, secret)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if requeue {
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	}
+
+	// Step 2: Ensure Join deployment is ready (if enabled)
+	if p.Spec.Join.Enabled {
+		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, "join"), operationName, r.createJoin, ns, labels, secret)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if requeue {
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		}
+	}
+
+	// Step 3: Ensure Dedup StatefulSets are ready
+	result, err := r.ensureDedupStatefulSetsReady(ctx, log, *p, ns, labels, secret, operationName)
+	if err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Step 4: Ensure Ingestor deployments are ready
+	for i := range p.Spec.Ingestor.Streams {
+		deploymentName := r.getResourceName(*p, fmt.Sprintf("ingestor-%d", i))
+		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+		}
+		if !ready {
+			// Check for timeout before requeuing
+			timedOut, _ := r.checkOperationTimeout(log, p)
+			if timedOut {
+				return r.handleOperationTimeout(ctx, log, p, operationName)
+			}
+
+			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			err = r.createIngestors(ctx, log, ns, labels, secret, *p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
+			}
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		}
+		log.Info("ingestor deployment is already ready", "deployment", deploymentName, "namespace", namespace)
 	}
 
 	return ctrl.Result{}, nil
