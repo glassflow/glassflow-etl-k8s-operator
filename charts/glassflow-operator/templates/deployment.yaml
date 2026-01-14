@@ -36,7 +36,7 @@ spec:
       {{- if and (not .Values.global.postgres.connection_url) (not .Values.global.postgres.secret.name) }}
       initContainers:
         {{- if and .Values.global.usageStats .Values.global.usageStats.enabled }}
-        - name: wait-for-tracking-secret
+        - name: wait-for-usage-stats-secret
           image: "curlimages/curl:latest"
           command:
             - sh
@@ -47,13 +47,13 @@ spec:
                 apk add --no-cache jq >/dev/null 2>&1 || echo "Warning: Could not install jq, will use fallback JSON parsing"
               fi
 
-              SECRET_NAME="{{ .Release.Name }}-tracking-config"
+              SECRET_NAME="{{ .Release.Name }}-usage-stats-config"
               NAMESPACE="{{ .Release.Namespace }}"
               KUBE_API="https://kubernetes.default.svc"
               TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
               CA_CERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
-              echo "Waiting for tracking secret to be ready with installation_id..."
+              echo "Waiting for Usage stats secret to be ready with installation_id..."
               MAX_WAIT=300  # 5 minutes
               ELAPSED=0
               INTERVAL=2
@@ -92,7 +92,7 @@ spec:
                   fi
 
                   if [ -n "$INSTALLATION_ID" ] && [ "$INSTALLATION_ID" != "null" ] && [ "$INSTALLATION_ID" != "" ]; then
-                    echo "Tracking secret is ready with installation_id: ${INSTALLATION_ID:0:8}..."
+                    echo "Usage stats secret is ready with installation_id: ${INSTALLATION_ID:0:8}..."
                     exit 0
                   else
                     echo "Secret exists but installation_id is empty... waiting (${ELAPSED}s/${MAX_WAIT}s)"
@@ -108,7 +108,7 @@ spec:
                 ELAPSED=$((ELAPSED + INTERVAL))
               done
 
-              echo "ERROR: Timeout waiting for tracking secret $SECRET_NAME with installation_id after ${MAX_WAIT}s"
+              echo "ERROR: Timeout waiting for Usage stats secret $SECRET_NAME with installation_id after ${MAX_WAIT}s"
               echo "The pre-install hook may have failed to create the secret. Check the hook logs."
               exit 1
           securityContext:
@@ -197,29 +197,29 @@ spec:
               key: connection-url
         {{- end }}
         {{- if and .Values.global.usageStats .Values.global.usageStats.enabled }}
-            - name: GLASSFLOW_TRACKING_ENABLED
-              value: "true"
-            - name: GLASSFLOW_TRACKING_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-tracking-config
-                  key: tracking_endpoint
-            - name: GLASSFLOW_TRACKING_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-tracking-config
-                  key: tracking_username
-            - name: GLASSFLOW_TRACKING_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-tracking-config
-                  key: tracking_password
-            - name: GLASSFLOW_TRACKING_INSTALLATION_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-tracking-config
-                  key: installation_id
-                  optional: true
+        - name: GLASSFLOW_USAGE_STATS_ENABLED
+          value: "true"
+        - name: GLASSFLOW_USAGE_STATS_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-usage-stats-config
+              key: usage_stats_endpoint
+        - name: GLASSFLOW_USAGE_STATS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-usage-stats-config
+              key: usage_stats_username
+        - name: GLASSFLOW_USAGE_STATS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-usage-stats-config
+              key: usage_stats_password
+        - name: GLASSFLOW_USAGE_STATS_INSTALLATION_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-usage-stats-config
+              key: installation_id
+              optional: true
         {{- end }}
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
