@@ -513,6 +513,7 @@ func main() {
 		DedupImageTag:               dedupImageTag,
 		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
 		PipelinesNamespaceName:      pipelinesNamespaceName,
+		GlassflowNamespace:          podNamespace,
 		UsageStatsClient:            usageStatsClient,
 		UsageStatsEnabled:           usageStatsEnabled,
 		UsageStatsEndpoint:          usageStatsEndpoint,

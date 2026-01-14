@@ -33,9 +33,9 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if not .Values.global.postgres_connection_url }}
+      {{- if and (not .Values.global.postgres.connection_url) (not .Values.global.postgres.secret.name) }}
       initContainers:
-        {{- if not .Values.global.postgres_connection_url }}
+        {{- if and (not .Values.global.postgres.connection_url) (not .Values.global.postgres.secret.name) }}
         - name: wait-for-postgres
           image: "busybox:1.35"
           command:
@@ -100,9 +100,15 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        {{- if .Values.global.postgres_connection_url }}
+        {{- if .Values.global.postgres.connection_url }}
         - name: GLASSFLOW_DATABASE_URL
-          value: {{ .Values.global.postgres_connection_url | quote }}
+          value: {{ .Values.global.postgres.connection_url | quote }}
+        {{- else if .Values.global.postgres.secret.name }}
+        - name: GLASSFLOW_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.global.postgres.secret.name }}
+              key: {{ .Values.global.postgres.secret.key }}
         {{- else }}
         - name: GLASSFLOW_DATABASE_URL
           valueFrom:
