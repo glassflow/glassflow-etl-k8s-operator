@@ -33,6 +33,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if and (not .Values.global.postgres.connection_url) (not .Values.global.postgres.secret.name) }}
       initContainers:
         {{- if and .Values.global.usageStats .Values.global.usageStats.enabled }}
         - name: wait-for-tracking-secret
@@ -45,30 +46,30 @@ spec:
               if ! command -v jq >/dev/null 2>&1; then
                 apk add --no-cache jq >/dev/null 2>&1 || echo "Warning: Could not install jq, will use fallback JSON parsing"
               fi
-              
+
               SECRET_NAME="{{ .Release.Name }}-tracking-config"
               NAMESPACE="{{ .Release.Namespace }}"
               KUBE_API="https://kubernetes.default.svc"
               TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
               CA_CERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-              
+
               echo "Waiting for tracking secret to be ready with installation_id..."
               MAX_WAIT=300  # 5 minutes
               ELAPSED=0
               INTERVAL=2
-              
+
               while [ $ELAPSED -lt $MAX_WAIT ]; do
                 HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --cacert "$CA_CERT" \
                   -H "Authorization: Bearer $TOKEN" \
                   "$KUBE_API/api/v1/namespaces/$NAMESPACE/secrets/$SECRET_NAME" 2>/dev/null || echo "000")
-                
+
                 if [ "$HTTP_CODE" = "404" ]; then
                   echo "Secret $SECRET_NAME does not exist yet (HTTP 404)... waiting (${ELAPSED}s/${MAX_WAIT}s)"
                 elif [ "$HTTP_CODE" = "200" ]; then
                   SECRET_JSON=$(curl -sS --cacert "$CA_CERT" \
                     -H "Authorization: Bearer $TOKEN" \
                     "$KUBE_API/api/v1/namespaces/$NAMESPACE/secrets/$SECRET_NAME" 2>/dev/null || echo "{}")
-                  
+
                   # Try to extract installation_id using jq if available, otherwise use python3
                   if command -v jq >/dev/null 2>&1; then
                     INSTALLATION_ID=$(echo "$SECRET_JSON" | jq -r '.data.installation_id // empty' | base64 -d 2>/dev/null || echo "")
@@ -89,7 +90,7 @@ spec:
                       INSTALLATION_ID=""
                     fi
                   fi
-                  
+
                   if [ -n "$INSTALLATION_ID" ] && [ "$INSTALLATION_ID" != "null" ] && [ "$INSTALLATION_ID" != "" ]; then
                     echo "Tracking secret is ready with installation_id: ${INSTALLATION_ID:0:8}..."
                     exit 0
@@ -102,11 +103,11 @@ spec:
                 else
                   echo "Warning: Unexpected HTTP code $HTTP_CODE when checking secret... waiting (${ELAPSED}s/${MAX_WAIT}s)"
                 fi
-                
+
                 sleep $INTERVAL
                 ELAPSED=$((ELAPSED + INTERVAL))
               done
-              
+
               echo "ERROR: Timeout waiting for tracking secret $SECRET_NAME with installation_id after ${MAX_WAIT}s"
               echo "The pre-install hook may have failed to create the secret. Check the hook logs."
               exit 1
@@ -114,7 +115,7 @@ spec:
             runAsNonRoot: true
             runAsUser: 65534
         {{- end }}
-        {{- if not .Values.global.postgres_connection_url }}
+        {{- if and (not .Values.global.postgres.connection_url) (not .Values.global.postgres.secret.name) }}
         - name: wait-for-postgres
           image: "busybox:1.35"
           command:
@@ -160,33 +161,40 @@ spec:
           securityContext:
             runAsNonRoot: true
             runAsUser: 65534
+        {{- end }}
       containers:
-        - args:
-            - --leader-elect
-            - --health-probe-bind-address=:8081
-          command:
-            - /manager
-          envFrom:
-            - configMapRef:
-                name: glassflow-operator-config
-          env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-        {{- if .Values.global.postgres_connection_url }}
-            - name: GLASSFLOW_DATABASE_URL
-              value: {{ .Values.global.postgres_connection_url | quote }}
+      - args:
+        - --leader-elect
+        - --health-probe-bind-address=:8081        
+        command:
+        - /manager
+        envFrom:
+        - configMapRef:
+            name: glassflow-operator-config
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- if .Values.global.postgres.connection_url }}
+        - name: GLASSFLOW_DATABASE_URL
+          value: {{ .Values.global.postgres.connection_url | quote }}
+        {{- else if .Values.global.postgres.secret.name }}
+        - name: GLASSFLOW_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.global.postgres.secret.name }}
+              key: {{ .Values.global.postgres.secret.key }}
         {{- else }}
-            - name: GLASSFLOW_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: glassflow-postgresql
-                  key: connection-url
+        - name: GLASSFLOW_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: glassflow-postgresql
+              key: connection-url
         {{- end }}
         {{- if and .Values.global.usageStats .Values.global.usageStats.enabled }}
             - name: GLASSFLOW_TRACKING_ENABLED
@@ -213,29 +221,25 @@ spec:
                   key: installation_id
                   optional: true
         {{- end }}
-          image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8081
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          name: manager
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8081
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          {{- with .Values.controllerManager.manager.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.controllerManager.manager.containerSecurityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+        image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources: {{- toYaml .Values.controllerManager.manager.resources | nindent 10
+          }}
+        securityContext: {{- toYaml .Values.controllerManager.manager.containerSecurityContext
+          | nindent 10 }}
       securityContext: {{- toYaml .Values.controllerManager.podSecurityContext | nindent
         8 }}
       serviceAccountName: {{ .Release.Name }}-controller-manager

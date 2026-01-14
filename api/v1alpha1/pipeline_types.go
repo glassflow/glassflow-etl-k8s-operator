@@ -39,7 +39,11 @@ type PipelineSpec struct {
 	Ingestor Sources `json:"sources"`
 	Join     Join    `json:"join"`
 	Sink     Sink    `json:"sink"`
-	Config   string  `json:"config"`
+	// Config will be deprecated. Initial Pipeline configuration is now read from a Kubernetes Secret
+	// in the glassflow namespace (pipeline-config-{pipeline_id}). This field is kept for
+	// backward compatibility and will be used as a fallback if the secret is not found.
+	// +optional
+	Config string `json:"config,omitempty"`
 }
 
 type Sources struct {

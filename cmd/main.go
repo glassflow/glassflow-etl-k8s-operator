@@ -494,6 +494,7 @@ func main() {
 		DedupImageTag:               dedupImageTag,
 		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
 		PipelinesNamespaceName:      pipelinesNamespaceName,
+		GlassflowNamespace:          podNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)
