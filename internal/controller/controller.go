@@ -410,10 +410,15 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		log.Info("pipeline is not stopped but attempting to delete", "pipeline_id", p.Spec.ID)
 	}
 
-	// Delete namespace for this pipeline
+	// only if pipelines have individual NS
 	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete pipeline namespace: %w", err)
+	}
+
+	err = r.deleteSecret(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline secret: %w", err)
 	}
 
 	// Clean up NATS streams
