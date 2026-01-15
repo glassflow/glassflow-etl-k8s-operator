@@ -43,7 +43,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(*p, fmt.Sprintf("ingestor-%d", i))
+		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
@@ -92,7 +92,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for pending messages first
 		err := r.checkDedupPendingMessages(ctx, *p, i)
 		if err != nil {
-			log.Info("dedup has pending messages, requeuing", "dedup", dedupName, "error", err.Error())
+			log.Info("dedup has pending messages, requeuing", constants.DedupComponent, dedupName, "error", err.Error())
 			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
 		}
 
@@ -137,7 +137,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
 		}
 
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, "join"))
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.JoinComponent))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
@@ -150,7 +150,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 
 			log.Info("deleting join deployment", "namespace", namespace)
 			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, "join")}, &deployment)
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, constants.JoinComponent)}, &deployment)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
 					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
@@ -184,7 +184,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
 	}
 
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, "sink"))
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.SinkComponent))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
@@ -197,7 +197,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 
 		log.Info("deleting sink deployment", "namespace", namespace)
 		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, "sink")}, &deployment)
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, constants.SinkComponent)}, &deployment)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
@@ -224,7 +224,7 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 
 	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
+		deploymentName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
@@ -283,14 +283,14 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 
 	// Step 3: Check join and stop Join deployment (if enabled)
 	if p.Spec.Join.Enabled {
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, "join"))
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, constants.JoinComponent))
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
 		}
 		if !deleted {
 			log.Info("deleting join deployment", "namespace", namespace)
 			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "join")}, &deployment)
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.JoinComponent)}, &deployment)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
 					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
@@ -309,14 +309,14 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 	}
 
 	// Step 3: Check sink and stop Sink deployment
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, "sink"))
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, constants.SinkComponent))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
 	}
 	if !deleted {
 		log.Info("deleting sink deployment", "namespace", namespace)
 		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "sink")}, &deployment)
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SinkComponent)}, &deployment)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
@@ -342,7 +342,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 	ing := p.Spec.Ingestor
 
 	for i, t := range ing.Streams {
-		resourceRef := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
+		resourceRef := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
@@ -367,7 +367,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
 				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "ingestor"},
+				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.IngestorComponent},
 				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.IngestorImageTag},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
@@ -409,7 +409,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 
 // createJoin creates a join deployment for the pipeline
 func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	resourceRef := r.getResourceName(p, "join")
+	resourceRef := r.getResourceName(p, constants.JoinComponent)
 
 	joinLabels := r.getJoinLabels()
 
@@ -434,7 +434,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "join"},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.JoinComponent},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.JoinImageTag},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
@@ -474,7 +474,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 // createSink creates a sink deployment for the pipeline
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	resourceRef := r.getResourceName(p, "sink")
+	resourceRef := r.getResourceName(p, constants.SinkComponent)
 
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
@@ -498,7 +498,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "sink"},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.SinkComponent},
 			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.SinkImageTag},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
@@ -594,7 +594,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
 				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: "dedup"},
+				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
 				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},

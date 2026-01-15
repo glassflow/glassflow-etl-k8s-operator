@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	v1 "k8s.io/api/core/v1"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
@@ -28,7 +29,7 @@ import (
 // getKafkaIngestorLabels returns labels for Kafka ingestor components
 func (r *PipelineReconciler) getKafkaIngestorLabels(topic string) map[string]string {
 	labels := map[string]string{
-		"etl.glassflow.io/component": "ingestor",
+		"etl.glassflow.io/component": constants.IngestorComponent,
 		"etl.glassflow.io/topic":     topic,
 	}
 
@@ -38,7 +39,7 @@ func (r *PipelineReconciler) getKafkaIngestorLabels(topic string) map[string]str
 // getJoinLabels returns labels for join components
 func (r *PipelineReconciler) getJoinLabels() map[string]string {
 	labels := map[string]string{
-		"etl.glassflow.io/component": "join",
+		"etl.glassflow.io/component": constants.JoinComponent,
 	}
 
 	return labels
@@ -47,7 +48,7 @@ func (r *PipelineReconciler) getJoinLabels() map[string]string {
 // getSinkLabels returns labels for sink components
 func (r *PipelineReconciler) getSinkLabels() map[string]string {
 	labels := map[string]string{
-		"etl.glassflow.io/component": "sink",
+		"etl.glassflow.io/component": constants.SinkComponent,
 	}
 
 	return labels
@@ -56,7 +57,7 @@ func (r *PipelineReconciler) getSinkLabels() map[string]string {
 // getDedupLabels returns labels for dedup components
 func (r *PipelineReconciler) getDedupLabels(topic string) map[string]string {
 	labels := map[string]string{
-		"etl.glassflow.io/component": "dedup",
+		"etl.glassflow.io/component": constants.DedupComponent,
 		"etl.glassflow.io/topic":     topic,
 	}
 
