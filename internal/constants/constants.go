@@ -33,3 +33,12 @@ const (
 	OperationTerminate     = "terminate"
 	OperationHelmUninstall = "helm-uninstall"
 )
+
+// resource name constants (used for prefix / suffix when naming resources)
+const (
+	SecretSuffix      = "secret"
+	DedupComponent    = "dedup"
+	SinkComponent     = "sink"
+	IngestorComponent = "ingestor"
+	JoinComponent     = "join"
+)

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -273,7 +274,7 @@ func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, 
 		return nil
 	}
 
-	secretName := types.NamespacedName{Namespace: r.PipelinesNamespaceName, Name: r.getResourceName(p, "secret")}
+	secretName := types.NamespacedName{Namespace: r.PipelinesNamespaceName, Name: r.getResourceName(p, constants.SecretSuffix)}
 	var secret v1.Secret
 	err := r.Get(ctx, secretName, &secret)
 	if err != nil {

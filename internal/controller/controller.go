@@ -296,7 +296,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 
 	labels := preparePipelineLabels(p)
 
-	secretName := r.getResourceName(p, "secret")
+	secretName := r.getResourceName(p, constants.SecretSuffix)
 	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: secretName}, labels, p)
 	if err != nil {
 		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
@@ -631,7 +631,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Get secret
-	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "secret")}
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SecretSuffix)}
 	var secret v1.Secret
 	err = r.Get(ctx, secretName, &secret)
 	if err != nil {
@@ -787,7 +787,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	// Update the pipeline config secret with new config
 	labels := preparePipelineLabels(p)
-	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, "secret")}
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SecretSuffix)}
 	_, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
 		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
@@ -905,7 +905,7 @@ func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
 				continue
 			}
 
-			dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+			dedupName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
 			ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
@@ -988,7 +988,7 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 	namespace := r.getTargetNamespace(*p)
 
 	// Step 1: Ensure Sink deployment is ready
-	requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, "sink"), operationName, r.createSink, ns, labels, secret)
+	requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), operationName, r.createSink, ns, labels, secret)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -998,7 +998,7 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 
 	// Step 2: Ensure Join deployment is ready (if enabled)
 	if p.Spec.Join.Enabled {
-		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, "join"), operationName, r.createJoin, ns, labels, secret)
+		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), operationName, r.createJoin, ns, labels, secret)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -1015,7 +1015,7 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 
 	// Step 4: Ensure Ingestor deployments are ready
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(*p, fmt.Sprintf("ingestor-%d", i))
+		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
