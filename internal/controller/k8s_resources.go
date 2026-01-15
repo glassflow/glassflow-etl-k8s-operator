@@ -265,6 +265,30 @@ func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName ty
 	return s, nil
 }
 
+// deleteSecret deletes a secret for a pipeline
+func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	// ns deletion takes care of deleting the secret
+	if r.PipelinesNamespaceAuto {
+		log.Info("namespaceauto=true, skipping secret deletion", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+		return nil
+	}
+
+	secretName := types.NamespacedName{Namespace: r.PipelinesNamespaceName, Name: r.getResourceName(p, "secret")}
+	var secret v1.Secret
+	err := r.Get(ctx, secretName, &secret)
+	if err != nil {
+		log.Info("secret already deleted", "secret", secretName.Name)
+		return nil
+	}
+
+	err = r.Delete(ctx, &secret)
+	if err != nil {
+		return fmt.Errorf("failed to delete secret %s: %w", secretName.Name, err)
+	}
+
+	return nil
+}
+
 // isDeploymentAbsent checks if a deployment is fully deleted
 func (r *PipelineReconciler) isDeploymentAbsent(ctx context.Context, namespace, name string) (bool, error) {
 	var deployment appsv1.Deployment
