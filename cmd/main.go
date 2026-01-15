@@ -45,6 +45,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -324,6 +325,7 @@ func main() {
 	}
 
 	// Configure observability
+	//nolint:goconst
 	obsConfig := &observability.Config{
 		LogsEnabled:       observabilityLogsEnabled == "true",
 		MetricsEnabled:    observabilityMetricsEnabled == "true",
@@ -335,6 +337,23 @@ func main() {
 
 	logger := observability.ConfigureLogger(obsConfig)
 	meter := observability.ConfigureMeter(obsConfig, logger)
+
+	//nolint:goconst
+	usageStatsEnabled := getEnvOrDefault("GLASSFLOW_USAGE_STATS_ENABLED", "false") == "true"
+	usageStatsEndpoint := getEnvOrDefault("GLASSFLOW_USAGE_STATS_ENDPOINT", "")
+	usageStatsUsername := getEnvOrDefault("GLASSFLOW_USAGE_STATS_USERNAME", "")
+	usageStatsPassword := getEnvOrDefault("GLASSFLOW_USAGE_STATS_PASSWORD", "")
+	usageStatsInstallationID := getEnvOrDefault("GLASSFLOW_USAGE_STATS_INSTALLATION_ID", "")
+	clusterProvider := getEnvOrDefault("CLUSTER_PROVIDER", "unknown")
+
+	usageStatsClient := usagestats.NewClient(
+		usageStatsEndpoint,
+		usageStatsUsername,
+		usageStatsPassword,
+		usageStatsInstallationID,
+		usageStatsEnabled,
+		logger,
+	)
 
 	// Set global logger for controller-runtime
 	ctrl.SetLogger(logger)
@@ -495,6 +514,13 @@ func main() {
 		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
 		PipelinesNamespaceName:      pipelinesNamespaceName,
 		GlassflowNamespace:          podNamespace,
+		UsageStatsClient:            usageStatsClient,
+		UsageStatsEnabled:           usageStatsEnabled,
+		UsageStatsEndpoint:          usageStatsEndpoint,
+		UsageStatsUsername:          usageStatsUsername,
+		UsageStatsPassword:          usageStatsPassword,
+		UsageStatsInstallationID:    usageStatsInstallationID,
+		ClusterProvider:             clusterProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)
@@ -519,6 +545,13 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
+
+	// Send readiness ping after manager starts
+	go func() {
+		time.Sleep(2 * time.Second) // small delay to wait for manager to start
+		usageStatsClient.SendEvent(context.Background(), "ready", "operator", nil)
+	}()
+
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

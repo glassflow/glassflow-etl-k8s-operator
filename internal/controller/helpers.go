@@ -121,3 +121,45 @@ func ptrInt64(i int64) *int64 {
 func ptrBool(v bool) *bool {
 	return &v
 }
+
+// getUsageStatsEnvVars returns environment variables for usage stats configuration
+// Values are passed directly (not from secrets)
+func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {
+	if !r.UsageStatsEnabled {
+		return []v1.EnvVar{}
+	}
+
+	envVars := []v1.EnvVar{
+		{Name: "GLASSFLOW_USAGE_STATS_ENABLED", Value: "true"},
+	}
+
+	if r.UsageStatsEndpoint != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_USAGE_STATS_ENDPOINT",
+			Value: r.UsageStatsEndpoint,
+		})
+	}
+
+	if r.UsageStatsUsername != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_USAGE_STATS_USERNAME",
+			Value: r.UsageStatsUsername,
+		})
+	}
+
+	if r.UsageStatsPassword != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_USAGE_STATS_PASSWORD",
+			Value: r.UsageStatsPassword,
+		})
+	}
+
+	if r.UsageStatsInstallationID != "" {
+		envVars = append(envVars, v1.EnvVar{
+			Name:  "GLASSFLOW_USAGE_STATS_INSTALLATION_ID",
+			Value: r.UsageStatsInstallationID,
+		})
+	}
+
+	return envVars
+}
