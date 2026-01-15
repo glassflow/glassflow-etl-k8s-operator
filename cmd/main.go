@@ -549,7 +549,7 @@ func main() {
 	// Send readiness ping after manager starts
 	go func() {
 		time.Sleep(2 * time.Second) // small delay to wait for manager to start
-		usageStatsClient.SendEvent(context.Background(), "readiness_ping", "operator", nil)
+		usageStatsClient.SendEvent(context.Background(), "ready", "operator", nil)
 	}()
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
