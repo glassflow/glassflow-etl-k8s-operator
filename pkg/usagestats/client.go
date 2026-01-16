@@ -61,6 +61,16 @@ func NewClient(endpoint, username, password, installationID string, enabled bool
 		return &Client{enabled: false}
 	}
 
+	// Validate required fields - if any are missing, disable usage stats gracefully
+	if endpoint == "" || username == "" || password == "" || installationID == "" {
+		log.Info("Usage stats disabled: missing required configuration",
+			"endpoint_empty", endpoint == "",
+			"username_empty", username == "",
+			"password_empty", password == "",
+			"installation_id_empty", installationID == "")
+		return &Client{enabled: false}
+	}
+
 	return &Client{
 		endpoint:       endpoint,
 		username:       username,
