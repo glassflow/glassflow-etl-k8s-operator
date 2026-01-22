@@ -25,8 +25,8 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
-	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
@@ -65,9 +65,9 @@ func (r *PipelineReconciler) recordMetricsIfEnabled(fn func(*observability.Meter
 }
 
 // updatePipelineStatus updates PostgreSQL and CRD status (validation handled by backend API)
-func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus postgresstorage.PipelineStatus, errors []string) error {
+func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus models.PipelineStatus, errors []string) error {
 	// Check if status is already the same - avoid duplicate updates and history entries
-	currentStatus := postgresstorage.PipelineStatus(p.Status)
+	currentStatus := models.PipelineStatus(p.Status)
 	if currentStatus == newStatus {
 		log.V(1).Info("pipeline status unchanged, skipping update", "pipeline_id", p.Spec.ID, "status", newStatus)
 		return nil

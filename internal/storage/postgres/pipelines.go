@@ -9,20 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-)
 
-// PipelineStatus represents the overall status of a pipeline
-type PipelineStatus string
-
-// Pipeline status constants
-const (
-	PipelineStatusCreated     PipelineStatus = "Created"
-	PipelineStatusRunning     PipelineStatus = "Running"
-	PipelineStatusResuming    PipelineStatus = "Resuming"
-	PipelineStatusStopping    PipelineStatus = "Stopping"
-	PipelineStatusStopped     PipelineStatus = "Stopped"
-	PipelineStatusTerminating PipelineStatus = "Terminating"
-	PipelineStatusFailed      PipelineStatus = "Failed"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 )
 
 // pipelineRow represents a row from the pipelines table
@@ -82,7 +70,7 @@ func (s *PostgresStorage) loadPipelineRow(ctx context.Context, pipelineID string
 }
 
 // UpdatePipelineStatus updates the pipeline status and creates a history event
-func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID string, status PipelineStatus, errors []string) error {
+func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string) error {
 
 	// Begin transaction
 	tx, err := s.pool.Begin(ctx)

@@ -42,3 +42,9 @@ const (
 	IngestorComponent = "ingestor"
 	JoinComponent     = "join"
 )
+
+// NATS stream and consumer names for critical messages
+const (
+	ComponentSignalsStream = "component-signals"
+	OperatorConsumer       = "operator-consumer"
+)

@@ -37,6 +37,7 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
@@ -257,7 +258,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	log.Info("reconciling pipeline creation", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already running
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusRunning) {
 		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
@@ -271,12 +272,12 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
 	}
 
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusCreated) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusCreated) {
 		log.Info("pipeline is already being created", "pipeline_id", p.Spec.ID)
 		// Continue with the creation process
 	} else {
 		// Transition to Creation status first
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusCreated)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusCreated)
 
 		// Update CRD status
 		err := r.Status().Update(ctx, &p, &client.SubResourceUpdateOptions{})
@@ -324,7 +325,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
@@ -335,7 +336,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		delete(annotations, constants.PipelineCreateAnnotation)
 		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
 		if err != nil {
 			log.Error(err, "failed to remove create annotation", "pipeline_id", p.Spec.ID)
@@ -360,7 +361,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	log.Info("reconciling pipeline termination", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already stopped
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline already stopped", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
@@ -388,7 +389,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	}
 
 	// Update pipeline status to "Stopped"
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusStopped, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
@@ -398,7 +399,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	if annotations != nil {
 		delete(annotations, constants.PipelineTerminateAnnotation)
 		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusStopped)
 		err = r.Update(ctx, &p)
 		if err != nil {
 			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
@@ -423,7 +424,7 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	log.Info("reconciling pipeline deletion", "pipeline_id", pipelineID)
 
 	// Check if pipeline is stopped
-	if p.Status != etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status != etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline is not stopped but attempting to delete", "pipeline_id", p.Spec.ID)
 	}
 
@@ -469,7 +470,7 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	if annotations != nil {
 		delete(annotations, constants.PipelineDeleteAnnotation)
 		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusStopped)
 		err = r.Update(ctx, &p)
 		if err != nil {
 			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
@@ -508,7 +509,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	log.Info("HELM UNINSTALL: Forcing immediate cleanup of pipeline", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already stopped
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline already stopped during helm uninstall", "pipeline_id", pipelineID)
 		// Remove helm uninstall annotation and finalizer to allow cleanup
 		annotations := p.GetAnnotations()
@@ -611,7 +612,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	namespace := r.getTargetNamespace(p)
 
 	// Check if pipeline is already running or resuming
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusRunning) {
 		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
@@ -625,12 +626,12 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
 	}
 
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusResuming) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusResuming) {
 		log.Info("pipeline is already being resumed", "pipeline_id", p.Spec.ID)
 		// Continue with the resume process
 	} else {
 		// Transition to Resuming status first
-		err := r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusResuming, nil)
+		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
@@ -689,7 +690,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
@@ -700,7 +701,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		delete(annotations, constants.PipelineResumeAnnotation)
 		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
 		if err != nil {
 			log.Error(err, "failed to remove resume annotation", "pipeline_id", p.Spec.ID)
@@ -725,7 +726,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	log.Info("reconciling pipeline stop", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already stopped
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline already stopped", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
@@ -740,12 +741,12 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	}
 
 	// Check if pipeline is already stopping
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopping) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopping) {
 		log.Info("pipeline is already being stopped", "pipeline_id", p.Spec.ID)
 		// Continue with the stop process
 	} else {
 		// Transition to Stopping status first
-		err := r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusStopping, nil)
+		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopping, nil)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
 		}
@@ -768,7 +769,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	}
 
 	// Update status to Stopped
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusStopped, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
@@ -779,7 +780,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		delete(annotations, constants.PipelineStopAnnotation)
 		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusStopped)
 		err = r.Update(ctx, &p)
 		if err != nil {
 			log.Error(err, "failed to remove stop annotation", "pipeline_id", p.Spec.ID)
@@ -826,12 +827,12 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)
 	}
 
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusRunning) {
 		log.Info("pipeline is already being resumed", "pipeline_id", p.Spec.ID)
 		// Continue with the resume process
 	} else {
 		// Transition status to Resuming
-		err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusResuming, nil)
+		err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
@@ -870,7 +871,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
@@ -881,7 +882,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		delete(annotations, constants.PipelineEditAnnotation)
 		r.clearOperationStartTime(&p)
 		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusRunning)
 		err = r.Update(ctx, &p)
 		if err != nil {
 			log.Error(err, "failed to remove edit annotation", "pipeline_id", p.Spec.ID)
