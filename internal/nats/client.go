@@ -88,11 +88,11 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 		Subjects: []string{name + ".*"},
 		Storage:  jetstream.FileStorage,
 
-		Retention: jetstream.LimitsPolicy,
-		MaxAge:    n.maxAge,
-		MaxBytes:  n.maxBytes,
-		Discard:   jetstream.DiscardOld,
-		AllowDirect:       true,
+		Retention:          jetstream.LimitsPolicy,
+		MaxAge:             n.maxAge,
+		MaxBytes:           n.maxBytes,
+		Discard:            jetstream.DiscardOld,
+		AllowDirect:        true,
 		AllowAtomicPublish: true,
 	}
 
