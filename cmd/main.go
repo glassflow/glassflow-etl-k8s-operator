@@ -40,6 +40,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/consumers"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
@@ -448,6 +450,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := natsClient.CreateOrUpdateStream(ctx, constants.ComponentSignalsStream, 0); err != nil {
+		setupLog.Error(err, "unable to create component signals messages stream")
+		os.Exit(1)
+	}
+
 	// Initialize PostgreSQL storage (required)
 	if postgresDSN == "" {
 		setupLog.Error(errors.New("postgres DSN is required"), "postgres DSN not provided")
@@ -551,6 +558,18 @@ func main() {
 		time.Sleep(2 * time.Second) // small delay to wait for manager to start
 		usageStatsClient.SendEvent(context.Background(), "ready", "operator", nil)
 	}()
+
+	componentSignalsConsumer := consumers.NewComponentSignalsConsumer(
+		natsClient,
+		logger,
+		mgr.GetClient(),
+		postgresStorage,
+		podNamespace,
+	)
+	if err := mgr.Add(componentSignalsConsumer); err != nil {
+		setupLog.Error(err, "unable to add component signals messages consumer to manager")
+		os.Exit(1)
+	}
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
