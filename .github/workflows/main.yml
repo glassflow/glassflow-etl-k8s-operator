@@ -27,12 +27,20 @@ jobs:
 
   test-operator:
     needs: [check-merge]
-    if: needs.check-merge.outputs.should-build
+    if: ${{ needs.check-merge.outputs.should-build && !contains(github.event.pull_request.labels.*.name, 'build-only') }}
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
     needs: [test-operator]
-    if: needs.check-merge.outputs.should-build
+    if: ${{ needs.check-merge.outputs.should-build && !contains(github.event.pull_request.labels.*.name, 'build-only') }}
+    uses: ./.github/workflows/build-image.yml
+    with:
+      push: true
+    secrets: inherit
+
+  build-operator-image-build-only:
+    needs: [build-operator-binary]
+    if: ${{ needs.check-merge.outputs.should-build && contains(github.event.pull_request.labels.*.name, 'build-only') }}
     uses: ./.github/workflows/build-image.yml
     with:
       push: true
