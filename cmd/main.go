@@ -564,7 +564,7 @@ func main() {
 		logger,
 		mgr.GetClient(),
 		postgresStorage,
-		podNamespace,
+		pipelinesNamespaceName,
 	)
 	if err := mgr.Add(componentSignalsConsumer); err != nil {
 		setupLog.Error(err, "unable to add component signals messages consumer to manager")
