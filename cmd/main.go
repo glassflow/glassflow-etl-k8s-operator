@@ -559,12 +559,18 @@ func main() {
 		usageStatsClient.SendEvent(context.Background(), "ready", "operator", nil)
 	}()
 
+	crdNS := podNamespace
+	// If user chosen namespace
+	if !pipelinesNamespaceAuto {
+		crdNS = pipelinesNamespaceName
+	}
+
 	componentSignalsConsumer := consumers.NewComponentSignalsConsumer(
 		natsClient,
 		logger,
 		mgr.GetClient(),
 		postgresStorage,
-		podNamespace,
+		crdNS,
 	)
 	if err := mgr.Add(componentSignalsConsumer); err != nil {
 		setupLog.Error(err, "unable to add component signals messages consumer to manager")
