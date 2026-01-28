@@ -13,6 +13,22 @@ import (
 const DefaultStreamMaxAge = 168 * time.Hour       // 7 days
 const DefaultStreamMaxBytes = int64(107374182400) // 100GB
 
+// ParseRetentionPolicy parses a string retention policy name to jetstream.RetentionPolicy
+// Valid values: "WorkQueue", "Limits", "Interest"
+// Returns jetstream.WorkQueuePolicy as default if the string is invalid
+func ParseRetentionPolicy(policy string) jetstream.RetentionPolicy {
+	switch policy {
+	case "WorkQueue":
+		return jetstream.WorkQueuePolicy
+	case "Limits":
+		return jetstream.LimitsPolicy
+	case "Interest":
+		return jetstream.InterestPolicy
+	default:
+		return jetstream.WorkQueuePolicy
+	}
+}
+
 // NATS connection retry constants - similar to glassflow-api
 const (
 	NATSConnectionTimeout = 1 * time.Minute
@@ -22,14 +38,27 @@ const (
 	NATSMaxConnectionWait = 2 * time.Minute
 )
 
-type NATSClient struct {
-	nc       *nats.Conn
-	js       jetstream.JetStream
-	maxAge   time.Duration
-	maxBytes int64
+// Config holds configuration for NATS client and stream creation
+type Config struct {
+	URL                string
+	MaxAge             time.Duration
+	MaxBytes           int64
+	Retention          jetstream.RetentionPolicy
+	AllowDirect        bool
+	AllowAtomicPublish bool
 }
 
-func New(ctx context.Context, url string, maxAge time.Duration, maxBytes int64) (*NATSClient, error) {
+type NATSClient struct {
+	nc                 *nats.Conn
+	js                 jetstream.JetStream
+	maxAge             time.Duration
+	maxBytes           int64
+	retention          jetstream.RetentionPolicy
+	allowDirect        bool
+	allowAtomicPublish bool
+}
+
+func New(ctx context.Context, cfg Config) (*NATSClient, error) {
 	var (
 		nc  *nats.Conn
 		err error
@@ -43,11 +72,11 @@ func New(ctx context.Context, url string, maxAge time.Duration, maxBytes int64) 
 	for i := range NATSConnectionRetries {
 		select {
 		case <-connCtx.Done():
-			return nil, fmt.Errorf("timeout after %v waiting to connect to NATS at %s", NATSMaxConnectionWait, url)
+			return nil, fmt.Errorf("timeout after %v waiting to connect to NATS at %s", NATSMaxConnectionWait, cfg.URL)
 		default:
 		}
 
-		nc, err = nats.Connect(url, nats.Timeout(NATSConnectionTimeout))
+		nc, err = nats.Connect(cfg.URL, nats.Timeout(NATSConnectionTimeout))
 		if err == nil {
 			break
 		}
@@ -55,10 +84,10 @@ func New(ctx context.Context, url string, maxAge time.Duration, maxBytes int64) 
 		if i < NATSConnectionRetries-1 {
 			select {
 			case <-time.After(retryDelay):
-				log.Printf("Retrying connection to NATS to %s in %v...", url, retryDelay)
+				log.Printf("Retrying connection to NATS to %s in %v...", cfg.URL, retryDelay)
 				// Continue with retry
 			case <-connCtx.Done():
-				return nil, fmt.Errorf("timeout during retry delay for NATS at %s: %w", url, connCtx.Err())
+				return nil, fmt.Errorf("timeout during retry delay for NATS at %s: %w", cfg.URL, connCtx.Err())
 			}
 			// Exponential backoff
 			retryDelay = min(time.Duration(float64(retryDelay)*1.5), NATSMaxRetryDelay)
@@ -74,10 +103,13 @@ func New(ctx context.Context, url string, maxAge time.Duration, maxBytes int64) 
 	}
 
 	return &NATSClient{
-		nc:       nc,
-		js:       js,
-		maxAge:   maxAge,
-		maxBytes: maxBytes,
+		nc:                 nc,
+		js:                 js,
+		maxAge:             cfg.MaxAge,
+		maxBytes:           cfg.MaxBytes,
+		retention:          cfg.Retention,
+		allowDirect:        cfg.AllowDirect,
+		allowAtomicPublish: cfg.AllowAtomicPublish,
 	}, nil
 }
 
@@ -88,10 +120,13 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 		Subjects: []string{name + ".*"},
 		Storage:  jetstream.FileStorage,
 
-		Retention: jetstream.LimitsPolicy,
-		MaxAge:    n.maxAge,
-		MaxBytes:  n.maxBytes,
-		Discard:   jetstream.DiscardOld,
+		MaxAge:   n.maxAge,
+		MaxBytes: n.maxBytes,
+		Discard:  jetstream.DiscardOld,
+
+		Retention:          n.retention,
+		AllowDirect:        n.allowDirect,
+		AllowAtomicPublish: n.allowAtomicPublish,
 	}
 
 	if dedupWindow > 0 {

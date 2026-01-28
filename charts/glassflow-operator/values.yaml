@@ -13,6 +13,9 @@ global:
     stream:
       maxAge: 168h
       maxBytes: 100GB
+      retention: WorkQueue  # Options: WorkQueue, Limits, Interest
+      allowDirect: true
+      allowAtomicPublish: true
 
   # Pipelines namespace configuration
   pipelines:
