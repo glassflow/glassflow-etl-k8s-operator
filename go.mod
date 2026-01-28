@@ -9,7 +9,7 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/nats-io/nats.go v1.43.0
+	github.com/nats-io/nats.go v1.48.0
 	github.com/onsi/ginkgo/v2 v2.21.0
 	github.com/onsi/gomega v1.35.1
 	go.opentelemetry.io/contrib/bridges/otelzap v0.13.0

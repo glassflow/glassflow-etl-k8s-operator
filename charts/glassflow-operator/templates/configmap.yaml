@@ -11,6 +11,9 @@ data:
   PIPELINES_NAMESPACE_NAME: {{ .Values.global.pipelines.namespace.name | quote }}
   NATS_MAX_STREAM_AGE: {{ .Values.global.nats.stream.maxAge | quote }}
   NATS_MAX_STREAM_BYTES: {{ .Values.global.nats.stream.maxBytes | quote }}
+  NATS_STREAM_RETENTION: {{ .Values.global.nats.stream.retention | default "WorkQueue" | quote }}
+  NATS_STREAM_ALLOW_DIRECT: {{ .Values.global.nats.stream.allowDirect | default true | quote }}
+  NATS_STREAM_ALLOW_ATOMIC_PUBLISH: {{ .Values.global.nats.stream.allowAtomicPublish | default true | quote }}
   KUBERNETES_CLUSTER_DOMAIN: {{ quote .Values.kubernetesClusterDomain }}
   INGESTOR_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.ingestor.image.repository .Values.glassflowComponents.ingestor.image.tag | quote }}
   JOIN_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.join.image.repository .Values.glassflowComponents.join.image.tag | quote }}
