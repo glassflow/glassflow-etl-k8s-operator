@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -157,6 +158,56 @@ func (r *PipelineReconciler) getPipelineConfigFromSecret(ctx context.Context, pi
 	}
 
 	return string(pipelineJSON), nil
+}
+
+// pipelineConfigSinkReplicas is a minimal struct to parse only sink.replicas from pipeline.json.
+type pipelineConfigSinkReplicas struct {
+	Sink struct {
+		Replicas int `json:"replicas"`
+	} `json:"sink"`
+}
+
+// getSinkReplicasFromPipelineConfig parses pipeline.json from the secret and returns sink.replicas.
+// Returns 1 if the field is missing, invalid, or < 1.
+func (r *PipelineReconciler) getSinkReplicasFromPipelineConfig(secret v1.Secret) int {
+	data, exists := secret.Data["pipeline.json"]
+	if !exists || len(data) == 0 {
+		return 1
+	}
+	var cfg pipelineConfigSinkReplicas
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return 1
+	}
+	if cfg.Sink.Replicas < 1 {
+		return 1
+	}
+	return cfg.Sink.Replicas
+}
+
+// createHeadlessService creates a headless Service (ClusterIP: None) for a StatefulSet.
+func (r *PipelineReconciler) createHeadlessService(ctx context.Context, namespace, name string, labels map[string]string) error {
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: v1.ServiceSpec{
+			ClusterIP: v1.ClusterIPNone,
+			Selector:  labels,
+			Ports: []v1.ServicePort{
+				{Name: "placeholder", Port: 80, Protocol: v1.ProtocolTCP},
+			},
+		},
+	}
+	err := r.Create(ctx, svc, &client.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("create headless service %s: %w", name, err)
+	}
+	return nil
 }
 
 // createSecret creates a secret for pipeline configuration

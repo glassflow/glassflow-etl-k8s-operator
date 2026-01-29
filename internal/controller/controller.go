@@ -1008,6 +1008,43 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	return true, nil
 }
 
+// ensureStatefulSetReady checks if a StatefulSet is ready, creates it if not, and handles timeouts.
+func (r *PipelineReconciler) ensureStatefulSetReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace,
+	statefulSetName,
+	operationName string,
+	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (bool, error) {
+	ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
+	if err != nil {
+		return false, fmt.Errorf("check %s statefulset: %w", statefulSetName, err)
+	}
+	if ready {
+		log.Info(fmt.Sprintf("%s statefulset is already ready", statefulSetName), "namespace", namespace)
+		return false, nil
+	}
+
+	// Check for timeout before creating
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		_, err := r.handleOperationTimeout(ctx, log, p, operationName)
+		return false, err
+	}
+
+	log.Info(fmt.Sprintf("creating %s statefulset", statefulSetName), "namespace", namespace)
+	err = createFn(ctx, ns, labels, secret, *p)
+	if err != nil {
+		return false, fmt.Errorf("create %s statefulset: %w", statefulSetName, err)
+	}
+	return true, nil
+}
+
 // ensureAllDeploymentsReady ensures all required deployments (sink, join, dedup, ingestor) are ready.
 func (r *PipelineReconciler) ensureAllDeploymentsReady(
 	ctx context.Context,
@@ -1020,8 +1057,9 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 ) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(*p)
 
-	// Step 1: Ensure Sink deployment is ready
-	requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), operationName, r.createSink, ns, labels, secret)
+	// Step 1: Ensure Sink StatefulSet is ready
+	sinkName := r.getResourceName(*p, constants.SinkComponent)
+	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, sinkName, operationName, r.createSink, ns, labels, secret)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

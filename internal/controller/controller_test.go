@@ -93,6 +93,8 @@ var _ = Describe("Pipeline Controller", func() {
 							Type:     "clickhouse",
 							Replicas: 1,
 						},
+						// Pipeline config fallback: sink replica count is read from pipeline.json (sink.replicas).
+						Config: `{"pipeline_id":"test-pipeline","sink":{"replicas":1}}`,
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())

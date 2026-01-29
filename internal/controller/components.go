@@ -168,7 +168,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		}
 	}
 
-	// Step 3: Check sink and stop Sink deployment
+	// Step 3: Check sink and stop Sink StatefulSet
 	// Check for timeout before checking pending messages
 	timedOut, _ := r.checkOperationTimeout(log, p)
 	if timedOut {
@@ -184,9 +184,10 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
 	}
 
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.SinkComponent))
+	sinkName := r.getResourceName(*p, constants.SinkComponent)
+	deleted, err := r.isStatefulSetAbsent(ctx, namespace, sinkName)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+		return ctrl.Result{}, fmt.Errorf("check sink statefulset: %w", err)
 	}
 	if !deleted {
 		// Check for timeout before requeuing
@@ -195,23 +196,23 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 		}
 
-		log.Info("deleting sink deployment", "namespace", namespace)
-		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, constants.SinkComponent)}, &deployment)
+		log.Info("deleting sink statefulset", "namespace", namespace)
+		var sts appsv1.StatefulSet
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &sts)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("get sink statefulset: %w", err)
 			}
 		} else {
-			err = r.deleteDeployment(ctx, &deployment)
+			err = r.deleteStatefulSet(ctx, &sts)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("delete sink statefulset: %w", err)
 			}
 		}
-		// Requeue to wait for deployment to be fully deleted
+		// Requeue to wait for statefulset to be fully deleted
 		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	} else {
-		log.Info("sink deployment is already deleted", "namespace", namespace)
+		log.Info("sink statefulset is already deleted", "namespace", namespace)
 	}
 
 	// All deployments are deleted
@@ -308,29 +309,30 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 		}
 	}
 
-	// Step 3: Check sink and stop Sink deployment
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, constants.SinkComponent))
+	// Step 3: Check sink and stop Sink StatefulSet
+	sinkName := r.getResourceName(p, constants.SinkComponent)
+	deleted, err := r.isStatefulSetAbsent(ctx, namespace, sinkName)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+		return ctrl.Result{}, fmt.Errorf("check sink statefulset: %w", err)
 	}
 	if !deleted {
-		log.Info("deleting sink deployment", "namespace", namespace)
-		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SinkComponent)}, &deployment)
+		log.Info("deleting sink statefulset", "namespace", namespace)
+		var sts appsv1.StatefulSet
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &sts)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("get sink statefulset: %w", err)
 			}
 		} else {
-			err = r.deleteDeployment(ctx, &deployment)
+			err = r.deleteStatefulSet(ctx, &sts)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("delete sink statefulset: %w", err)
 			}
 		}
-		// Requeue to wait for deployment to be fully deleted
+		// Requeue to wait for statefulset to be fully deleted
 		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	} else {
-		log.Info("sink deployment is already deleted", "namespace", namespace)
+		log.Info("sink statefulset is already deleted", "namespace", namespace)
 	}
 
 	// All deployments are deleted
@@ -472,12 +474,30 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	return nil
 }
 
-// createSink creates a sink deployment for the pipeline
+// createSink creates a sink StatefulSet for the pipeline (replicas from pipeline config in secret).
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	resourceRef := r.getResourceName(p, constants.SinkComponent)
+	namespace := ns.GetName()
 
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
+
+	replicas := r.getSinkReplicasFromPipelineConfig(secret)
+
+	// Migration: delete existing sink Deployment if present (upgrade from Deployment to StatefulSet).
+	var existingDeployment appsv1.Deployment
+	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: resourceRef}, &existingDeployment)
+	if err == nil {
+		if err := r.deleteDeployment(ctx, &existingDeployment); err != nil {
+			return fmt.Errorf("delete existing sink deployment for migration: %w", err)
+		}
+	}
+	// Ignore NotFound; no deployment to migrate
+
+	// Create headless Service for StatefulSet (required for pod DNS).
+	if err := r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels); err != nil {
+		return fmt.Errorf("create sink headless service: %w", err)
+	}
 
 	container := newComponentContainerBuilder().
 		withName(resourceRef).
@@ -511,9 +531,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
 		build()
 
-	deployment := newComponentDeploymentBuilder().
+	statefulSet := newComponentStatefulSetBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
+		withServiceName(resourceRef).
 		withLabels(sinkLabels).
 		withVolume(v1.Volume{
 			Name: "config",
@@ -524,13 +545,13 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 				},
 			},
 		}).
+		withReplicas(replicas).
 		withContainer(*container).
 		withAffinity(r.SinkAffinity).
 		build()
 
-	err := r.createDeployment(ctx, deployment)
-	if err != nil {
-		return fmt.Errorf("create sink deployment: %w", err)
+	if err := r.createStatefulSet(ctx, statefulSet); err != nil {
+		return fmt.Errorf("create sink statefulset: %w", err)
 	}
 
 	return nil
