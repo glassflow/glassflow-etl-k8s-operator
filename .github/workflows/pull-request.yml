@@ -28,13 +28,23 @@ jobs:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
     uses: ./.github/workflows/build_binary.yml
 
+  # When "build-only" label is present: skip tests and build image after binary only
   test-operator:
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') && !contains(github.event.pull_request.labels.*.name, 'build-only') }}
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
     needs: [build-operator-binary, test-operator]
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') && !contains(github.event.pull_request.labels.*.name, 'build-only') }}
+    uses: ./.github/workflows/build-image.yml
+    with:
+      push: true
+      pr_number: ${{ github.event.number }}
+    secrets: inherit
+
+  build-operator-image-build-only:
+    needs: [build-operator-binary]
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') && contains(github.event.pull_request.labels.*.name, 'build-only') }}
     uses: ./.github/workflows/build-image.yml
     with:
       push: true
@@ -43,5 +53,5 @@ jobs:
 
   test-chart:
     needs: [changes]
-    if: needs.changes.outputs.charts != 'true'
+    if: ${{ needs.changes.outputs.charts != 'true' && !contains(github.event.pull_request.labels.*.name, 'build-only') }}
     uses: ./.github/workflows/test-chart.yml
