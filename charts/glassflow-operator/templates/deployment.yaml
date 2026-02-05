@@ -221,6 +221,14 @@ spec:
               key: installation_id
               optional: true
         {{- end }}
+        {{- if and .Values.global.encryption.enabled (or .Values.global.encryption.existingSecret.name .Values.global.encryption.createSecret) }}
+        - name: COMPONENT_ENCRYPTION_ENABLED
+          value: "true"
+        - name: COMPONENT_ENCRYPTION_SECRET_NAME
+          value: {{ if .Values.global.encryption.existingSecret.name }}{{ .Values.global.encryption.existingSecret.name | quote }}{{ else }}{{ .Values.global.encryption.secretName | default (printf "%s-encryption-key" .Release.Name) | quote }}{{ end }}
+        - name: COMPONENT_ENCRYPTION_SECRET_KEY
+          value: {{ .Values.global.encryption.existingSecret.key | default "encryption-key" | quote }}
+        {{- end }}
         image: "{{ .Values.global.imageRegistry | default "" }}{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
         livenessProbe:
