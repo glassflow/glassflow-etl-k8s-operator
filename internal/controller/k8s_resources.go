@@ -306,8 +306,8 @@ func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx conte
 			}
 			s := v1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace},
-				Data:      map[string][]byte{key: []byte(r.DatabaseURL)},
-				Type:      v1.SecretTypeOpaque,
+				Data:       map[string][]byte{key: []byte(r.DatabaseURL)},
+				Type:       v1.SecretTypeOpaque,
 			}
 			if err = r.Create(ctx, &s, &client.CreateOptions{}); err != nil {
 				return fmt.Errorf("create secret %s: %w", nn, err)
@@ -348,8 +348,8 @@ func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx conte
 			}
 			s := v1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: destName, Namespace: targetNamespace},
-				Data:      map[string][]byte{constants.ComponentEncryptionSecretKey: data},
-				Type:      v1.SecretTypeOpaque,
+				Data:       map[string][]byte{constants.ComponentEncryptionSecretKey: data},
+				Type:       v1.SecretTypeOpaque,
 			}
 			if err = r.Create(ctx, &s, &client.CreateOptions{}); err != nil {
 				return fmt.Errorf("create secret %s: %w", destNN, err)

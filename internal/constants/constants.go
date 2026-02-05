@@ -52,7 +52,7 @@ const (
 // Component secrets created in pipeline namespace (same DB/encryption as API)
 const (
 	ComponentDatabaseSecretName   = "glassflow-component-database-url"
-	ComponentDatabaseSecretKey   = "connection-url"
+	ComponentDatabaseSecretKey    = "connection-url"
 	ComponentEncryptionSecretName = "glassflow-component-encryption-key"
 	ComponentEncryptionSecretKey  = "encryption-key"
 )
