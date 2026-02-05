@@ -347,7 +347,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
 
-		container := newComponentContainerBuilder().
+		containerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.IngestorImage).
 			withImagePullPolicy(r.IngestorPullPolicy).
@@ -356,7 +356,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				ReadOnly:  true,
 				MountPath: "/config",
 			}).
-			withEnv(append([]v1.EnvVar{
+			withEnv(append(append([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
@@ -376,11 +376,14 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 						FieldPath: "metadata.name",
 					},
 				}},
-			}, r.getUsageStatsEnvVars()...)).
-			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit).
-			build()
+			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit)
+		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
+			containerBuilder = containerBuilder.withVolumeMount(mount)
+		}
+		container := containerBuilder.build()
 
-		deployment := newComponentDeploymentBuilder().
+		depBuilder := newComponentDeploymentBuilder().
 			withNamespace(ns).
 			withResourceName(resourceRef).
 			withLabels(ingestorLabels).
@@ -395,8 +398,11 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}).
 			withReplicas(t.Replicas).
 			withContainer(*container).
-			withAffinity(r.IngestorAffinity).
-			build()
+			withAffinity(r.IngestorAffinity)
+		if vol, ok := r.getComponentEncryptionVolume(); ok {
+			depBuilder = depBuilder.withVolume(vol)
+		}
+		deployment := depBuilder.build()
 
 		err := r.createDeployment(ctx, deployment)
 		if err != nil {
@@ -415,7 +421,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	maps.Copy(joinLabels, labels)
 
-	container := newComponentContainerBuilder().
+	joinContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.JoinImage).
 		withImagePullPolicy(r.JoinPullPolicy).
@@ -424,7 +430,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv(append([]v1.EnvVar{
+		withEnv(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
@@ -443,11 +449,14 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}, r.getUsageStatsEnvVars()...)).
-		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit).
-		build()
+		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit)
+	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
+		joinContainerBuilder = joinContainerBuilder.withVolumeMount(mount)
+	}
+	joinContainer := joinContainerBuilder.build()
 
-	deployment := newComponentDeploymentBuilder().
+	joinDepBuilder := newComponentDeploymentBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
 		withLabels(joinLabels).
@@ -460,9 +469,12 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 				},
 			},
 		}).
-		withContainer(*container).
-		withAffinity(r.JoinAffinity).
-		build()
+		withContainer(*joinContainer).
+		withAffinity(r.JoinAffinity)
+	if vol, ok := r.getComponentEncryptionVolume(); ok {
+		joinDepBuilder = joinDepBuilder.withVolume(vol)
+	}
+	deployment := joinDepBuilder.build()
 
 	err := r.createDeployment(ctx, deployment)
 	if err != nil {
@@ -479,7 +491,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 
-	container := newComponentContainerBuilder().
+	sinkContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.SinkImage).
 		withImagePullPolicy(r.SinkPullPolicy).
@@ -488,7 +500,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv(append([]v1.EnvVar{
+		withEnv(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
@@ -507,11 +519,14 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}, r.getUsageStatsEnvVars()...)).
-		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit).
-		build()
+		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit)
+	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
+		sinkContainerBuilder = sinkContainerBuilder.withVolumeMount(mount)
+	}
+	sinkContainer := sinkContainerBuilder.build()
 
-	deployment := newComponentDeploymentBuilder().
+	sinkDepBuilder := newComponentDeploymentBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
 		withLabels(sinkLabels).
@@ -524,9 +539,12 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 				},
 			},
 		}).
-		withContainer(*container).
-		withAffinity(r.SinkAffinity).
-		build()
+		withContainer(*sinkContainer).
+		withAffinity(r.SinkAffinity)
+	if vol, ok := r.getComponentEncryptionVolume(); ok {
+		sinkDepBuilder = sinkDepBuilder.withVolume(vol)
+	}
+	deployment := sinkDepBuilder.build()
 
 	err := r.createDeployment(ctx, deployment)
 	if err != nil {
@@ -566,7 +584,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			storageClass = stream.Deduplication.StorageClass
 		}
 
-		container := newComponentContainerBuilder().
+		dedupContainerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.DedupImage).
 			withImagePullPolicy(r.DedupPullPolicy).
@@ -579,7 +597,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				Name:      "data",
 				MountPath: "/data/badger",
 			}).
-			withEnv(append([]v1.EnvVar{
+			withEnv(append(append([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
@@ -603,9 +621,12 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 						FieldPath: "metadata.name",
 					},
 				}},
-			}, r.getUsageStatsEnvVars()...)).
-			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit).
-			build()
+			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit)
+		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
+			dedupContainerBuilder = dedupContainerBuilder.withVolumeMount(mount)
+		}
+		container := dedupContainerBuilder.build()
 
 		// Parse storage size
 		storageSizeQuantity, err := resource.ParseQuantity(storageSize)
@@ -628,8 +649,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			pvcTemplate.Spec.StorageClassName = &storageClass
 		}
 
-		// Build StatefulSet
-		statefulSet := newComponentStatefulSetBuilder().
+		stsBuilder := newComponentStatefulSetBuilder().
 			withNamespace(ns).
 			withResourceName(resourceRef).
 			withServiceName(serviceName).
@@ -646,8 +666,11 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			withReplicas(replicas).
 			withContainer(*container).
 			withAffinity(r.DedupAffinity).
-			withVolumeClaimTemplate(pvcTemplate).
-			build()
+			withVolumeClaimTemplate(pvcTemplate)
+		if vol, ok := r.getComponentEncryptionVolume(); ok {
+			stsBuilder = stsBuilder.withVolume(vol)
+		}
+		statefulSet := stsBuilder.build()
 
 		err = r.createStatefulSet(ctx, statefulSet)
 		if err != nil {
