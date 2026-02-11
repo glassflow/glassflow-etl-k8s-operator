@@ -119,10 +119,17 @@ func main() {
 		"Maximum bytes for NATS streams (default: 100GB)")
 
 	// PostgreSQL configuration
-	var postgresDSN string
+	var postgresDSN, postgresOperatorDSN string
 	flag.StringVar(&postgresDSN, "glassflow-database-url", getEnvOrDefault(
 		"GLASSFLOW_DATABASE_URL", ""),
 		"PostgreSQL connection string (DSN) for pipeline storage")
+	flag.StringVar(&postgresOperatorDSN, "postgres-op-dsn", getEnvOrDefault(
+		"POSTGRES_OP_DSN", ""),
+		"PostgreSQL connection string (DSN) for operator (defaults to glassflow-database-url)")
+
+	if postgresOperatorDSN == "" {
+		postgresOperatorDSN = postgresDSN
+	}
 
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage, dedupImage string
@@ -488,7 +495,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresDSN, logger)
+	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to postgres")
 		os.Exit(1)
