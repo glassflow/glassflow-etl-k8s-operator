@@ -118,6 +118,18 @@ func main() {
 		"NATS_MAX_STREAM_BYTES", "107374182400"),
 		"Maximum bytes for NATS streams (default: 100GB)")
 
+	// NATS stream policy configuration
+	var natsStreamRetention, natsStreamAllowDirect, natsStreamAllowAtomicPublish string
+	flag.StringVar(&natsStreamRetention, "nats-stream-retention", getEnvOrDefault(
+		"NATS_STREAM_RETENTION", "WorkQueue"),
+		"Retention policy for NATS streams (WorkQueue, Limits, Interest) (default: WorkQueue)")
+	flag.StringVar(&natsStreamAllowDirect, "nats-stream-allow-direct", getEnvOrDefault(
+		"NATS_STREAM_ALLOW_DIRECT", "true"),
+		"Allow direct access to individual messages (default: true)")
+	flag.StringVar(&natsStreamAllowAtomicPublish, "nats-stream-allow-atomic-publish", getEnvOrDefault(
+		"NATS_STREAM_ALLOW_ATOMIC_PUBLISH", "true"),
+		"Allow atomic batch publishing into the stream (default: true)")
+
 	// PostgreSQL configuration
 	var postgresDSN, postgresOperatorDSN string
 	flag.StringVar(&postgresDSN, "glassflow-database-url", getEnvOrDefault(
@@ -477,8 +489,32 @@ func main() {
 		maxBytes = 107374182400 // 100GB default
 	}
 
+	// Parse NATS stream policy configuration
+	retention := nats.ParseRetentionPolicy(natsStreamRetention)
+
+	allowDirect, err := strconv.ParseBool(natsStreamAllowDirect)
+	if err != nil {
+		setupLog.Error(err, "unable to parse nats stream allow direct, using default",
+			"value", natsStreamAllowDirect, "default", "true")
+		allowDirect = true
+	}
+
+	allowAtomicPublish, err := strconv.ParseBool(natsStreamAllowAtomicPublish)
+	if err != nil {
+		setupLog.Error(err, "unable to parse nats stream allow atomic publish, using default",
+			"value", natsStreamAllowAtomicPublish, "default", "true")
+		allowAtomicPublish = true
+	}
+
 	ctx := context.Background()
-	natsClient, err := nats.New(ctx, natsOperatorAddr, maxAge, maxBytes)
+	natsClient, err := nats.New(ctx, nats.Config{
+		URL:                natsOperatorAddr,
+		MaxAge:             maxAge,
+		MaxBytes:           maxBytes,
+		Retention:          retention,
+		AllowDirect:        allowDirect,
+		AllowAtomicPublish: allowAtomicPublish,
+	})
 	if err != nil {
 		setupLog.Error(err, "unable to connect to nats")
 		os.Exit(1)
