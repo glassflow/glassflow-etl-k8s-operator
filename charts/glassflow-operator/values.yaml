@@ -24,7 +24,7 @@ global:
       # When auto is false, Helm can optionally create the namespace
       create: true
 
-  # PostgreSQL connection URL
+  # PostgreSQL connection URL (same as API; operator passes DSN to pipeline components)
   # Only used when external postgres is used by the user.
   # By default, operator uses postgres deployed by the glassflow-etl chart.
   postgres:
@@ -34,6 +34,15 @@ global:
     secret:
       name: ""
       key: ""
+
+  # Encryption for pipeline components (same as API; when enabled, operator copies secret into pipeline namespaces)
+  encryption:
+    enabled: false
+    existingSecret:
+      name: ""
+      key: "encryption-key"
+    createSecret: false
+    secretName: ""  # Defaults to "{{ .Release.Name }}-encryption-key" if empty
 
 controllerManager:
   manager:
