@@ -290,6 +290,81 @@ func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, 
 	return nil
 }
 
+// ensureComponentSecretsInPipelineNamespace ensures DSN and optionally encryption secrets exist in the target namespace (same as API).
+// targetNamespace is r.getTargetNamespace(p). Works for both per-pipeline and single shared namespace.
+func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx context.Context, targetNamespace string) error {
+	// Database: create secret from operator's DatabaseURL (same as GLASSFLOW_DATABASE_URL used by API)
+	if r.DatabaseURL != "" {
+		name := constants.ComponentDatabaseSecretName
+		key := constants.ComponentDatabaseSecretKey
+		nn := types.NamespacedName{Namespace: targetNamespace, Name: name}
+		var existing v1.Secret
+		err := r.Get(ctx, nn, &existing)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("get secret %s: %w", nn, err)
+			}
+			s := v1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace},
+				Data:       map[string][]byte{key: []byte(r.DatabaseURL)},
+				Type:       v1.SecretTypeOpaque,
+			}
+			if err = r.Create(ctx, &s, &client.CreateOptions{}); err != nil {
+				return fmt.Errorf("create secret %s: %w", nn, err)
+			}
+		} else if string(existing.Data[key]) != r.DatabaseURL {
+			existing.Data[key] = []byte(r.DatabaseURL)
+			if err = r.Update(ctx, &existing); err != nil {
+				return fmt.Errorf("update secret %s: %w", nn, err)
+			}
+		}
+	}
+
+	// Encryption: copy secret from operator namespace (same as API volume)
+	if r.EncryptionEnabled && r.EncryptionSecretName != "" {
+		srcNN := types.NamespacedName{Namespace: r.EncryptionSecretNamespace, Name: r.EncryptionSecretName}
+		var src v1.Secret
+		if err := r.Get(ctx, srcNN, &src); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil // secret not found, skip (encryption may be disabled in chart)
+			}
+			return fmt.Errorf("get encryption secret %s: %w", srcNN, err)
+		}
+		key := r.EncryptionSecretKey
+		if key == "" {
+			key = constants.ComponentEncryptionSecretKey
+		}
+		data, ok := src.Data[key]
+		if !ok {
+			return fmt.Errorf("encryption secret %s has no key %q", srcNN, key)
+		}
+		destName := constants.ComponentEncryptionSecretName
+		destNN := types.NamespacedName{Namespace: targetNamespace, Name: destName}
+		var dest v1.Secret
+		err := r.Get(ctx, destNN, &dest)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("get secret %s: %w", destNN, err)
+			}
+			s := v1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: destName, Namespace: targetNamespace},
+				Data:       map[string][]byte{constants.ComponentEncryptionSecretKey: data},
+				Type:       v1.SecretTypeOpaque,
+			}
+			if err = r.Create(ctx, &s, &client.CreateOptions{}); err != nil {
+				return fmt.Errorf("create secret %s: %w", destNN, err)
+			}
+		} else if string(dest.Data[constants.ComponentEncryptionSecretKey]) != string(data) {
+			dest.Data[constants.ComponentEncryptionSecretKey] = data
+			if err = r.Update(ctx, &dest); err != nil {
+				return fmt.Errorf("update secret %s: %w", destNN, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 // isDeploymentAbsent checks if a deployment is fully deleted
 func (r *PipelineReconciler) isDeploymentAbsent(ctx context.Context, namespace, name string) (bool, error) {
 	var deployment appsv1.Deployment

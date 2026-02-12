@@ -48,3 +48,11 @@ const (
 	ComponentSignalsStream = "component-signals"
 	OperatorConsumer       = "operator-consumer"
 )
+
+// Component secrets created in pipeline namespace (same DB/encryption as API)
+const (
+	ComponentDatabaseSecretName   = "glassflow-component-database-url"
+	ComponentDatabaseSecretKey    = "connection-url"
+	ComponentEncryptionSecretName = "glassflow-component-encryption-key"
+	ComponentEncryptionSecretKey  = "encryption-key"
+)

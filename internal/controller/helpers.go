@@ -163,3 +163,50 @@ func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {
 
 	return envVars
 }
+
+// getComponentDatabaseEnvVars returns GLASSFLOW_DATABASE_URL from the component secret (same as API).
+func (r *PipelineReconciler) getComponentDatabaseEnvVars() []v1.EnvVar {
+	if r.DatabaseURL == "" {
+		return nil
+	}
+	return []v1.EnvVar{
+		{
+			Name: "GLASSFLOW_DATABASE_URL",
+			ValueFrom: &v1.EnvVarSource{
+				SecretKeyRef: &v1.SecretKeySelector{
+					LocalObjectReference: v1.LocalObjectReference{Name: constants.ComponentDatabaseSecretName},
+					Key:                  constants.ComponentDatabaseSecretKey,
+				},
+			},
+		},
+	}
+}
+
+// getComponentEncryptionVolume returns the encryption secret volume (same as API) when encryption is enabled.
+func (r *PipelineReconciler) getComponentEncryptionVolume() (v1.Volume, bool) {
+	if !r.EncryptionEnabled {
+		return v1.Volume{}, false
+	}
+	return v1.Volume{
+		Name: "encryption-key",
+		VolumeSource: v1.VolumeSource{
+			Secret: &v1.SecretVolumeSource{
+				SecretName:  constants.ComponentEncryptionSecretName,
+				DefaultMode: ptrInt32(0o444),
+				Items:       []v1.KeyToPath{{Key: constants.ComponentEncryptionSecretKey, Path: "encryption-key"}},
+			},
+		},
+	}, true
+}
+
+// getComponentEncryptionVolumeMount returns the encryption volume mount at /etc/glassflow/secrets (same as API).
+func (r *PipelineReconciler) getComponentEncryptionVolumeMount() (v1.VolumeMount, bool) {
+	if !r.EncryptionEnabled {
+		return v1.VolumeMount{}, false
+	}
+	return v1.VolumeMount{
+		Name:      "encryption-key",
+		ReadOnly:  true,
+		MountPath: "/etc/glassflow/secrets",
+	}, true
+}

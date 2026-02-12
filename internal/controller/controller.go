@@ -151,6 +151,14 @@ type PipelineReconciler struct {
 	UsageStatsInstallationID string
 	// Cluster provider (e.g., GKE, EKS, IBM, etc.)
 	ClusterProvider string
+
+	// Component database and encryption (same as API). DatabaseURL is passed from operator env (GLASSFLOW_DATABASE_URL).
+	DatabaseURL string
+	// Encryption: when enabled, operator copies this secret into pipeline namespace and mounts at /etc/glassflow/secrets (same as API).
+	EncryptionEnabled         bool
+	EncryptionSecretName      string
+	EncryptionSecretKey       string
+	EncryptionSecretNamespace string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -169,7 +177,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
 
 // For more details, check Reconcile and its Result here:
@@ -316,6 +324,11 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
+	}
+
+	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {
+		r.recordReconcileError(ctx, "create", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("ensure component secrets: %w", err)
 	}
 
 	// Ensure all deployments are ready
@@ -683,6 +696,11 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
+	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {
+		r.recordReconcileError(ctx, "resume", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("ensure component secrets: %w", err)
+	}
+
 	// Ensure all deployments are ready
 	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationResume)
 	if err != nil || result.Requeue {
@@ -862,6 +880,11 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	if err != nil {
 		r.recordReconcileError(ctx, "edit", pipelineID, err)
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+	}
+
+	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("ensure component secrets: %w", err)
 	}
 
 	// Ensure all deployments are ready

@@ -59,6 +59,14 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+// defaultNamespace returns value if non-empty, otherwise fallback (e.g. operator namespace)
+func defaultNamespace(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -111,10 +119,17 @@ func main() {
 		"Maximum bytes for NATS streams (default: 100GB)")
 
 	// PostgreSQL configuration
-	var postgresDSN string
+	var postgresDSN, postgresOperatorDSN string
 	flag.StringVar(&postgresDSN, "glassflow-database-url", getEnvOrDefault(
 		"GLASSFLOW_DATABASE_URL", ""),
 		"PostgreSQL connection string (DSN) for pipeline storage")
+	flag.StringVar(&postgresOperatorDSN, "postgres-op-dsn", getEnvOrDefault(
+		"POSTGRES_OP_DSN", ""),
+		"PostgreSQL connection string (DSN) for operator (defaults to glassflow-database-url)")
+
+	if postgresOperatorDSN == "" {
+		postgresOperatorDSN = postgresDSN
+	}
 
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage, dedupImage string
@@ -289,6 +304,25 @@ func main() {
 		return true
 	}(), "Enable automatic creation of per-pipeline namespaces (default: true)")
 
+	// Component encryption (same as API; chart sets from global.encryption)
+	var componentEncryptionEnabled bool
+	var componentEncryptionSecretName, componentEncryptionSecretKey, componentEncryptionSecretNamespace string
+	flag.BoolVar(&componentEncryptionEnabled, "component-encryption-enabled", func() bool {
+		if b, err := strconv.ParseBool(getEnvOrDefault("COMPONENT_ENCRYPTION_ENABLED", "false")); err == nil {
+			return b
+		}
+		return false
+	}(), "Enable mounting encryption secret for pipeline components (mirrors API)")
+	flag.StringVar(&componentEncryptionSecretName, "component-encryption-secret-name", getEnvOrDefault(
+		"COMPONENT_ENCRYPTION_SECRET_NAME", ""),
+		"Secret name for encryption key (same as API)")
+	flag.StringVar(&componentEncryptionSecretKey, "component-encryption-secret-key", getEnvOrDefault(
+		"COMPONENT_ENCRYPTION_SECRET_KEY", "encryption-key"),
+		"Key in the encryption secret")
+	flag.StringVar(&componentEncryptionSecretNamespace, "component-encryption-secret-namespace", getEnvOrDefault(
+		"COMPONENT_ENCRYPTION_SECRET_NAMESPACE", ""),
+		"Namespace of the encryption secret (default: operator namespace)")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -461,7 +495,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresDSN, logger)
+	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to postgres")
 		os.Exit(1)
@@ -528,6 +562,11 @@ func main() {
 		UsageStatsPassword:          usageStatsPassword,
 		UsageStatsInstallationID:    usageStatsInstallationID,
 		ClusterProvider:             clusterProvider,
+		DatabaseURL:                 postgresDSN,
+		EncryptionEnabled:           componentEncryptionEnabled,
+		EncryptionSecretName:        componentEncryptionSecretName,
+		EncryptionSecretKey:         componentEncryptionSecretKey,
+		EncryptionSecretNamespace:   defaultNamespace(componentEncryptionSecretNamespace, podNamespace),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)
