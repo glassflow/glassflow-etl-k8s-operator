@@ -2,13 +2,17 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+const JSErrCodeStreamRetentionPolicyChange jetstream.ErrorCode = 10052
 
 const DefaultStreamMaxAge = 168 * time.Hour       // 7 days
 const DefaultStreamMaxBytes = int64(107374182400) // 100GB
@@ -135,6 +139,18 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 
 	_, err := n.JetStream().CreateOrUpdateStream(ctx, sc)
 	if err != nil {
+		// Skip if update fails for old pipelines with existing streams with different retention policy
+		var apiErr *jetstream.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode == JSErrCodeStreamRetentionPolicyChange {
+			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", name)
+			return nil
+		}
+		// Fallback: check error string for err_code=10052 in case error structure varies
+		if strings.Contains(err.Error(), "10052") && strings.Contains(err.Error(), "retention policy") {
+			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", name)
+			return nil
+		}
+
 		return fmt.Errorf("cannot create nats stream: %w", err)
 	}
 
