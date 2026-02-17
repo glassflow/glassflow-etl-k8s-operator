@@ -33,6 +33,7 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 )
 
@@ -92,8 +93,11 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for pending messages first
 		err := r.checkDedupPendingMessages(ctx, *p, i)
 		if err != nil {
-			log.Info("dedup has pending messages, requeuing", constants.DedupComponent, dedupName, "error", err.Error())
-			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+			if errs.IsConsumerPendingMessagesError(err) {
+				log.Info("dedup has pending messages, requeuing", "pipeline_id", p.Spec.ID, "stream_index", i, "error", err.Error())
+				return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("check dedup pending messages for stream %d: %w", i, err)
 		}
 
 		deleted, err := r.isStatefulSetAbsent(ctx, namespace, dedupName)
@@ -131,10 +135,13 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for pending messages first
 		err := r.checkJoinPendingMessages(ctx, *p)
 		if err != nil {
-			log.Info("join has pending messages, requeuing operation",
-				"pipeline_id", p.Spec.ID,
-				"error", err.Error())
-			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+			if errs.IsConsumerPendingMessagesError(err) {
+				log.Info("join has pending messages, requeuing operation",
+					"pipeline_id", p.Spec.ID,
+					"error", err.Error())
+				return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("check join pending messages: %w", err)
 		}
 
 		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.JoinComponent))
@@ -178,10 +185,13 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 	// Check for pending messages first
 	err := r.checkSinkPendingMessages(ctx, *p)
 	if err != nil {
-		log.Info("sink has pending messages, requeuing operation",
-			"pipeline_id", p.Spec.ID,
-			"error", err.Error())
-		return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+		if errs.IsConsumerPendingMessagesError(err) {
+			log.Info("sink has pending messages, requeuing operation",
+				"pipeline_id", p.Spec.ID,
+				"error", err.Error())
+			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("check sink pending messages: %w", err)
 	}
 
 	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.SinkComponent))
