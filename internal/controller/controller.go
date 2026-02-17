@@ -836,7 +836,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	// Update the pipeline config secret with new config
 	labels := preparePipelineLabels(p)
 	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SecretSuffix)}
-	_, err := r.updateSecret(ctx, secretName, labels, p)
+	secret, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
 		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
 			log.Info("pipeline config secret not found during edit, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
@@ -863,17 +863,11 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		}
 	}
 
-	// Get namespace and secret for deployment creation
+	// Get namespace for deployment creation
 	var ns v1.Namespace
 	err = r.Get(ctx, types.NamespacedName{Name: namespace}, &ns)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
-	}
-
-	var secret v1.Secret
-	err = r.Get(ctx, secretName, &secret)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
 	}
 
 	err = r.createNATSStreams(ctx, p)
