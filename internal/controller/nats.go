@@ -24,6 +24,7 @@ import (
 	"github.com/go-logr/logr"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 )
 
@@ -34,7 +35,7 @@ func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, s
 		return fmt.Errorf("check consumer %s: %w", consumerName, err)
 	}
 	if hasPending {
-		return fmt.Errorf("consumer %s has %d pending and %d unacknowledged messages", consumerName, pending, unack)
+		return errs.NewConsumerPendingMessagesError(consumerName, pending, unack)
 	}
 
 	return nil
@@ -57,13 +58,13 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 	// Check left stream
 	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
 	if err != nil {
-		return fmt.Errorf("left join consumer: %w", err)
+		return err
 	}
 
 	// Check right stream
 	err = r.checkConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
 	if err != nil {
-		return fmt.Errorf("right join consumer: %w", err)
+		return err
 	}
 
 	return nil
@@ -83,12 +84,7 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 	}
 
 	// Check sink stream
-	err := r.checkConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
-	if err != nil {
-		return fmt.Errorf("sink consumer: %w", err)
-	}
-
-	return nil
+	return r.checkConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
 }
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages
@@ -101,12 +97,8 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 	consumerName := stream.Deduplication.NATSConsumerName
 	inputStreamName := stream.OutputStream // Dedup reads from ingestor output
 
-	err := r.checkConsumerPendingMessages(ctx, inputStreamName, consumerName)
-	if err != nil {
-		return fmt.Errorf("dedup-%d consumer: %w", streamIndex, err)
-	}
+	return r.checkConsumerPendingMessages(ctx, inputStreamName, consumerName)
 
-	return nil
 }
 
 // createNATSStreams creates all NATS streams and KV stores for a pipeline
