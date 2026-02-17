@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -238,6 +239,12 @@ func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName ty
 
 	if pipelineConfig == "" {
 		return zero, fmt.Errorf("pipeline config is empty for pipeline %s, cannot update secret", p.Spec.ID)
+	}
+
+	// avoids redundant churn on requeue if content is unchanged
+	existingData := existingSecret.Data["pipeline.json"]
+	if bytes.Equal(existingData, []byte(pipelineConfig)) {
+		return existingSecret, nil
 	}
 
 	// recreate new secret
