@@ -2,6 +2,20 @@ apiVersion: v1
 entries:
   glassflow-operator:
   - apiVersion: v2
+    appVersion: 1.8.1
+    created: "2026-02-17T11:21:08.846085431Z"
+    description: GlassFlow Operator chart
+    digest: fdbc3360e9455a17307f54d709272821c74d9cf603df5f5d3e3b8c8199c1f60f
+    maintainers:
+    - email: help@glassflow.dev
+      name: Glassflow
+      url: https://glassflow.dev
+    name: glassflow-operator
+    type: application
+    urls:
+    - https://github.com/glassflow/glassflow-etl-k8s-operator/releases/download/glassflow-operator-0.7.3/glassflow-operator-0.7.3.tgz
+    version: 0.7.3
+  - apiVersion: v2
     appVersion: 1.8.0
     created: "2026-02-13T13:32:27.944166475Z"
     description: GlassFlow Operator chart
@@ -155,4 +169,4 @@ entries:
     urls:
     - https://github.com/glassflow/glassflow-etl-k8s-operator/releases/download/glassflow-operator-0.6.2/glassflow-operator-0.6.2.tgz
     version: 0.6.2
-generated: "2026-02-13T13:32:27.944214455Z"
+generated: "2026-02-17T11:21:08.846137729Z"
