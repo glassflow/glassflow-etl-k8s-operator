@@ -357,6 +357,30 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
 
+		cpuReq, cpuLim, memReq, memLim := r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit
+		if p.Spec.Resources != nil && p.Spec.Resources.Ingestor != nil {
+			ingRes := p.Spec.Resources.Ingestor
+			var comp *etlv1alpha1.ComponentResources
+			if p.Spec.Join.Enabled {
+				if i == 0 {
+					comp = ingRes.Left
+				} else {
+					comp = ingRes.Right
+				}
+			} else {
+				comp = ingRes.Base
+			}
+			if comp != nil && comp.Resources != nil {
+				res := comp.Resources
+				if res.Requests != nil {
+					cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+				}
+				if res.Limits != nil {
+					cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+				}
+			}
+		}
+
 		containerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.IngestorImage).
@@ -387,7 +411,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 					},
 				}},
 			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit)
+			withResources(cpuReq, cpuLim, memReq, memLim)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			containerBuilder = containerBuilder.withVolumeMount(mount)
 		}
@@ -431,6 +455,20 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	maps.Copy(joinLabels, labels)
 
+	cpuReq, cpuLim, memReq, memLim := r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit
+	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil {
+		comp := p.Spec.Resources.Join
+		if comp.Resources != nil {
+			res := comp.Resources
+			if res.Requests != nil {
+				cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+			}
+			if res.Limits != nil {
+				cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+			}
+		}
+	}
+
 	joinContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.JoinImage).
@@ -460,7 +498,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 				},
 			}},
 		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit)
+		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		joinContainerBuilder = joinContainerBuilder.withVolumeMount(mount)
 	}
@@ -501,6 +539,20 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 
+	cpuReq, cpuLim, memReq, memLim := r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit
+	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
+		comp := p.Spec.Resources.Sink
+		if comp.Resources != nil {
+			res := comp.Resources
+			if res.Requests != nil {
+				cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+			}
+			if res.Limits != nil {
+				cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+			}
+		}
+	}
+
 	sinkContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.SinkImage).
@@ -530,7 +582,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 				},
 			}},
 		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit)
+		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		sinkContainerBuilder = sinkContainerBuilder.withVolumeMount(mount)
 	}
@@ -582,10 +634,26 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 
 		replicas := 1
 
-		// Determine storage size (use pipeline config, fallback to Helm default)
+		// Determine storage size: CRD pipeline_resources > stream dedup config > global default
 		storageSize := r.DedupDefaultStorageSize
 		if stream.Deduplication.StorageSize != "" {
 			storageSize = stream.Deduplication.StorageSize
+		}
+		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
+		if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil {
+			comp := p.Spec.Resources.Dedup
+			if comp.Resources != nil {
+				res := comp.Resources
+				if res.Requests != nil {
+					cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+				}
+				if res.Limits != nil {
+					cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+				}
+				if res.Storage != nil && res.Storage.Size != "" {
+					storageSize = res.Storage.Size
+				}
+			}
 		}
 
 		// Determine storage class (use pipeline config, fallback to Helm default)
@@ -632,7 +700,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 					},
 				}},
 			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit)
+			withResources(cpuReq, cpuLim, memReq, memLim)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			dedupContainerBuilder = dedupContainerBuilder.withVolumeMount(mount)
 		}

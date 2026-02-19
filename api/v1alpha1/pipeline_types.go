@@ -44,6 +44,8 @@ type PipelineSpec struct {
 	// backward compatibility and will be used as a fallback if the secret is not found.
 	// +optional
 	Config string `json:"config,omitempty"`
+	// +optional
+	Resources *PipelineResources `json:"pipeline_resources,omitempty"`
 }
 
 type Sources struct {
@@ -95,6 +97,45 @@ type Sink struct {
 	Replicas int `json:"replicas"`
 
 	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
+}
+
+// PipelineResources defines per-component resource configuration for a pipeline.
+type PipelineResources struct {
+	Ingestor *IngestorResources  `json:"ingestor,omitempty"`
+	Join     *ComponentResources `json:"join,omitempty"`
+	Sink     *ComponentResources `json:"sink,omitempty"`
+	Dedup    *ComponentResources `json:"dedup,omitempty"`
+}
+
+// IngestorResources defines resources for ingestor components.
+// When join is disabled: use Base. When join is enabled: use Left (stream[0]) and Right (stream[1]).
+type IngestorResources struct {
+	Base  *ComponentResources `json:"base,omitempty"`
+	Left  *ComponentResources `json:"left,omitempty"`
+	Right *ComponentResources `json:"right,omitempty"`
+}
+
+// ComponentResources wraps the resource spec for a single component.
+type ComponentResources struct {
+	Resources *ResourceSpec `json:"resources,omitempty"`
+}
+
+// ResourceSpec defines CPU, memory, and storage resources.
+type ResourceSpec struct {
+	Requests *ResourceQuantities `json:"requests,omitempty"`
+	Limits   *ResourceQuantities `json:"limits,omitempty"`
+	Storage  *StorageSpec        `json:"storage,omitempty"`
+}
+
+// ResourceQuantities defines CPU and memory resource strings (e.g. "100m", "128Mi").
+type ResourceQuantities struct {
+	CPU    string `json:"cpu,omitempty"`
+	Memory string `json:"memory,omitempty"`
+}
+
+// StorageSpec defines persistent storage size for StatefulSets.
+type StorageSpec struct {
+	Size string `json:"size,omitempty"`
 }
 
 // PipelineStatus defines the observed state of Pipeline.
