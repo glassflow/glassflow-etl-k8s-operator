@@ -351,11 +351,40 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
 
+	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
+
 	for i, t := range ing.Streams {
 		resourceRef := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
+
+		cpuReq, cpuLim, memReq, memLim := r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit
+		ingestorReplicas := t.Replicas
+		if p.Spec.Resources != nil && p.Spec.Resources.Ingestor != nil {
+			ingRes := p.Spec.Resources.Ingestor
+			var comp *etlv1alpha1.ComponentResources
+			if p.Spec.Join.Enabled {
+				if i == 0 {
+					comp = ingRes.Left
+				} else {
+					comp = ingRes.Right
+				}
+			} else {
+				comp = ingRes.Base
+			}
+			if comp != nil {
+				if comp.Requests != nil {
+					cpuReq, memReq = comp.Requests.CPU.String(), comp.Requests.Memory.String()
+				}
+				if comp.Limits != nil {
+					cpuLim, memLim = comp.Limits.CPU.String(), comp.Limits.Memory.String()
+				}
+				if comp.Replicas != nil {
+					ingestorReplicas = int(*comp.Replicas)
+				}
+			}
+		}
 
 		containerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
@@ -371,8 +400,8 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
+				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
+				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -387,7 +416,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 					},
 				}},
 			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit)
+			withResources(cpuReq, cpuLim, memReq, memLim)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			containerBuilder = containerBuilder.withVolumeMount(mount)
 		}
@@ -406,7 +435,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 					},
 				},
 			}).
-			withReplicas(t.Replicas).
+			withReplicas(ingestorReplicas).
 			withContainer(*container).
 			withAffinity(r.IngestorAffinity)
 		if vol, ok := r.getComponentEncryptionVolume(); ok {
@@ -431,6 +460,19 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	maps.Copy(joinLabels, labels)
 
+	cpuReq, cpuLim, memReq, memLim := r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit
+	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil {
+		comp := p.Spec.Resources.Join
+		if comp.Requests != nil {
+			cpuReq, memReq = comp.Requests.CPU.String(), comp.Requests.Memory.String()
+		}
+		if comp.Limits != nil {
+			cpuLim, memLim = comp.Limits.CPU.String(), comp.Limits.Memory.String()
+		}
+	}
+
+	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
+
 	joinContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.JoinImage).
@@ -444,8 +486,8 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -460,7 +502,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 				},
 			}},
 		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-		withResources(r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit)
+		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		joinContainerBuilder = joinContainerBuilder.withVolumeMount(mount)
 	}
@@ -481,6 +523,9 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		}).
 		withContainer(*joinContainer).
 		withAffinity(r.JoinAffinity)
+	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil && p.Spec.Resources.Join.Replicas != nil {
+		joinDepBuilder = joinDepBuilder.withReplicas(int(*p.Spec.Resources.Join.Replicas))
+	}
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
 		joinDepBuilder = joinDepBuilder.withVolume(vol)
 	}
@@ -501,6 +546,19 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 
+	cpuReq, cpuLim, memReq, memLim := r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit
+	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
+		comp := p.Spec.Resources.Sink
+		if comp.Requests != nil {
+			cpuReq, memReq = comp.Requests.CPU.String(), comp.Requests.Memory.String()
+		}
+		if comp.Limits != nil {
+			cpuLim, memLim = comp.Limits.CPU.String(), comp.Limits.Memory.String()
+		}
+	}
+
+	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
+
 	sinkContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.SinkImage).
@@ -514,8 +572,8 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -530,7 +588,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 				},
 			}},
 		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit)
+		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		sinkContainerBuilder = sinkContainerBuilder.withVolumeMount(mount)
 	}
@@ -551,6 +609,9 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		}).
 		withContainer(*sinkContainer).
 		withAffinity(r.SinkAffinity)
+	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil && p.Spec.Resources.Sink.Replicas != nil {
+		sinkDepBuilder = sinkDepBuilder.withReplicas(int(*p.Spec.Resources.Sink.Replicas))
+	}
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
 		sinkDepBuilder = sinkDepBuilder.withVolume(vol)
 	}
@@ -567,6 +628,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 // createDedups creates dedup StatefulSets for the pipeline (one per ingestor stream with dedup enabled)
 func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
+	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
 
 	for i, stream := range ing.Streams {
 		// Skip if dedup not enabled for this stream
@@ -582,10 +644,26 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 
 		replicas := 1
 
-		// Determine storage size (use pipeline config, fallback to Helm default)
+		// Determine storage size: CRD pipeline_resources > stream dedup config > global default
 		storageSize := r.DedupDefaultStorageSize
 		if stream.Deduplication.StorageSize != "" {
 			storageSize = stream.Deduplication.StorageSize
+		}
+		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
+		if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil {
+			comp := p.Spec.Resources.Dedup
+			if comp.Requests != nil {
+				cpuReq, memReq = comp.Requests.CPU.String(), comp.Requests.Memory.String()
+			}
+			if comp.Limits != nil {
+				cpuLim, memLim = comp.Limits.CPU.String(), comp.Limits.Memory.String()
+			}
+			if comp.Storage != nil && !comp.Storage.Size.IsZero() {
+				storageSize = comp.Storage.Size.String()
+			}
+			if comp.Replicas != nil {
+				replicas = int(*comp.Replicas)
+			}
 		}
 
 		// Determine storage class (use pipeline config, fallback to Helm default)
@@ -616,8 +694,8 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				{Name: "GLASSFLOW_OUTPUT_STREAM", Value: stream.Deduplication.OutputStream},
 				{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
+				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
+				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -632,7 +710,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 					},
 				}},
 			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
-			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit)
+			withResources(cpuReq, cpuLim, memReq, memLim)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			dedupContainerBuilder = dedupContainerBuilder.withVolumeMount(mount)
 		}
@@ -690,4 +768,22 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 	}
 
 	return nil
+}
+
+// resolveNatsStreamEnvVars returns NATS stream env var values, applying per-pipeline CRD overrides
+// on top of the operator-level defaults.
+func (r *PipelineReconciler) resolveNatsStreamEnvVars(p etlv1alpha1.Pipeline) (natsMaxAge, natsMaxBytes string) {
+	natsMaxAge = r.NATSMaxStreamAge
+	natsMaxBytes = utils.ConvertBytesToString(r.NATSMaxStreamBytes)
+	if p.Spec.Resources == nil || p.Spec.Resources.Nats == nil || p.Spec.Resources.Nats.Stream == nil {
+		return
+	}
+	stream := p.Spec.Resources.Nats.Stream
+	if stream.MaxAge.Duration != 0 {
+		natsMaxAge = stream.MaxAge.Duration.String()
+	}
+	if !stream.MaxBytes.IsZero() {
+		natsMaxBytes = fmt.Sprintf("%d", stream.MaxBytes.Value())
+	}
+	return
 }
