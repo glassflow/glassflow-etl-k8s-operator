@@ -373,10 +373,10 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			if comp != nil && comp.Resources != nil {
 				res := comp.Resources
 				if res.Requests != nil {
-					cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+					cpuReq, memReq = res.Requests.CPU.String(), res.Requests.Memory.String()
 				}
 				if res.Limits != nil {
-					cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+					cpuLim, memLim = res.Limits.CPU.String(), res.Limits.Memory.String()
 				}
 			}
 		}
@@ -461,10 +461,10 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		if comp.Resources != nil {
 			res := comp.Resources
 			if res.Requests != nil {
-				cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+				cpuReq, memReq = res.Requests.CPU.String(), res.Requests.Memory.String()
 			}
 			if res.Limits != nil {
-				cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+				cpuLim, memLim = res.Limits.CPU.String(), res.Limits.Memory.String()
 			}
 		}
 	}
@@ -545,10 +545,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		if comp.Resources != nil {
 			res := comp.Resources
 			if res.Requests != nil {
-				cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+				cpuReq, memReq = res.Requests.CPU.String(), res.Requests.Memory.String()
 			}
 			if res.Limits != nil {
-				cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+				cpuLim, memLim = res.Limits.CPU.String(), res.Limits.Memory.String()
 			}
 		}
 	}
@@ -645,13 +645,13 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			if comp.Resources != nil {
 				res := comp.Resources
 				if res.Requests != nil {
-					cpuReq, memReq = res.Requests.CPU, res.Requests.Memory
+					cpuReq, memReq = res.Requests.CPU.String(), res.Requests.Memory.String()
 				}
 				if res.Limits != nil {
-					cpuLim, memLim = res.Limits.CPU, res.Limits.Memory
+					cpuLim, memLim = res.Limits.CPU.String(), res.Limits.Memory.String()
 				}
-				if res.Storage != nil && res.Storage.Size != "" {
-					storageSize = res.Storage.Size
+				if res.Storage != nil && res.Storage.Size.String() != "" {
+					storageSize = res.Storage.Size.String()
 				}
 			}
 		}

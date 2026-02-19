@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -127,15 +128,15 @@ type ResourceSpec struct {
 	Storage  *StorageSpec        `json:"storage,omitempty"`
 }
 
-// ResourceQuantities defines CPU and memory resource strings (e.g. "100m", "128Mi").
+// ResourceQuantities defines CPU and memory resource quantities (e.g. "100m", "128Mi").
 type ResourceQuantities struct {
-	CPU    string `json:"cpu,omitempty"`
-	Memory string `json:"memory,omitempty"`
+	CPU    resource.Quantity `json:"cpu,omitempty"`
+	Memory resource.Quantity `json:"memory,omitempty"`
 }
 
 // StorageSpec defines persistent storage size for StatefulSets.
 type StorageSpec struct {
-	Size string `json:"size,omitempty"`
+	Size resource.Quantity `json:"size,omitempty"`
 }
 
 // PipelineStatus defines the observed state of Pipeline.
