@@ -85,6 +85,227 @@ spec:
               pipeline_id:
                 minLength: 5
                 type: string
+              pipeline_resources:
+                description: PipelineResources defines per-component resource configuration
+                  for a pipeline.
+                properties:
+                  dedup:
+                    description: ComponentResources wraps the resource spec for a
+                      single component.
+                    properties:
+                      resources:
+                        description: ResourceSpec defines CPU, memory, and storage
+                          resources.
+                        properties:
+                          limits:
+                            description: ResourceQuantities defines CPU and memory
+                              resource strings (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                type: string
+                              memory:
+                                type: string
+                            type: object
+                          requests:
+                            description: ResourceQuantities defines CPU and memory
+                              resource strings (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                type: string
+                              memory:
+                                type: string
+                            type: object
+                          storage:
+                            description: StorageSpec defines persistent storage size
+                              for StatefulSets.
+                            properties:
+                              size:
+                                type: string
+                            type: object
+                        type: object
+                    type: object
+                  ingestor:
+                    description: |-
+                      IngestorResources defines resources for ingestor components.
+                      When join is disabled: use Base. When join is enabled: use Left (stream[0]) and Right (stream[1]).
+                    properties:
+                      base:
+                        description: ComponentResources wraps the resource spec for
+                          a single component.
+                        properties:
+                          resources:
+                            description: ResourceSpec defines CPU, memory, and storage
+                              resources.
+                            properties:
+                              limits:
+                                description: ResourceQuantities defines CPU and memory
+                                  resource strings (e.g. "100m", "128Mi").
+                                properties:
+                                  cpu:
+                                    type: string
+                                  memory:
+                                    type: string
+                                type: object
+                              requests:
+                                description: ResourceQuantities defines CPU and memory
+                                  resource strings (e.g. "100m", "128Mi").
+                                properties:
+                                  cpu:
+                                    type: string
+                                  memory:
+                                    type: string
+                                type: object
+                              storage:
+                                description: StorageSpec defines persistent storage
+                                  size for StatefulSets.
+                                properties:
+                                  size:
+                                    type: string
+                                type: object
+                            type: object
+                        type: object
+                      left:
+                        description: ComponentResources wraps the resource spec for
+                          a single component.
+                        properties:
+                          resources:
+                            description: ResourceSpec defines CPU, memory, and storage
+                              resources.
+                            properties:
+                              limits:
+                                description: ResourceQuantities defines CPU and memory
+                                  resource strings (e.g. "100m", "128Mi").
+                                properties:
+                                  cpu:
+                                    type: string
+                                  memory:
+                                    type: string
+                                type: object
+                              requests:
+                                description: ResourceQuantities defines CPU and memory
+                                  resource strings (e.g. "100m", "128Mi").
+                                properties:
+                                  cpu:
+                                    type: string
+                                  memory:
+                                    type: string
+                                type: object
+                              storage:
+                                description: StorageSpec defines persistent storage
+                                  size for StatefulSets.
+                                properties:
+                                  size:
+                                    type: string
+                                type: object
+                            type: object
+                        type: object
+                      right:
+                        description: ComponentResources wraps the resource spec for
+                          a single component.
+                        properties:
+                          resources:
+                            description: ResourceSpec defines CPU, memory, and storage
+                              resources.
+                            properties:
+                              limits:
+                                description: ResourceQuantities defines CPU and memory
+                                  resource strings (e.g. "100m", "128Mi").
+                                properties:
+                                  cpu:
+                                    type: string
+                                  memory:
+                                    type: string
+                                type: object
+                              requests:
+                                description: ResourceQuantities defines CPU and memory
+                                  resource strings (e.g. "100m", "128Mi").
+                                properties:
+                                  cpu:
+                                    type: string
+                                  memory:
+                                    type: string
+                                type: object
+                              storage:
+                                description: StorageSpec defines persistent storage
+                                  size for StatefulSets.
+                                properties:
+                                  size:
+                                    type: string
+                                type: object
+                            type: object
+                        type: object
+                    type: object
+                  join:
+                    description: ComponentResources wraps the resource spec for a
+                      single component.
+                    properties:
+                      resources:
+                        description: ResourceSpec defines CPU, memory, and storage
+                          resources.
+                        properties:
+                          limits:
+                            description: ResourceQuantities defines CPU and memory
+                              resource strings (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                type: string
+                              memory:
+                                type: string
+                            type: object
+                          requests:
+                            description: ResourceQuantities defines CPU and memory
+                              resource strings (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                type: string
+                              memory:
+                                type: string
+                            type: object
+                          storage:
+                            description: StorageSpec defines persistent storage size
+                              for StatefulSets.
+                            properties:
+                              size:
+                                type: string
+                            type: object
+                        type: object
+                    type: object
+                  sink:
+                    description: ComponentResources wraps the resource spec for a
+                      single component.
+                    properties:
+                      resources:
+                        description: ResourceSpec defines CPU, memory, and storage
+                          resources.
+                        properties:
+                          limits:
+                            description: ResourceQuantities defines CPU and memory
+                              resource strings (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                type: string
+                              memory:
+                                type: string
+                            type: object
+                          requests:
+                            description: ResourceQuantities defines CPU and memory
+                              resource strings (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                type: string
+                              memory:
+                                type: string
+                            type: object
+                          storage:
+                            description: StorageSpec defines persistent storage size
+                              for StatefulSets.
+                            properties:
+                              size:
+                                type: string
+                            type: object
+                        type: object
+                    type: object
+                type: object
               sink:
                 properties:
                   nats_consumer_name:
