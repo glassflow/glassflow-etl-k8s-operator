@@ -1,6 +1,7 @@
 name: Pull Request Creation
 on:
-  - pull_request
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,16 +26,23 @@ jobs:
               - 'charts/**'
 
   build-operator-binary:
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
+    if: ${{ !contains(github.event.pull_request.labels.*.name || '', 'no-build') }}
     uses: ./.github/workflows/build_binary.yml
 
   test-operator:
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
+    if: >-
+      !contains(github.event.pull_request.labels.*.name || '', 'no-build') &&
+      !contains(github.event.pull_request.labels.*.name || '', 'build-only')
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
-    needs: [build-operator-binary, test-operator]
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
+    needs:
+      - build-operator-binary
+      - test-operator
+    if: >-
+      always() &&
+      (needs.test-operator.result == 'success' || needs.test-operator.result == 'skipped') &&
+      !contains(github.event.pull_request.labels.*.name || '', 'no-build')
     uses: ./.github/workflows/build-image.yml
     with:
       push: true
