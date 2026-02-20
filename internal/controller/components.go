@@ -42,37 +42,56 @@ import (
 func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(*p)
 
-	// Step 1: Stop Ingestor deployments
+	// Step 1: Stop Ingestor StatefulSets and headless Services
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
+		resourceName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		deleted, err := r.isStatefulSetAbsent(ctx, namespace, resourceName)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", resourceName, err)
 		}
 		if !deleted {
-			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, p)
 			if timedOut {
 				return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 			}
-
-			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: deploymentName}, &deployment)
+			log.Info("deleting ingestor statefulset", "statefulset", resourceName, "namespace", namespace)
+			var sts appsv1.StatefulSet
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: resourceName}, &sts)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
+					return ctrl.Result{}, fmt.Errorf("get ingestor statefulset %s: %w", resourceName, err)
 				}
 			} else {
-				err = r.deleteDeployment(ctx, &deployment)
+				err = r.deleteStatefulSet(ctx, &sts)
 				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
+					return ctrl.Result{}, fmt.Errorf("delete ingestor statefulset %s: %w", resourceName, err)
 				}
 			}
-			// Requeue to wait for deployment to be fully deleted
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("ingestor deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
+		}
+		svcAbsent, err := r.isServiceAbsent(ctx, namespace, resourceName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor service %s: %w", resourceName, err)
+		}
+		if !svcAbsent {
+			timedOut, _ := r.checkOperationTimeout(log, p)
+			if timedOut {
+				return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+			}
+			log.Info("deleting ingestor headless service", "service", resourceName, "namespace", namespace)
+			var svc v1.Service
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: resourceName}, &svc)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get ingestor service %s: %w", resourceName, err)
+				}
+			} else {
+				err = r.deleteService(ctx, &svc)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete ingestor service %s: %w", resourceName, err)
+				}
+			}
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 		}
 	}
 
@@ -175,14 +194,11 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		}
 	}
 
-	// Step 3: Check sink and stop Sink deployment
-	// Check for timeout before checking pending messages
+	// Step 4: Check sink and stop Sink StatefulSet and headless Service
 	timedOut, _ := r.checkOperationTimeout(log, p)
 	if timedOut {
 		return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 	}
-
-	// Check for pending messages first
 	err := r.checkSinkPendingMessages(ctx, *p)
 	if err != nil {
 		if errs.IsConsumerPendingMessagesError(err) {
@@ -194,37 +210,57 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		return ctrl.Result{}, fmt.Errorf("check sink pending messages: %w", err)
 	}
 
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.SinkComponent))
+	sinkName := r.getResourceName(*p, constants.SinkComponent)
+	deleted, err := r.isStatefulSetAbsent(ctx, namespace, sinkName)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+		return ctrl.Result{}, fmt.Errorf("check sink statefulset: %w", err)
 	}
 	if !deleted {
-		// Check for timeout before requeuing
 		timedOut, _ := r.checkOperationTimeout(log, p)
 		if timedOut {
 			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
 		}
-
-		log.Info("deleting sink deployment", "namespace", namespace)
-		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, constants.SinkComponent)}, &deployment)
+		log.Info("deleting sink statefulset", "namespace", namespace)
+		var sts appsv1.StatefulSet
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &sts)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("get sink statefulset: %w", err)
 			}
 		} else {
-			err = r.deleteDeployment(ctx, &deployment)
+			err = r.deleteStatefulSet(ctx, &sts)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("delete sink statefulset: %w", err)
 			}
 		}
-		// Requeue to wait for deployment to be fully deleted
 		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	} else {
-		log.Info("sink deployment is already deleted", "namespace", namespace)
+	}
+	svcAbsent, err := r.isServiceAbsent(ctx, namespace, sinkName)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check sink service: %w", err)
+	}
+	if !svcAbsent {
+		timedOut, _ := r.checkOperationTimeout(log, p)
+		if timedOut {
+			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+		}
+		log.Info("deleting sink headless service", "namespace", namespace)
+		var svc v1.Service
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &svc)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("get sink service: %w", err)
+			}
+		} else {
+			err = r.deleteService(ctx, &svc)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("delete sink service: %w", err)
+			}
+		}
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
-	// All deployments are deleted
+	// All components (ingestor/sink StatefulSets and Services, Join deployment) are deleted
 	return ctrl.Result{}, nil
 }
 
@@ -232,31 +268,48 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(p)
 
-	// Step 1: Stop Ingestor deployments
+	// Step 1: Stop Ingestor StatefulSets and headless Services
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
+		resourceName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		deleted, err := r.isStatefulSetAbsent(ctx, namespace, resourceName)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", resourceName, err)
 		}
 		if !deleted {
-			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: deploymentName}, &deployment)
+			log.Info("deleting ingestor statefulset", "statefulset", resourceName, "namespace", namespace)
+			var sts appsv1.StatefulSet
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: resourceName}, &sts)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
+					return ctrl.Result{}, fmt.Errorf("get ingestor statefulset %s: %w", resourceName, err)
 				}
 			} else {
-				err = r.deleteDeployment(ctx, &deployment)
+				err = r.deleteStatefulSet(ctx, &sts)
 				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
+					return ctrl.Result{}, fmt.Errorf("delete ingestor statefulset %s: %w", resourceName, err)
 				}
 			}
-			// Requeue to wait for deployment to be fully deleted
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("ingestor deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
+		}
+		svcAbsent, err := r.isServiceAbsent(ctx, namespace, resourceName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor service %s: %w", resourceName, err)
+		}
+		if !svcAbsent {
+			log.Info("deleting ingestor headless service", "service", resourceName, "namespace", namespace)
+			var svc v1.Service
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: resourceName}, &svc)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get ingestor service %s: %w", resourceName, err)
+				}
+			} else {
+				err = r.deleteService(ctx, &svc)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete ingestor service %s: %w", resourceName, err)
+				}
+			}
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 		}
 	}
 
@@ -318,44 +371,68 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 		}
 	}
 
-	// Step 3: Check sink and stop Sink deployment
-	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, constants.SinkComponent))
+	// Step 4: Check sink and stop Sink StatefulSet and headless Service
+	sinkName := r.getResourceName(p, constants.SinkComponent)
+	deleted, err := r.isStatefulSetAbsent(ctx, namespace, sinkName)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+		return ctrl.Result{}, fmt.Errorf("check sink statefulset: %w", err)
 	}
 	if !deleted {
-		log.Info("deleting sink deployment", "namespace", namespace)
-		var deployment appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SinkComponent)}, &deployment)
+		log.Info("deleting sink statefulset", "namespace", namespace)
+		var sts appsv1.StatefulSet
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &sts)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("get sink statefulset: %w", err)
 			}
 		} else {
-			err = r.deleteDeployment(ctx, &deployment)
+			err = r.deleteStatefulSet(ctx, &sts)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
+				return ctrl.Result{}, fmt.Errorf("delete sink statefulset: %w", err)
 			}
 		}
-		// Requeue to wait for deployment to be fully deleted
 		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	} else {
-		log.Info("sink deployment is already deleted", "namespace", namespace)
+	}
+	svcAbsent, err := r.isServiceAbsent(ctx, namespace, sinkName)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check sink service: %w", err)
+	}
+	if !svcAbsent {
+		log.Info("deleting sink headless service", "namespace", namespace)
+		var svc v1.Service
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &svc)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("get sink service: %w", err)
+			}
+		} else {
+			err = r.deleteService(ctx, &svc)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("delete sink service: %w", err)
+			}
+		}
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
-	// All deployments are deleted
+	// All components are deleted
 	return ctrl.Result{}, nil
 }
 
-// createIngestors creates ingestor deployments for the pipeline
+// createIngestors creates ingestor StatefulSets (and headless Services) for the pipeline.
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
+	namespace := ns.GetName()
 
 	for i, t := range ing.Streams {
 		resourceRef := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
+
+		err := r.createHeadlessService(ctx, namespace, resourceRef, ingestorLabels)
+		if err != nil {
+			return fmt.Errorf("create ingestor headless service %s: %w", resourceRef, err)
+		}
 
 		containerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
@@ -366,10 +443,11 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				ReadOnly:  true,
 				MountPath: "/config",
 			}).
-			withEnv(append(append([]v1.EnvVar{
+			withEnv(append(append(append(append([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
+				{Name: "NATS_SUBJECT_PREFIX", Value: getIngestorSubjectPrefix(p.Spec.ID, t.TopicName)},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
 				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
 				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
@@ -386,16 +464,17 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 						FieldPath: "metadata.name",
 					},
 				}},
-			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			}, ingestorNATSSubjectCountEnvVars(t)...), r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			containerBuilder = containerBuilder.withVolumeMount(mount)
 		}
 		container := containerBuilder.build()
 
-		depBuilder := newComponentDeploymentBuilder().
+		stsBuilder := newComponentStatefulSetBuilder().
 			withNamespace(ns).
 			withResourceName(resourceRef).
+			withServiceName(resourceRef).
 			withLabels(ingestorLabels).
 			withVolume(v1.Volume{
 				Name: "config",
@@ -410,13 +489,13 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			withContainer(*container).
 			withAffinity(r.IngestorAffinity)
 		if vol, ok := r.getComponentEncryptionVolume(); ok {
-			depBuilder = depBuilder.withVolume(vol)
+			stsBuilder = stsBuilder.withVolume(vol)
 		}
-		deployment := depBuilder.build()
+		statefulSet := stsBuilder.build()
 
-		err := r.createDeployment(ctx, deployment)
+		err = r.createStatefulSet(ctx, statefulSet)
 		if err != nil {
-			return fmt.Errorf("create ingestor deployment: %w", err)
+			return fmt.Errorf("create ingestor statefulset %s: %w", resourceRef, err)
 		}
 	}
 
@@ -494,12 +573,18 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	return nil
 }
 
-// createSink creates a sink deployment for the pipeline
+// createSink creates a sink StatefulSet (and headless Service) for the pipeline.
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	resourceRef := r.getResourceName(p, constants.SinkComponent)
+	namespace := ns.GetName()
 
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
+
+	err := r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels)
+	if err != nil {
+		return fmt.Errorf("create sink headless service: %w", err)
+	}
 
 	sinkContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
@@ -510,9 +595,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv(append(append([]v1.EnvVar{
+		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "NATS_INPUT_STREAM_PREFIX", Value: getSinkInputStreamPrefix(p.Spec.ID)},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
 			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
 			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
@@ -529,16 +615,17 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		}, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 		withResources(r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		sinkContainerBuilder = sinkContainerBuilder.withVolumeMount(mount)
 	}
 	sinkContainer := sinkContainerBuilder.build()
 
-	sinkDepBuilder := newComponentDeploymentBuilder().
+	stsBuilder := newComponentStatefulSetBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
+		withServiceName(resourceRef).
 		withLabels(sinkLabels).
 		withVolume(v1.Volume{
 			Name: "config",
@@ -550,15 +637,16 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*sinkContainer).
+		withReplicas(getSinkReplicaCount(p)).
 		withAffinity(r.SinkAffinity)
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
-		sinkDepBuilder = sinkDepBuilder.withVolume(vol)
+		stsBuilder = stsBuilder.withVolume(vol)
 	}
-	deployment := sinkDepBuilder.build()
+	statefulSet := stsBuilder.build()
 
-	err := r.createDeployment(ctx, deployment)
+	err = r.createStatefulSet(ctx, statefulSet)
 	if err != nil {
-		return fmt.Errorf("create sink deployment: %w", err)
+		return fmt.Errorf("create sink statefulset: %w", err)
 	}
 
 	return nil
@@ -580,7 +668,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		dedupLabels := r.getDedupLabels(stream.TopicName)
 		maps.Copy(dedupLabels, labels)
 
-		replicas := 1
+		replicas := getDedupReplicaCount(stream)
 
 		// Determine storage size (use pipeline config, fallback to Helm default)
 		storageSize := r.DedupDefaultStorageSize
@@ -594,6 +682,40 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			storageClass = stream.Deduplication.StorageClass
 		}
 
+		dedupEnvBase := []v1.EnvVar{
+			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
+			{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
+			{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
+
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
+			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			}},
+		}
+		if useDedupNStreamPath(p) {
+			dedupEnvBase = append(dedupEnvBase,
+				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+			)
+		} else {
+			dedupEnvBase = append(dedupEnvBase,
+				v1.EnvVar{Name: "GLASSFLOW_INPUT_STREAM", Value: stream.OutputStream},
+				v1.EnvVar{Name: "GLASSFLOW_OUTPUT_STREAM", Value: stream.Deduplication.OutputStream},
+			)
+		}
 		dedupContainerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.DedupImage).
@@ -607,31 +729,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				Name:      "data",
 				MountPath: "/data/badger",
 			}).
-			withEnv(append(append([]v1.EnvVar{
-				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
-				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-				{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
-				{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
-				{Name: "GLASSFLOW_INPUT_STREAM", Value: stream.OutputStream},
-				{Name: "GLASSFLOW_OUTPUT_STREAM", Value: stream.Deduplication.OutputStream},
-				{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
-				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
-
-				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
-				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
-				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
-				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
-					FieldRef: &v1.ObjectFieldSelector{
-						FieldPath: "metadata.name",
-					},
-				}},
-			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			withEnv(append(append(append(dedupEnvBase, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			dedupContainerBuilder = dedupContainerBuilder.withVolumeMount(mount)

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
@@ -74,6 +75,47 @@ func getEffectiveOutputStream(stream etlv1alpha1.SourceStream) string {
 		return stream.Deduplication.OutputStream
 	}
 	return stream.OutputStream
+}
+
+// getSinkReplicaCount returns the sink replica count from the pipeline spec. Defaults to 2 when unset or 0; minimum 2 when set.
+func getSinkReplicaCount(p etlv1alpha1.Pipeline) int {
+	if p.Spec.Sink.Replicas >= 2 {
+		return p.Spec.Sink.Replicas
+	}
+	return 2
+}
+
+// getDedupReplicaCount returns the dedup replica count for a stream. Defaults to 3 when dedup is enabled and Replicas is unset/0; minimum 3 when set. Returns 1 when dedup is disabled (unused).
+func getDedupReplicaCount(stream etlv1alpha1.SourceStream) int {
+	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+		return 1
+	}
+	if stream.Deduplication.Replicas >= 3 {
+		return stream.Deduplication.Replicas
+	}
+	return 3
+}
+
+// useDedupNStreamPath returns true when the pipeline uses the M→D→N dedup path: single topic, no join, dedup enabled for that topic.
+// In this path we create N sink streams (dedup output subjects) and D dedup input streams (ingestor subjects), not s.OutputStream / s.Deduplication.OutputStream.
+func useDedupNStreamPath(p etlv1alpha1.Pipeline) bool {
+	if p.Spec.Join.Enabled || len(p.Spec.Ingestor.Streams) != 1 {
+		return false
+	}
+	s := &p.Spec.Ingestor.Streams[0]
+	return s.Deduplication != nil && s.Deduplication.Enabled
+}
+
+// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=M (ingestor replica count) when dedup is enabled for the stream.
+func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream) []v1.EnvVar {
+	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+		return nil
+	}
+	M := stream.Replicas
+	if M <= 0 {
+		M = 1
+	}
+	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(M)}}
 }
 
 // preparePipelineLabels returns labels for pipeline resources
@@ -162,6 +204,22 @@ func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {
 	}
 
 	return envVars
+}
+
+// getStatefulSetPodIdentityEnvVars returns env vars that inject the Kubernetes pod index by reference
+// (downward API). StatefulSet adds the label apps.kubernetes.io/pod-index to each pod; this exposes
+// that ordinal (0, 1, 2, ...) as GLASSFLOW_POD_INDEX.
+func (r *PipelineReconciler) getStatefulSetPodIdentityEnvVars() []v1.EnvVar {
+	return []v1.EnvVar{
+		{
+			Name: "GLASSFLOW_POD_INDEX",
+			ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.labels['apps.kubernetes.io/pod-index']",
+				},
+			},
+		},
+	}
 }
 
 // getComponentDatabaseEnvVars returns GLASSFLOW_DATABASE_URL from the component secret (same as API).

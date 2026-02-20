@@ -416,6 +416,58 @@ func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *a
 }
 
 // -------------------------------------------------------------------------------------------------------------------
+// Headless Service Operations (for StatefulSet)
+// -------------------------------------------------------------------------------------------------------------------
+
+// createHeadlessService creates a headless Service for a StatefulSet (ClusterIP: None, selector = labels).
+func (r *PipelineReconciler) createHeadlessService(ctx context.Context, namespace, name string, labels map[string]string) error {
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: v1.ServiceSpec{
+			ClusterIP: "None",
+			Selector:  labels,
+		},
+	}
+	err := r.Create(ctx, svc, &client.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("create headless service %s: %w", name, err)
+	}
+	return nil
+}
+
+// isServiceAbsent checks if a service is absent (deleted or not found).
+func (r *PipelineReconciler) isServiceAbsent(ctx context.Context, namespace, name string) (bool, error) {
+	var svc v1.Service
+	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &svc)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("get service %s: %w", name, err)
+	}
+	return false, nil
+}
+
+// deleteService safely deletes a service, handling NotFound errors gracefully.
+func (r *PipelineReconciler) deleteService(ctx context.Context, svc *v1.Service) error {
+	err := r.Delete(ctx, svc, &client.DeleteOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("delete service: %w", err)
+	}
+	return nil
+}
+
+// -------------------------------------------------------------------------------------------------------------------
 // StatefulSet Operations
 // -------------------------------------------------------------------------------------------------------------------
 
@@ -462,10 +514,13 @@ func (r *PipelineReconciler) isStatefulSetAbsent(ctx context.Context, namespace,
 	return false, nil
 }
 
-// deleteStatefulSet deletes a StatefulSet
+// deleteStatefulSet safely deletes a StatefulSet, handling NotFound errors gracefully.
 func (r *PipelineReconciler) deleteStatefulSet(ctx context.Context, sts *appsv1.StatefulSet) error {
-	err := r.Delete(ctx, sts)
+	err := r.Delete(ctx, sts, &client.DeleteOptions{})
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("delete statefulset: %w", err)
 	}
 	return nil
@@ -482,7 +537,7 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 
 		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
 
-		replicas := 1
+		replicas := getDedupReplicaCount(stream)
 
 		// StatefulSet PVCs have format: data-{statefulset-name}-{ordinal}
 		for replica := 0; replica < replicas; replica++ {
