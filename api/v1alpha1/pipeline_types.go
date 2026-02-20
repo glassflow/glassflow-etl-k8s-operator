@@ -70,9 +70,13 @@ type SourceStream struct {
 type Deduplication struct {
 	Enabled          bool   `json:"enabled"`
 	OutputStream     string `json:"stream"`                  // NATS stream after dedup
-	StorageSize      string `json:"storage_size,omitempty"`  // Default: "10Gi"
-	StorageClass     string `json:"storage_class,omitempty"` // Optional
+	StorageSize      string `json:"storage_size,omitempty"`   // Default: "10Gi"
+	StorageClass     string `json:"storage_class,omitempty"`  // Optional
 	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
+	// Replicas is the number of dedup StatefulSet replicas. Defaults to 1 when unset or 0.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	Replicas int `json:"replicas,omitempty"`
 }
 
 type Join struct {

@@ -119,6 +119,11 @@ spec:
                               type: boolean
                             nats_consumer_name:
                               type: string
+                            replicas:
+                              description: Replicas is the number of dedup StatefulSet
+                                replicas. Defaults to 1 when unset or 0.
+                              minimum: 1
+                              type: integer
                             storage_class:
                               type: string
                             storage_size:

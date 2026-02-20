@@ -537,7 +537,7 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 
 		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
 
-		replicas := 1
+		replicas := getDedupReplicaCount(stream)
 
 		// StatefulSet PVCs have format: data-{statefulset-name}-{ordinal}
 		for replica := 0; replica < replicas; replica++ {

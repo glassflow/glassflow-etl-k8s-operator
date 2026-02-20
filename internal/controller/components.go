@@ -637,7 +637,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*sinkContainer).
-		withReplicas(2).
+		withReplicas(getSinkReplicaCount(p)).
 		withAffinity(r.SinkAffinity)
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
 		stsBuilder = stsBuilder.withVolume(vol)
@@ -668,7 +668,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		dedupLabels := r.getDedupLabels(stream.TopicName)
 		maps.Copy(dedupLabels, labels)
 
-		replicas := 1
+		replicas := getDedupReplicaCount(stream)
 
 		// Determine storage size (use pipeline config, fallback to Helm default)
 		storageSize := r.DedupDefaultStorageSize

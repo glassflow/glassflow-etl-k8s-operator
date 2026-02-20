@@ -29,9 +29,6 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 )
 
-// sinkReplicaCount is the number of sink StatefulSet replicas (and thus NATS streams for sink input). Must match createSink.
-const sinkReplicaCount = 2
-
 // useNStreamSinkPath returns true when the sink consumes directly from N ingestor-output streams (single topic, no join, no dedup).
 // When dedup is enabled, the sink consumes from the dedup output stream (one stream), so we use the single-stream path.
 func useNStreamSinkPath(p etlv1alpha1.Pipeline) bool {
@@ -94,8 +91,9 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 	}
 	if useNStreamSinkPath(p) {
 		// N streams, per-pod consumer name = baseConsumerName + "_" + podIndex
+		N := getSinkReplicaCount(p)
 		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-		for n := 0; n < sinkReplicaCount; n++ {
+		for n := 0; n < N; n++ {
 			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
 			consumerName := baseConsumerName + "_" + strconv.Itoa(n)
 			if err := r.checkConsumerPendingMessages(ctx, streamName, consumerName); err != nil {
@@ -147,7 +145,7 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 			if M <= 0 {
 				M = 1
 			}
-			N := sinkReplicaCount
+			N := getSinkReplicaCount(p)
 			for n := 0; n < N; n++ {
 				streamName := streamNamePrefix + "_" + strconv.Itoa(n)
 				subjects := getSubjectsForStreamIndex(subjectPrefix, M, N, n)
@@ -243,8 +241,9 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 	useNStreams := useNStreamSinkPath(p)
 	for _, stream := range p.Spec.Ingestor.Streams {
 		if useNStreams {
+			N := getSinkReplicaCount(p)
 			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-			for n := 0; n < sinkReplicaCount; n++ {
+			for n := 0; n < N; n++ {
 				streamName := streamNamePrefix + "_" + strconv.Itoa(n)
 				log.Info("deleting NATS sink input stream", "stream", streamName)
 				err := r.deleteNATSStream(ctx, log, streamName)

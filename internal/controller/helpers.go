@@ -76,6 +76,25 @@ func getEffectiveOutputStream(stream etlv1alpha1.SourceStream) string {
 	return stream.OutputStream
 }
 
+// getSinkReplicaCount returns the sink replica count from the pipeline spec. Defaults to 2 when unset or 0 (backward compatibility).
+func getSinkReplicaCount(p etlv1alpha1.Pipeline) int {
+	if p.Spec.Sink.Replicas > 0 {
+		return p.Spec.Sink.Replicas
+	}
+	return 2
+}
+
+// getDedupReplicaCount returns the dedup replica count for a stream. Defaults to 1 when dedup is disabled, or when Replicas is unset/0.
+func getDedupReplicaCount(stream etlv1alpha1.SourceStream) int {
+	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+		return 1
+	}
+	if stream.Deduplication.Replicas > 0 {
+		return stream.Deduplication.Replicas
+	}
+	return 1
+}
+
 // preparePipelineLabels returns labels for pipeline resources
 func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 	return map[string]string{"etl.glassflow.io/glassflow-etl-k8s-operator-id": p.Spec.ID}
