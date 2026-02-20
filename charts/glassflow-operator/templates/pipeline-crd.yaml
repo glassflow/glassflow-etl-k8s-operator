@@ -89,14 +89,13 @@ spec:
                   nats_consumer_name:
                     type: string
                   replicas:
-                    minimum: 1
+                    description: Number of sink StatefulSet replicas. Defaults to 2 when unset.
                     type: integer
                   type:
                     enum:
                     - clickhouse
                     type: string
                 required:
-                - replicas
                 - type
                 type: object
               sources:
@@ -118,6 +117,9 @@ spec:
                               type: boolean
                             nats_consumer_name:
                               type: string
+                            replicas:
+                              description: Number of dedup StatefulSet replicas. Defaults to 3 when unset.
+                              type: integer
                             storage_class:
                               type: string
                             storage_size:
