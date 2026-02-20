@@ -164,6 +164,22 @@ func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {
 	return envVars
 }
 
+// getStatefulSetPodIdentityEnvVars returns env vars that inject the Kubernetes pod index by reference
+// (downward API). StatefulSet adds the label apps.kubernetes.io/pod-index to each pod; this exposes
+// that ordinal (0, 1, 2, ...) as GLASSFLOW_POD_INDEX.
+func (r *PipelineReconciler) getStatefulSetPodIdentityEnvVars() []v1.EnvVar {
+	return []v1.EnvVar{
+		{
+			Name: "GLASSFLOW_POD_INDEX",
+			ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.labels['apps.kubernetes.io/pod-index']",
+				},
+			},
+		},
+	}
+}
+
 // getComponentDatabaseEnvVars returns GLASSFLOW_DATABASE_URL from the component secret (same as API).
 func (r *PipelineReconciler) getComponentDatabaseEnvVars() []v1.EnvVar {
 	if r.DatabaseURL == "" {
