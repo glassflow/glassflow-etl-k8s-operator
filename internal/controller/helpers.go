@@ -106,13 +106,16 @@ func useDedupNStreamPath(p etlv1alpha1.Pipeline) bool {
 	return s.Deduplication != nil && s.Deduplication.Enabled
 }
 
-// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=D when dedup is enabled for the stream (so ingestor hashes dedup key to subject keyHash % D).
+// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=M (ingestor replica count) when dedup is enabled for the stream.
 func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream) []v1.EnvVar {
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 		return nil
 	}
-	D := getDedupReplicaCount(stream)
-	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(D)}}
+	M := stream.Replicas
+	if M <= 0 {
+		M = 1
+	}
+	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(M)}}
 }
 
 // preparePipelineLabels returns labels for pipeline resources
