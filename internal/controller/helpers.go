@@ -76,23 +76,23 @@ func getEffectiveOutputStream(stream etlv1alpha1.SourceStream) string {
 	return stream.OutputStream
 }
 
-// getSinkReplicaCount returns the sink replica count from the pipeline spec. Defaults to 2 when unset or 0 (backward compatibility).
+// getSinkReplicaCount returns the sink replica count from the pipeline spec. Defaults to 2 when unset or 0; minimum 2 when set.
 func getSinkReplicaCount(p etlv1alpha1.Pipeline) int {
-	if p.Spec.Sink.Replicas > 0 {
+	if p.Spec.Sink.Replicas >= 2 {
 		return p.Spec.Sink.Replicas
 	}
 	return 2
 }
 
-// getDedupReplicaCount returns the dedup replica count for a stream. Defaults to 1 when dedup is disabled, or when Replicas is unset/0.
+// getDedupReplicaCount returns the dedup replica count for a stream. Defaults to 3 when dedup is enabled and Replicas is unset/0; minimum 3 when set. Returns 1 when dedup is disabled (unused).
 func getDedupReplicaCount(stream etlv1alpha1.SourceStream) int {
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 		return 1
 	}
-	if stream.Deduplication.Replicas > 0 {
+	if stream.Deduplication.Replicas >= 3 {
 		return stream.Deduplication.Replicas
 	}
-	return 1
+	return 3
 }
 
 // preparePipelineLabels returns labels for pipeline resources
