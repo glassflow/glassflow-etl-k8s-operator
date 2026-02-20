@@ -443,7 +443,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				ReadOnly:  true,
 				MountPath: "/config",
 			}).
-			withEnv(append(append(append([]v1.EnvVar{
+			withEnv(append(append(append(append([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
@@ -464,7 +464,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 						FieldPath: "metadata.name",
 					},
 				}},
-			}, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			}, ingestorNATSSubjectCountEnvVars(t)...), r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 			withResources(r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			containerBuilder = containerBuilder.withVolumeMount(mount)
@@ -682,6 +682,40 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			storageClass = stream.Deduplication.StorageClass
 		}
 
+		dedupEnvBase := []v1.EnvVar{
+			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
+			{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
+			{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
+
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
+			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			}},
+		}
+		if useDedupNStreamPath(p) {
+			dedupEnvBase = append(dedupEnvBase,
+				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+			)
+		} else {
+			dedupEnvBase = append(dedupEnvBase,
+				v1.EnvVar{Name: "GLASSFLOW_INPUT_STREAM", Value: stream.OutputStream},
+				v1.EnvVar{Name: "GLASSFLOW_OUTPUT_STREAM", Value: stream.Deduplication.OutputStream},
+			)
+		}
 		dedupContainerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.DedupImage).
@@ -695,31 +729,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				Name:      "data",
 				MountPath: "/data/badger",
 			}).
-			withEnv(append(append(append([]v1.EnvVar{
-				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
-				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-				{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
-				{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
-				{Name: "GLASSFLOW_INPUT_STREAM", Value: stream.OutputStream},
-				{Name: "GLASSFLOW_OUTPUT_STREAM", Value: stream.Deduplication.OutputStream},
-				{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
-				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: r.NATSMaxStreamAge},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: utils.ConvertBytesToString(r.NATSMaxStreamBytes)},
-
-				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
-				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
-				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
-				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
-					FieldRef: &v1.ObjectFieldSelector{
-						FieldPath: "metadata.name",
-					},
-				}},
-			}, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			withEnv(append(append(append(dedupEnvBase, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 			withResources(r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			dedupContainerBuilder = dedupContainerBuilder.withVolumeMount(mount)

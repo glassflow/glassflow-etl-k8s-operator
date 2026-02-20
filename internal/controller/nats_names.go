@@ -66,6 +66,42 @@ func getSinkInputStreamPrefix(pipelineID string) string {
 	return fmt.Sprintf("%s-%s-sink", PipelineStreamPrefix, hash)
 }
 
+// getDedupInputStreamPrefix returns the stream name prefix for the D streams that dedup reads from.
+// Stream names are prefix_0, ..., prefix_(D-1). Same length/truncation rules as getIngestorSubjectPrefix.
+func getDedupInputStreamPrefix(pipelineID, topicName string) string {
+	hash := generateStreamHash(pipelineID)
+	sanitized := sanitizeNATSSubject(topicName)
+	streamName := fmt.Sprintf("%s-%s-%s-dedup-in", PipelineStreamPrefix, hash, sanitized)
+	if len(streamName) > MaxStreamNameLength {
+		prefix := fmt.Sprintf("%s-%s-", PipelineStreamPrefix, hash)
+		maxTopicLength := MaxStreamNameLength - len(prefix) - len("-dedup-in")
+		if maxTopicLength > 0 {
+			streamName = prefix + sanitized[:min(len(sanitized), maxTopicLength)] + "-dedup-in"
+		} else {
+			streamName = (prefix + "dedup-in")[:MaxStreamNameLength]
+		}
+	}
+	return streamName
+}
+
+// getDedupOutputSubjectPrefix returns the subject prefix for dedup output. Dedup pod d publishes to prefix.d.
+// Same length/truncation rules as getIngestorSubjectPrefix.
+func getDedupOutputSubjectPrefix(pipelineID, topicName string) string {
+	hash := generateStreamHash(pipelineID)
+	sanitized := sanitizeNATSSubject(topicName)
+	streamName := fmt.Sprintf("%s-%s-%s-dedup-out", PipelineStreamPrefix, hash, sanitized)
+	if len(streamName) > MaxStreamNameLength {
+		prefix := fmt.Sprintf("%s-%s-", PipelineStreamPrefix, hash)
+		maxTopicLength := MaxStreamNameLength - len(prefix) - len("-dedup-out")
+		if maxTopicLength > 0 {
+			streamName = prefix + sanitized[:min(len(sanitized), maxTopicLength)] + "-dedup-out"
+		} else {
+			streamName = (prefix + "dedup-out")[:MaxStreamNameLength]
+		}
+	}
+	return streamName
+}
+
 // getSubjectsForStreamIndex returns the list of subjects that map to stream index s (round-robin: subject i -> stream i%N).
 // subjectPrefix is the ingestor subject prefix; subjects are subjectPrefix.0, subjectPrefix.1, ... subjectPrefix.(M-1).
 func getSubjectsForStreamIndex(subjectPrefix string, M, N, streamIndex int) []string {

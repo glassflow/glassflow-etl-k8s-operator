@@ -18,6 +18,7 @@ package controller
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
@@ -93,6 +94,25 @@ func getDedupReplicaCount(stream etlv1alpha1.SourceStream) int {
 		return stream.Deduplication.Replicas
 	}
 	return 3
+}
+
+// useDedupNStreamPath returns true when the pipeline uses the M→D→N dedup path: single topic, no join, dedup enabled for that topic.
+// In this path we create N sink streams (dedup output subjects) and D dedup input streams (ingestor subjects), not s.OutputStream / s.Deduplication.OutputStream.
+func useDedupNStreamPath(p etlv1alpha1.Pipeline) bool {
+	if p.Spec.Join.Enabled || len(p.Spec.Ingestor.Streams) != 1 {
+		return false
+	}
+	s := &p.Spec.Ingestor.Streams[0]
+	return s.Deduplication != nil && s.Deduplication.Enabled
+}
+
+// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=D when dedup is enabled for the stream (so ingestor hashes dedup key to subject keyHash % D).
+func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream) []v1.EnvVar {
+	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+		return nil
+	}
+	D := getDedupReplicaCount(stream)
+	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(D)}}
 }
 
 // preparePipelineLabels returns labels for pipeline resources
