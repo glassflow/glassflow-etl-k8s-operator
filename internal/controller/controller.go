@@ -178,6 +178,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
 
 // For more details, check Reconcile and its Result here:
@@ -548,7 +549,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	// FORCE cleanup - skip normal termination process for helm uninstall
 	log.Info("HELM UNINSTALL: Force deleting pipeline namespace and resources", "pipeline_id", pipelineID)
 
-	// Force delete namespace for this pipeline (this will delete all deployments)
+	// Force delete namespace for this pipeline (this will delete all resources in the namespace: StatefulSets, Services, Deployments, etc.)
 	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		log.Error(err, "failed to delete pipeline namespace during helm uninstall", "pipeline_id", pipelineID)
@@ -1025,7 +1026,43 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	return true, nil
 }
 
-// ensureAllDeploymentsReady ensures all required deployments (sink, join, dedup, ingestor) are ready.
+// ensureStatefulSetReady checks if a StatefulSet is ready, creates it if not, and handles timeouts.
+func (r *PipelineReconciler) ensureStatefulSetReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace,
+	statefulSetName,
+	operationName string,
+	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (bool, error) {
+	ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
+	if err != nil {
+		return false, fmt.Errorf("check %s statefulset: %w", statefulSetName, err)
+	}
+	if ready {
+		log.Info(fmt.Sprintf("%s statefulset is already ready", statefulSetName), "namespace", namespace)
+		return false, nil
+	}
+
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		_, err := r.handleOperationTimeout(ctx, log, p, operationName)
+		return false, err
+	}
+
+	log.Info(fmt.Sprintf("creating %s statefulset", statefulSetName), "namespace", namespace)
+	err = createFn(ctx, ns, labels, secret, *p)
+	if err != nil {
+		return false, fmt.Errorf("create %s statefulset: %w", statefulSetName, err)
+	}
+	return true, nil
+}
+
+// ensureAllDeploymentsReady ensures all required components are ready: Sink StatefulSet, Join deployment (if enabled), Dedup StatefulSets, Ingestor StatefulSets.
 func (r *PipelineReconciler) ensureAllDeploymentsReady(
 	ctx context.Context,
 	log logr.Logger,
@@ -1037,8 +1074,8 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 ) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(*p)
 
-	// Step 1: Ensure Sink deployment is ready
-	requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), operationName, r.createSink, ns, labels, secret)
+	// Step 1: Ensure Sink StatefulSet is ready
+	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), operationName, r.createSink, ns, labels, secret)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1063,28 +1100,26 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 		return result, err
 	}
 
-	// Step 4: Ensure Ingestor deployments are ready
+	// Step 4: Ensure Ingestor StatefulSets are ready
 	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+		statefulSetName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", statefulSetName, err)
 		}
 		if !ready {
-			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, p)
 			if timedOut {
 				return r.handleOperationTimeout(ctx, log, p, operationName)
 			}
-
-			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			log.Info("creating ingestor statefulset", "statefulset", statefulSetName, "namespace", namespace)
 			err = r.createIngestors(ctx, log, ns, labels, secret, *p)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
+				return ctrl.Result{}, fmt.Errorf("create ingestor statefulset %s: %w", statefulSetName, err)
 			}
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 		}
-		log.Info("ingestor deployment is already ready", "deployment", deploymentName, "namespace", namespace)
+		log.Info("ingestor statefulset is already ready", "statefulset", statefulSetName, "namespace", namespace)
 	}
 
 	return ctrl.Result{}, nil
