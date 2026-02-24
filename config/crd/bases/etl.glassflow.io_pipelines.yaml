@@ -91,8 +91,8 @@ spec:
                     type: string
                   replicas:
                     description: Replicas is the number of sink StatefulSet replicas.
-                      Defaults to 2 when unset or 0.
-                    minimum: 2
+                      Defaults to 1 when unset or 0.
+                    minimum: 1
                     type: integer
                   type:
                     enum:
@@ -122,8 +122,8 @@ spec:
                               type: string
                             replicas:
                               description: Replicas is the number of dedup StatefulSet
-                                replicas. Defaults to 3 when unset or 0.
-                              minimum: 3
+                                replicas. Defaults to 1 when unset or 0.
+                              minimum: 1
                               type: integer
                             storage_class:
                               type: string

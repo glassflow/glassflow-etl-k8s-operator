@@ -73,8 +73,8 @@ type Deduplication struct {
 	StorageSize      string `json:"storage_size,omitempty"`  // Default: "10Gi"
 	StorageClass     string `json:"storage_class,omitempty"` // Optional
 	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
-	// Replicas is the number of dedup StatefulSet replicas. Defaults to 3 when unset or 0.
-	// +kubebuilder:validation:Minimum=3
+	// Replicas is the number of dedup StatefulSet replicas. Defaults to 1 when unset or 0.
+	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Replicas int `json:"replicas,omitempty"`
 }
@@ -95,8 +95,8 @@ type Join struct {
 type Sink struct {
 	// +kubebuilder:validation:Enum=clickhouse
 	Type string `json:"type"`
-	// Replicas is the number of sink StatefulSet replicas. Defaults to 2 when unset or 0.
-	// +kubebuilder:validation:Minimum=2
+	// Replicas is the number of sink StatefulSet replicas. Defaults to 1 when unset or 0.
+	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Replicas int `json:"replicas,omitempty"`
 
@@ -115,7 +115,8 @@ type Pipeline struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PipelineSpec   `json:"spec,omitempty"`
+	Spec PipelineSpec `json:"spec,omitempty"`
+	// +optional
 	Status PipelineStatus `json:"status,omitempty"`
 }
 
