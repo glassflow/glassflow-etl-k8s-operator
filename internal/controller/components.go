@@ -268,12 +268,36 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(p)
 
-	// Step 1: Stop Ingestor StatefulSets and headless Services
+	result, requeue, err := r.terminateIngestors(ctx, log, p, namespace)
+	if err != nil || requeue {
+		return result, err
+	}
+
+	result, requeue, err = r.terminateDedups(ctx, log, p, namespace)
+	if err != nil || requeue {
+		return result, err
+	}
+
+	result, requeue, err = r.terminateJoin(ctx, log, p, namespace)
+	if err != nil || requeue {
+		return result, err
+	}
+
+	result, requeue, err = r.terminateSink(ctx, log, p, namespace)
+	if err != nil || requeue {
+		return result, err
+	}
+
+	// All components are deleted
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) terminateIngestors(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline, namespace string) (ctrl.Result, bool, error) {
 	for i := range p.Spec.Ingestor.Streams {
 		resourceName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		deleted, err := r.isStatefulSetAbsent(ctx, namespace, resourceName)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", resourceName, err)
+			return ctrl.Result{}, false, fmt.Errorf("check ingestor statefulset %s: %w", resourceName, err)
 		}
 		if !deleted {
 			log.Info("deleting ingestor statefulset", "statefulset", resourceName, "namespace", namespace)
@@ -281,19 +305,19 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: resourceName}, &sts)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get ingestor statefulset %s: %w", resourceName, err)
+					return ctrl.Result{}, false, fmt.Errorf("get ingestor statefulset %s: %w", resourceName, err)
 				}
 			} else {
-				err = r.deleteStatefulSet(ctx, &sts)
-				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete ingestor statefulset %s: %w", resourceName, err)
+				if err = r.deleteStatefulSet(ctx, &sts); err != nil {
+					return ctrl.Result{}, false, fmt.Errorf("delete ingestor statefulset %s: %w", resourceName, err)
 				}
 			}
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, true, nil
 		}
+
 		svcAbsent, err := r.isServiceAbsent(ctx, namespace, resourceName)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor service %s: %w", resourceName, err)
+			return ctrl.Result{}, false, fmt.Errorf("check ingestor service %s: %w", resourceName, err)
 		}
 		if !svcAbsent {
 			log.Info("deleting ingestor headless service", "service", resourceName, "namespace", namespace)
@@ -301,19 +325,21 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: resourceName}, &svc)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get ingestor service %s: %w", resourceName, err)
+					return ctrl.Result{}, false, fmt.Errorf("get ingestor service %s: %w", resourceName, err)
 				}
 			} else {
-				err = r.deleteService(ctx, &svc)
-				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete ingestor service %s: %w", resourceName, err)
+				if err = r.deleteService(ctx, &svc); err != nil {
+					return ctrl.Result{}, false, fmt.Errorf("delete ingestor service %s: %w", resourceName, err)
 				}
 			}
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, true, nil
 		}
 	}
 
-	// Step 2: Stop Dedup StatefulSets (no pending message checks in terminate)
+	return ctrl.Result{}, false, nil
+}
+
+func (r *PipelineReconciler) terminateDedups(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline, namespace string) (ctrl.Result, bool, error) {
 	for i, stream := range p.Spec.Ingestor.Streams {
 		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 			continue
@@ -322,7 +348,7 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
 		deleted, err := r.isStatefulSetAbsent(ctx, namespace, dedupName)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check dedup statefulset %s: %w", dedupName, err)
+			return ctrl.Result{}, false, fmt.Errorf("check dedup statefulset %s: %w", dedupName, err)
 		}
 		if !deleted {
 			log.Info("deleting dedup statefulset", "statefulset", dedupName, "namespace", namespace)
@@ -330,52 +356,58 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: dedupName}, &sts)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get dedup statefulset %s: %w", dedupName, err)
+					return ctrl.Result{}, false, fmt.Errorf("get dedup statefulset %s: %w", dedupName, err)
 				}
 			} else {
-				err = r.deleteStatefulSet(ctx, &sts)
-				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete dedup statefulset %s: %w", dedupName, err)
+				if err = r.deleteStatefulSet(ctx, &sts); err != nil {
+					return ctrl.Result{}, false, fmt.Errorf("delete dedup statefulset %s: %w", dedupName, err)
 				}
 			}
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("dedup statefulset is already deleted", "statefulset", dedupName, "namespace", namespace)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, true, nil
+		}
+
+		log.Info("dedup statefulset is already deleted", "statefulset", dedupName, "namespace", namespace)
+	}
+
+	return ctrl.Result{}, false, nil
+}
+
+func (r *PipelineReconciler) terminateJoin(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline, namespace string) (ctrl.Result, bool, error) {
+	if !p.Spec.Join.Enabled {
+		return ctrl.Result{}, false, nil
+	}
+
+	joinName := r.getResourceName(p, constants.JoinComponent)
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, joinName)
+	if err != nil {
+		return ctrl.Result{}, false, fmt.Errorf("check join deployment: %w", err)
+	}
+	if deleted {
+		log.Info("join deployment is already deleted", "namespace", namespace)
+		return ctrl.Result{}, false, nil
+	}
+
+	log.Info("deleting join deployment", "namespace", namespace)
+	var deployment appsv1.Deployment
+	err = r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: joinName}, &deployment)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, false, fmt.Errorf("get join deployment: %w", err)
+		}
+	} else {
+		if err = r.deleteDeployment(ctx, &deployment); err != nil {
+			return ctrl.Result{}, false, fmt.Errorf("delete join deployment: %w", err)
 		}
 	}
 
-	// Step 3: Check join and stop Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, constants.JoinComponent))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !deleted {
-			log.Info("deleting join deployment", "namespace", namespace)
-			var deployment appsv1.Deployment
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.JoinComponent)}, &deployment)
-			if err != nil {
-				if !apierrors.IsNotFound(err) {
-					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
-				}
-			} else {
-				err = r.deleteDeployment(ctx, &deployment)
-				if err != nil {
-					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
-				}
-			}
-			// Requeue to wait for deployment to be fully deleted
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("join deployment is already deleted", "namespace", namespace)
-		}
-	}
+	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, true, nil
+}
 
-	// Step 4: Check sink and stop Sink StatefulSet and headless Service
+func (r *PipelineReconciler) terminateSink(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline, namespace string) (ctrl.Result, bool, error) {
 	sinkName := r.getResourceName(p, constants.SinkComponent)
 	deleted, err := r.isStatefulSetAbsent(ctx, namespace, sinkName)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink statefulset: %w", err)
+		return ctrl.Result{}, false, fmt.Errorf("check sink statefulset: %w", err)
 	}
 	if !deleted {
 		log.Info("deleting sink statefulset", "namespace", namespace)
@@ -383,39 +415,38 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &sts)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("get sink statefulset: %w", err)
+				return ctrl.Result{}, false, fmt.Errorf("get sink statefulset: %w", err)
 			}
 		} else {
-			err = r.deleteStatefulSet(ctx, &sts)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("delete sink statefulset: %w", err)
+			if err = r.deleteStatefulSet(ctx, &sts); err != nil {
+				return ctrl.Result{}, false, fmt.Errorf("delete sink statefulset: %w", err)
 			}
 		}
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
-	svcAbsent, err := r.isServiceAbsent(ctx, namespace, sinkName)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink service: %w", err)
-	}
-	if !svcAbsent {
-		log.Info("deleting sink headless service", "namespace", namespace)
-		var svc v1.Service
-		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &svc)
-		if err != nil {
-			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("get sink service: %w", err)
-			}
-		} else {
-			err = r.deleteService(ctx, &svc)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("delete sink service: %w", err)
-			}
-		}
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, true, nil
 	}
 
-	// All components are deleted
-	return ctrl.Result{}, nil
+	svcAbsent, err := r.isServiceAbsent(ctx, namespace, sinkName)
+	if err != nil {
+		return ctrl.Result{}, false, fmt.Errorf("check sink service: %w", err)
+	}
+	if svcAbsent {
+		return ctrl.Result{}, false, nil
+	}
+
+	log.Info("deleting sink headless service", "namespace", namespace)
+	var svc v1.Service
+	err = r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: sinkName}, &svc)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, false, fmt.Errorf("get sink service: %w", err)
+		}
+	} else {
+		if err = r.deleteService(ctx, &svc); err != nil {
+			return ctrl.Result{}, false, fmt.Errorf("delete sink service: %w", err)
+		}
+	}
+
+	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, true, nil
 }
 
 // createIngestors creates ingestor StatefulSets (and headless Services) for the pipeline.
