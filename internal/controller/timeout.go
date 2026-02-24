@@ -90,8 +90,9 @@ func (r *PipelineReconciler) clearOperationStartTime(p *etlv1alpha1.Pipeline) {
 }
 
 // handleOperationTimeout handles a timed-out operation by updating status to Failed and clearing annotations
-func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, operation string) (ctrl.Result, error) {
+func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
+	operation := r.getTimedOutOperation(p)
 	log.Error(fmt.Errorf("operation timed out after %v", constants.ReconcileTimeout), "operation timed out", "pipeline_id", pipelineID, "operation", operation)
 
 	// Update status to Failed with error message
@@ -105,32 +106,19 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 	// Clear operation start time
 	r.clearOperationStartTime(p)
 
-	// Clear the operation annotation
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		switch operation {
-		case constants.OperationCreate:
-			delete(annotations, constants.PipelineCreateAnnotation)
-		case constants.OperationResume:
-			delete(annotations, constants.PipelineResumeAnnotation)
-		case constants.OperationStop:
-			delete(annotations, constants.PipelineStopAnnotation)
-		case constants.OperationEdit:
-			delete(annotations, constants.PipelineEditAnnotation)
-		}
-		p.SetAnnotations(annotations)
+	// Clear all operation annotations directly on the Pipeline.
+	r.clearPipelineOperationAnnotations(p)
 
-		// Terminate all pipeline components
-		result, err := r.terminatePipelineComponents(ctx, log, *p)
-		if err != nil || result.Requeue {
-			return result, err
-		}
+	// Terminate all pipeline components.
+	result, err := r.terminatePipelineComponents(ctx, log, *p)
+	if err != nil || result.Requeue {
+		return result, err
+	}
 
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusFailed)
-		err = r.Update(ctx, p)
-		if err != nil {
-			log.Error(err, "failed to clear operation annotation after timeout", "pipeline_id", pipelineID)
-		}
+	p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusFailed)
+	err = r.Update(ctx, p)
+	if err != nil {
+		log.Error(err, "failed to clear operation annotations after timeout", "pipeline_id", pipelineID)
 	}
 
 	// Record timeout metrics
@@ -148,4 +136,55 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 	})
 
 	return ctrl.Result{}, nil // Don't requeue - operation has timed out
+}
+
+func (r *PipelineReconciler) clearPipelineOperationAnnotations(p *etlv1alpha1.Pipeline) {
+	annotations := p.GetAnnotations()
+	if annotations == nil {
+		return
+	}
+
+	for _, annotation := range []string{
+		constants.PipelineCreateAnnotation,
+		constants.PipelineResumeAnnotation,
+		constants.PipelineStopAnnotation,
+		constants.PipelineTerminateAnnotation,
+		constants.PipelineDeleteAnnotation,
+		constants.PipelineEditAnnotation,
+		constants.PipelineHelmUninstallAnnotation,
+	} {
+		delete(annotations, annotation)
+	}
+	p.SetAnnotations(annotations)
+}
+
+func (r *PipelineReconciler) getTimedOutOperation(p *etlv1alpha1.Pipeline) string {
+	annotations := p.GetAnnotations()
+	if annotations == nil {
+		return "unknown"
+	}
+
+	switch {
+	case hasAnnotation(annotations, constants.PipelineHelmUninstallAnnotation):
+		return constants.OperationHelmUninstall
+	case hasAnnotation(annotations, constants.PipelineDeleteAnnotation):
+		return constants.OperationDelete
+	case hasAnnotation(annotations, constants.PipelineTerminateAnnotation):
+		return constants.OperationTerminate
+	case hasAnnotation(annotations, constants.PipelineCreateAnnotation):
+		return constants.OperationCreate
+	case hasAnnotation(annotations, constants.PipelineStopAnnotation):
+		return constants.OperationStop
+	case hasAnnotation(annotations, constants.PipelineResumeAnnotation):
+		return constants.OperationResume
+	case hasAnnotation(annotations, constants.PipelineEditAnnotation):
+		return constants.OperationEdit
+	default:
+		return "unknown"
+	}
+}
+
+func hasAnnotation(annotations map[string]string, key string) bool {
+	_, ok := annotations[key]
+	return ok
 }
