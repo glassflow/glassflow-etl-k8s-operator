@@ -41,9 +41,9 @@ func sanitizeNATSSubject(topicName string) string {
 	return strings.ReplaceAll(topicName, ".", "_")
 }
 
-// getIngestorSubjectPrefix returns the subject prefix for ingestor output (aligned with glassflow-api GetIngestorStreamName).
+// getIngestorOutputSubjectPrefix returns the subject prefix for ingestor output (aligned with glassflow-api GetIngestorStreamName).
 // Ingestor publishes to subjectPrefix.POD_INDEX (e.g. gf-abc12345-topic.0).
-func getIngestorSubjectPrefix(pipelineID, topicName string) string {
+func getIngestorOutputSubjectPrefix(pipelineID, topicName string) string {
 	hash := generateStreamHash(pipelineID)
 	sanitized := sanitizeNATSSubject(topicName)
 	streamName := fmt.Sprintf("%s-%s-%s", PipelineStreamPrefix, hash, sanitized)
@@ -66,8 +66,8 @@ func getSinkInputStreamPrefix(pipelineID string) string {
 	return fmt.Sprintf("%s-%s-sink", PipelineStreamPrefix, hash)
 }
 
-// getDedupInputStreamPrefix returns the stream name prefix for the D streams that dedup reads from.
-// Stream names are prefix_0, ..., prefix_(D-1). Same length/truncation rules as getIngestorSubjectPrefix.
+// getDedupInputStreamPrefix returns the stream name prefix for the dedupReplicas streams that dedup reads from.
+// Stream names are prefix_0, ..., prefix_(dedupReplicas-1). Same length/truncation rules as getIngestorOutputSubjectPrefix.
 func getDedupInputStreamPrefix(pipelineID, topicName string) string {
 	hash := generateStreamHash(pipelineID)
 	sanitized := sanitizeNATSSubject(topicName)
@@ -85,7 +85,7 @@ func getDedupInputStreamPrefix(pipelineID, topicName string) string {
 }
 
 // getDedupOutputSubjectPrefix returns the subject prefix for dedup output. Dedup pod d publishes to prefix.d.
-// Same length/truncation rules as getIngestorSubjectPrefix.
+// Same length/truncation rules as getIngestorOutputSubjectPrefix.
 func getDedupOutputSubjectPrefix(pipelineID, topicName string) string {
 	hash := generateStreamHash(pipelineID)
 	sanitized := sanitizeNATSSubject(topicName)
@@ -102,14 +102,21 @@ func getDedupOutputSubjectPrefix(pipelineID, topicName string) string {
 	return streamName
 }
 
-// getSubjectsForStreamIndex returns the list of subjects that map to stream index s (round-robin: subject i -> stream i%N).
-// subjectPrefix is the ingestor subject prefix; subjects are subjectPrefix.0, subjectPrefix.1, ... subjectPrefix.(M-1).
-func getSubjectsForStreamIndex(subjectPrefix string, M, N, streamIndex int) []string {
-	if N <= 0 || streamIndex < 0 || streamIndex >= N {
+// getJoinOutputStreamName returns the stream name for join output.
+func getJoinOutputStreamName(pipelineID string) string {
+	hash := generateStreamHash(pipelineID)
+	return fmt.Sprintf("%s-%s-join", PipelineStreamPrefix, hash)
+}
+
+// getSubjectsForStreamIndex returns the list of subjects that map to stream index s
+// (round-robin: subject i -> stream i%targetStreamCount).
+// subjectPrefix is the subject prefix; subjects are subjectPrefix.0, ... subjectPrefix.(sourceSubjectCount-1).
+func getSubjectsForStreamIndex(subjectPrefix string, sourceSubjectCount, targetStreamCount, streamIndex int) []string {
+	if targetStreamCount <= 0 || streamIndex < 0 || streamIndex >= targetStreamCount {
 		return nil
 	}
 	var subjects []string
-	for i := streamIndex; i < M; i += N {
+	for i := streamIndex; i < sourceSubjectCount; i += targetStreamCount {
 		subjects = append(subjects, subjectPrefix+"."+strconv.Itoa(i))
 	}
 	return subjects

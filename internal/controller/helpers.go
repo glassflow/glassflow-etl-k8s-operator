@@ -65,39 +65,18 @@ func (r *PipelineReconciler) getDedupLabels(topic string) map[string]string {
 	return labels
 }
 
-// getEffectiveOutputStream returns the effective output stream name for a source stream,
-// accounting for deduplication. If dedup is enabled and has an output stream configured,
-// returns the dedup output stream. Otherwise returns the stream's standard output stream.
-func getEffectiveOutputStream(stream etlv1alpha1.SourceStream) string {
-	if stream.Deduplication != nil &&
-		stream.Deduplication.Enabled &&
-		stream.Deduplication.OutputStream != "" {
-		return stream.Deduplication.OutputStream
+// useNStreamSinkPath returns true when the sink consumes directly from sinkReplicas ingestor-output streams:
+// single topic, no join, no dedup.
+func useNStreamSinkPath(p etlv1alpha1.Pipeline) bool {
+	if p.Spec.Join.Enabled || len(p.Spec.Ingestor.Streams) != 1 {
+		return false
 	}
-	return stream.OutputStream
+	s := &p.Spec.Ingestor.Streams[0]
+	return s.Deduplication == nil || !s.Deduplication.Enabled
 }
 
-// getSinkReplicaCount returns the sink replica count from the pipeline spec. Defaults to 2 when unset or 0; minimum 2 when set.
-func getSinkReplicaCount(p etlv1alpha1.Pipeline) int {
-	if p.Spec.Sink.Replicas >= 2 {
-		return p.Spec.Sink.Replicas
-	}
-	return 2
-}
-
-// getDedupReplicaCount returns the dedup replica count for a stream. Defaults to 3 when dedup is enabled and Replicas is unset/0; minimum 3 when set. Returns 1 when dedup is disabled (unused).
-func getDedupReplicaCount(stream etlv1alpha1.SourceStream) int {
-	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
-		return 1
-	}
-	if stream.Deduplication.Replicas >= 3 {
-		return stream.Deduplication.Replicas
-	}
-	return 3
-}
-
-// useDedupNStreamPath returns true when the pipeline uses the M→D→N dedup path: single topic, no join, dedup enabled for that topic.
-// In this path we create N sink streams (dedup output subjects) and D dedup input streams (ingestor subjects), not s.OutputStream / s.Deduplication.OutputStream.
+// useDedupNStreamPath returns true when the pipeline uses dedup multi-stream output:
+// single topic, no join, dedup enabled.
 func useDedupNStreamPath(p etlv1alpha1.Pipeline) bool {
 	if p.Spec.Join.Enabled || len(p.Spec.Ingestor.Streams) != 1 {
 		return false
@@ -106,16 +85,13 @@ func useDedupNStreamPath(p etlv1alpha1.Pipeline) bool {
 	return s.Deduplication != nil && s.Deduplication.Enabled
 }
 
-// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=M (ingestor replica count) when dedup is enabled for the stream.
+// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=ingestorReplicas when dedup is enabled for the stream.
 func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream) []v1.EnvVar {
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 		return nil
 	}
-	M := stream.Replicas
-	if M <= 0 {
-		M = 1
-	}
-	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(M)}}
+	ingestorReplicas := stream.Replicas
+	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(ingestorReplicas)}}
 }
 
 // preparePipelineLabels returns labels for pipeline resources

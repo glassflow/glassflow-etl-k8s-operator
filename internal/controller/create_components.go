@@ -144,7 +144,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
-				{Name: "NATS_SUBJECT_PREFIX", Value: getIngestorSubjectPrefix(p.Spec.ID, t.TopicName)},
+				{Name: "NATS_SUBJECT_PREFIX", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, t.TopicName)},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
 				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
 				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
@@ -292,7 +292,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 	cpuReq, cpuLim, memReq, memLim := r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit
-	sinkReplicas := getSinkReplicaCount(p)
+	sinkReplicas := p.Spec.Sink.Replicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
 		comp := p.Spec.Resources.Sink
 		if comp.Requests != nil {
@@ -395,7 +395,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		dedupLabels := r.getDedupLabels(stream.TopicName)
 		maps.Copy(dedupLabels, labels)
 
-		replicas := getDedupReplicaCount(stream)
+		replicas := stream.Deduplication.Replicas
 		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
 
 		err := r.createHeadlessService(ctx, ns.GetName(), serviceName, dedupLabels)
@@ -453,15 +453,15 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				},
 			}},
 		}
-		if useDedupNStreamPath(p) {
+		if p.Spec.Join.Enabled {
 			dedupEnvBase = append(dedupEnvBase,
-				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)},
-				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "GLASSFLOW_INPUT_STREAM", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "GLASSFLOW_OUTPUT_STREAM", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
 			)
 		} else {
 			dedupEnvBase = append(dedupEnvBase,
-				v1.EnvVar{Name: "GLASSFLOW_INPUT_STREAM", Value: stream.OutputStream},
-				v1.EnvVar{Name: "GLASSFLOW_OUTPUT_STREAM", Value: stream.Deduplication.OutputStream},
+				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
 			)
 		}
 		dedupContainerBuilder := newComponentContainerBuilder().
