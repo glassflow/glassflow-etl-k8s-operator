@@ -221,7 +221,3 @@ func (r *PipelineReconciler) terminateSink(ctx context.Context, log logr.Logger,
 
 	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, true, nil
 }
-
-// -------------------------------------------------------------------------------------------------------------------
-
-// createPipelineComponents ensures all required components are ready: Sink StatefulSet, Join deployment (if enabled), Dedup StatefulSets, Ingestor StatefulSets.

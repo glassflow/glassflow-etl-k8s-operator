@@ -301,7 +301,3 @@ func (r *PipelineReconciler) stopSinkComponents(ctx context.Context, log logr.Lo
 
 	return ctrl.Result{}, false, nil
 }
-
-// -------------------------------------------------------------------------------------------------------------------
-
-// terminatePipelineComponents terminates all pipeline components immediately
