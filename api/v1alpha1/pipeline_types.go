@@ -54,9 +54,8 @@ type Sources struct {
 
 type SourceStream struct {
 	// +kubebuilder:validation:MinLength=1
-	TopicName    string        `json:"topic_name"`
-	OutputStream string        `json:"stream"`
-	DedupWindow  time.Duration `json:"dedup_window"`
+	TopicName   string        `json:"topic_name"`
+	DedupWindow time.Duration `json:"dedup_window"`
 
 	// Operator-specific dedup configuration
 	Deduplication *Deduplication `json:"deduplication,omitempty"`
@@ -65,7 +64,6 @@ type SourceStream struct {
 // Deduplication configuration for operator
 type Deduplication struct {
 	Enabled      bool   `json:"enabled"`
-	OutputStream string `json:"stream"`                  // NATS stream after dedup
 	StorageSize  string `json:"storage_size,omitempty"`  // Default: "10Gi"
 	StorageClass string `json:"storage_class,omitempty"` // Optional
 }

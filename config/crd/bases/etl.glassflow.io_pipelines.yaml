@@ -455,20 +455,14 @@ spec:
                               type: string
                             storage_size:
                               type: string
-                            stream:
-                              type: string
                           required:
                           - enabled
-                          - stream
                           type: object
-                        stream:
-                          type: string
                         topic_name:
                           minLength: 1
                           type: string
                       required:
                       - dedup_window
-                      - stream
                       - topic_name
                       type: object
                     maxItems: 2
