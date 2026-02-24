@@ -275,7 +275,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationCreate)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -333,7 +333,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationCreate)
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -383,7 +383,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationTerminate)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -634,7 +634,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -703,7 +703,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationResume)
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -753,7 +753,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationStop)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -828,7 +828,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -883,7 +883,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationEdit)
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -935,7 +935,6 @@ func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
 	ns v1.Namespace,
 	labels map[string]string,
 	secret v1.Secret,
-	operationName string,
 ) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(p)
 
@@ -971,7 +970,7 @@ func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, &p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, operationName)
+				return r.handleOperationTimeout(ctx, log, &p)
 			}
 
 			log.Info("creating dedup statefulsets", "namespace", namespace)
@@ -995,8 +994,7 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
 	namespace,
-	deploymentName,
-	operationName string,
+	deploymentName string,
 	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
 	ns v1.Namespace,
 	labels map[string]string,
@@ -1014,7 +1012,7 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	// Check for timeout before creating
 	timedOut, _ := r.checkOperationTimeout(log, p)
 	if timedOut {
-		_, err := r.handleOperationTimeout(ctx, log, p, operationName)
+		_, err := r.handleOperationTimeout(ctx, log, p)
 		return false, err
 	}
 
@@ -1032,8 +1030,7 @@ func (r *PipelineReconciler) ensureStatefulSetReady(
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
 	namespace,
-	statefulSetName,
-	operationName string,
+	statefulSetName string,
 	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
 	ns v1.Namespace,
 	labels map[string]string,
@@ -1050,7 +1047,7 @@ func (r *PipelineReconciler) ensureStatefulSetReady(
 
 	timedOut, _ := r.checkOperationTimeout(log, p)
 	if timedOut {
-		_, err := r.handleOperationTimeout(ctx, log, p, operationName)
+		_, err := r.handleOperationTimeout(ctx, log, p)
 		return false, err
 	}
 
@@ -1060,67 +1057,4 @@ func (r *PipelineReconciler) ensureStatefulSetReady(
 		return false, fmt.Errorf("create %s statefulset: %w", statefulSetName, err)
 	}
 	return true, nil
-}
-
-// ensureAllDeploymentsReady ensures all required components are ready: Sink StatefulSet, Join deployment (if enabled), Dedup StatefulSets, Ingestor StatefulSets.
-func (r *PipelineReconciler) ensureAllDeploymentsReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-	operationName string,
-) (ctrl.Result, error) {
-	namespace := r.getTargetNamespace(*p)
-
-	// Step 1: Ensure Sink StatefulSet is ready
-	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), operationName, r.createSink, ns, labels, secret)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if requeue {
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
-
-	// Step 2: Ensure Join deployment is ready (if enabled)
-	if p.Spec.Join.Enabled {
-		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), operationName, r.createJoin, ns, labels, secret)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if requeue {
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
-	}
-
-	// Step 3: Ensure Dedup StatefulSets are ready
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, *p, ns, labels, secret, operationName)
-	if err != nil || result.Requeue {
-		return result, err
-	}
-
-	// Step 4: Ensure Ingestor StatefulSets are ready
-	for i := range p.Spec.Ingestor.Streams {
-		statefulSetName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", statefulSetName, err)
-		}
-		if !ready {
-			timedOut, _ := r.checkOperationTimeout(log, p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, p, operationName)
-			}
-			log.Info("creating ingestor statefulset", "statefulset", statefulSetName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, *p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor statefulset %s: %w", statefulSetName, err)
-			}
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
-		log.Info("ingestor statefulset is already ready", "statefulset", statefulSetName, "namespace", namespace)
-	}
-
-	return ctrl.Result{}, nil
 }
