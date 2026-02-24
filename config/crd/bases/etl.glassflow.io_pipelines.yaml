@@ -45,8 +45,6 @@ spec:
                   in the glassflow namespace (pipeline-config-{pipeline_id}). This field is kept for
                   backward compatibility and will be used as a fallback if the secret is not found.
                 type: string
-              dlq:
-                type: string
               join:
                 properties:
                   enabled:
@@ -58,13 +56,6 @@ spec:
                       largest representable duration to approximately 290 years.
                     format: int64
                     type: integer
-                  nats_left_consumer_name:
-                    type: string
-                  nats_right_consumer_name:
-                    type: string
-                  replicas:
-                    minimum: 1
-                    type: integer
                   right_buffer_ttl:
                     description: |-
                       A Duration represents the elapsed time between two instants
@@ -72,14 +63,10 @@ spec:
                       largest representable duration to approximately 290 years.
                     format: int64
                     type: integer
-                  stream:
-                    type: string
                   type:
                     type: string
                 required:
                 - enabled
-                - replicas
-                - stream
                 - type
                 type: object
               pipeline_id:
@@ -440,13 +427,6 @@ spec:
                 type: object
               sink:
                 properties:
-                  nats_consumer_name:
-                    type: string
-                  replicas:
-                    description: Replicas is the number of sink StatefulSet replicas.
-                      Defaults to 1 when unset or 0.
-                    minimum: 1
-                    type: integer
                   type:
                     enum:
                     - clickhouse
@@ -471,13 +451,6 @@ spec:
                           properties:
                             enabled:
                               type: boolean
-                            nats_consumer_name:
-                              type: string
-                            replicas:
-                              description: Replicas is the number of dedup StatefulSet
-                                replicas. Defaults to 1 when unset or 0.
-                              minimum: 1
-                              type: integer
                             storage_class:
                               type: string
                             storage_size:
@@ -488,9 +461,6 @@ spec:
                           - enabled
                           - stream
                           type: object
-                        replicas:
-                          minimum: 1
-                          type: integer
                         stream:
                           type: string
                         topic_name:
@@ -498,7 +468,6 @@ spec:
                           type: string
                       required:
                       - dedup_window
-                      - replicas
                       - stream
                       - topic_name
                       type: object
@@ -514,7 +483,6 @@ spec:
                 - type
                 type: object
             required:
-            - dlq
             - join
             - pipeline_id
             - sink

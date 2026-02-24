@@ -86,12 +86,61 @@ func useDedupNStreamPath(p etlv1alpha1.Pipeline) bool {
 }
 
 // ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=ingestorReplicas when dedup is enabled for the stream.
-func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream) []v1.EnvVar {
+func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream, ingestorReplicas int) []v1.EnvVar {
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 		return nil
 	}
-	ingestorReplicas := stream.Replicas
+	if ingestorReplicas <= 0 {
+		ingestorReplicas = constants.DefaultMinReplicas
+	}
 	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(ingestorReplicas)}}
+}
+
+func getSinkReplicas(p etlv1alpha1.Pipeline) int {
+	replicas := constants.DefaultMinReplicas
+	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil && p.Spec.Resources.Sink.Replicas != nil {
+		replicas = int(*p.Spec.Resources.Sink.Replicas)
+	}
+	if replicas <= 0 {
+		return constants.DefaultMinReplicas
+	}
+	return replicas
+}
+
+func getIngestorReplicas(p etlv1alpha1.Pipeline, streamIndex int) int {
+	replicas := constants.DefaultMinReplicas
+	if p.Spec.Resources == nil || p.Spec.Resources.Ingestor == nil {
+		return replicas
+	}
+	ingRes := p.Spec.Resources.Ingestor
+	var comp *etlv1alpha1.ComponentResources
+	if p.Spec.Join.Enabled {
+		if streamIndex == 0 {
+			comp = ingRes.Left
+		} else {
+			comp = ingRes.Right
+		}
+	} else {
+		comp = ingRes.Base
+	}
+	if comp != nil && comp.Replicas != nil {
+		replicas = int(*comp.Replicas)
+	}
+	if replicas <= 0 {
+		return constants.DefaultMinReplicas
+	}
+	return replicas
+}
+
+func getDedupReplicas(p etlv1alpha1.Pipeline) int {
+	replicas := constants.DefaultMinReplicas
+	if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil && p.Spec.Resources.Dedup.Replicas != nil {
+		replicas = int(*p.Spec.Resources.Dedup.Replicas)
+	}
+	if replicas <= 0 {
+		return constants.DefaultMinReplicas
+	}
+	return replicas
 }
 
 // preparePipelineLabels returns labels for pipeline resources

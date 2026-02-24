@@ -91,7 +91,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		maps.Copy(ingestorLabels, labels)
 
 		cpuReq, cpuLim, memReq, memLim := r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit
-		ingestorReplicas := t.Replicas
+		ingestorReplicas := constants.DefaultMinReplicas
 		if p.Spec.Resources != nil && p.Spec.Resources.Ingestor != nil {
 			ingRes := p.Spec.Resources.Ingestor
 			var comp *etlv1alpha1.ComponentResources
@@ -117,7 +117,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}
 		}
 
-		subjectCountEnvVars := ingestorNATSSubjectCountEnvVars(t)
+		subjectCountEnvVars := ingestorNATSSubjectCountEnvVars(t, ingestorReplicas)
 		if t.Deduplication != nil && t.Deduplication.Enabled {
 			replicasForSubjects := ingestorReplicas
 			if replicasForSubjects <= 0 {
@@ -292,7 +292,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 	cpuReq, cpuLim, memReq, memLim := r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit
-	sinkReplicas := p.Spec.Sink.Replicas
+	sinkReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
 		comp := p.Spec.Resources.Sink
 		if comp.Requests != nil {
@@ -395,7 +395,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		dedupLabels := r.getDedupLabels(stream.TopicName)
 		maps.Copy(dedupLabels, labels)
 
-		replicas := stream.Deduplication.Replicas
+		replicas := constants.DefaultMinReplicas
 		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
 
 		err := r.createHeadlessService(ctx, ns.GetName(), serviceName, dedupLabels)

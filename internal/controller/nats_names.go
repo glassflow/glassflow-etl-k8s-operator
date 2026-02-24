@@ -30,6 +30,12 @@ const PipelineStreamPrefix = "gf"
 // MaxStreamNameLength is the maximum NATS stream name length (aligned with glassflow-api).
 const MaxStreamNameLength = 256
 
+// NATSConsumerNamePrefix is the NATS consumer name prefix (aligned with glassflow-api).
+const NATSConsumerNamePrefix = "gf-nats"
+
+// DLQSuffix is the DLQ stream suffix (aligned with glassflow-api).
+const DLQSuffix = "DLQ"
+
 // generateStreamHash returns the first 8 hex chars of SHA256(pipelineID), aligned with glassflow-api GenerateStreamHash.
 func generateStreamHash(pipelineID string) string {
 	hash := sha256.Sum256([]byte(pipelineID))
@@ -106,6 +112,46 @@ func getDedupOutputSubjectPrefix(pipelineID, topicName string) string {
 func getJoinOutputStreamName(pipelineID string) string {
 	hash := generateStreamHash(pipelineID)
 	return fmt.Sprintf("%s-%s-join", PipelineStreamPrefix, hash)
+}
+
+func getDLQStreamName(pipelineID string) string {
+	hash := generateStreamHash(pipelineID)
+	return fmt.Sprintf("%s-%s-%s", PipelineStreamPrefix, hash, DLQSuffix)
+}
+
+// getNATSConsumerName builds consumer names aligned with glassflow-api GetNATSConsumerName.
+func getNATSConsumerName(pipelineID, componentType, streamType string) string {
+	componentAbbr := map[string]string{
+		"sink":  "s",
+		"join":  "j",
+		"dedup": "d",
+	}
+	streamAbbr := map[string]string{
+		"input": "i",
+		"left":  "l",
+		"right": "r",
+	}
+	return fmt.Sprintf("%s-%s%s-%s",
+		NATSConsumerNamePrefix,
+		componentAbbr[componentType],
+		streamAbbr[streamType],
+		generateStreamHash(pipelineID))
+}
+
+func getNATSSinkConsumerName(pipelineID string) string {
+	return getNATSConsumerName(pipelineID, "sink", "input")
+}
+
+func getNATSJoinLeftConsumerName(pipelineID string) string {
+	return getNATSConsumerName(pipelineID, "join", "left")
+}
+
+func getNATSJoinRightConsumerName(pipelineID string) string {
+	return getNATSConsumerName(pipelineID, "join", "right")
+}
+
+func getNATSDedupConsumerName(pipelineID string) string {
+	return getNATSConsumerName(pipelineID, "dedup", "input")
 }
 
 // getSubjectsForStreamIndex returns the list of subjects that map to stream index s

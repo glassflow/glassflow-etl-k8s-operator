@@ -55,9 +55,9 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 		return nil // No join, nothing to check
 	}
 
-	// Get consumer names and stream names directly from spec
-	leftConsumerName := p.Spec.Join.NATSLeftConsumerName
-	rightConsumerName := p.Spec.Join.NATSRightConsumerName
+	// Consumer names are generated from pipeline ID (aligned with glassflow-api).
+	leftConsumerName := getNATSJoinLeftConsumerName(p.Spec.ID)
+	rightConsumerName := getNATSJoinRightConsumerName(p.Spec.ID)
 
 	// Use generated stream names resolved by operator naming rules.
 	leftStreamName := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[0])
@@ -80,14 +80,14 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 
 // checkSinkPendingMessages checks if sink consumer(s) have pending messages.
 func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
-	baseConsumerName := p.Spec.Sink.NATSConsumerName
+	baseConsumerName := getNATSSinkConsumerName(p.Spec.ID)
 	if p.Spec.Join.Enabled {
 		sinkStreamName := getJoinOutputStreamName(p.Spec.ID)
 		return r.checkConsumerPendingMessages(ctx, sinkStreamName, baseConsumerName)
 	}
 	if useNStreamSinkPath(p) || useDedupNStreamPath(p) {
 		// sinkReplicas streams, per-pod consumer name = baseConsumerName + "_" + podIndex
-		sinkReplicas := p.Spec.Sink.Replicas
+		sinkReplicas := getSinkReplicas(p)
 		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
 		for n := 0; n < sinkReplicas; n++ {
 			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
@@ -113,9 +113,9 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 		return nil
 	}
 
-	baseConsumerName := stream.Deduplication.NATSConsumerName
+	baseConsumerName := getNATSDedupConsumerName(p.Spec.ID)
 	if useDedupNStreamPath(p) {
-		dedupReplicas := stream.Deduplication.Replicas
+		dedupReplicas := getDedupReplicas(p)
 		streamNamePrefix := getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)
 		for d := 0; d < dedupReplicas; d++ {
 			streamName := streamNamePrefix + "_" + strconv.Itoa(d)
@@ -132,13 +132,15 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 
 // createNATSStreams creates all NATS streams and KV stores for a pipeline
 func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	dlqStreamName := getDLQStreamName(p.Spec.ID)
+
 	// create DLQ
-	err := r.NATSClient.CreateOrUpdateStream(ctx, p.Spec.DLQ, 0)
+	err := r.NATSClient.CreateOrUpdateStream(ctx, dlqStreamName, 0)
 	if err != nil {
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "create_stream", "failure", p.Spec.ID)
 		})
-		return fmt.Errorf("create stream %s: %w", p.Spec.DLQ, err)
+		return fmt.Errorf("create stream %s: %w", dlqStreamName, err)
 	}
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordNATSOperation(ctx, "create_dlq_stream", "success", p.Spec.ID)
@@ -147,12 +149,12 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 	// create source streams:
 	useNStreams := useNStreamSinkPath(p)
 	useDedupStreams := useDedupNStreamPath(p)
-	for _, s := range p.Spec.Ingestor.Streams {
+	for streamIndex, s := range p.Spec.Ingestor.Streams {
 		if useNStreams {
 			subjectPrefix := getIngestorOutputSubjectPrefix(p.Spec.ID, s.TopicName)
 			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-			ingestorReplicas := s.Replicas
-			sinkReplicas := p.Spec.Sink.Replicas
+			ingestorReplicas := getIngestorReplicas(p, streamIndex)
+			sinkReplicas := getSinkReplicas(p)
 			for n := 0; n < sinkReplicas; n++ {
 				streamName := streamNamePrefix + "_" + strconv.Itoa(n)
 				subjects := getSubjectsForStreamIndex(subjectPrefix, ingestorReplicas, sinkReplicas, n)
@@ -168,8 +170,8 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 		} else if useDedupStreams {
 			// Dedup path: do not create s.OutputStream or s.Deduplication.OutputStream.
 			// Create sinkReplicas sink streams (sink reads from dedup output).
-			dedupReplicas := s.Deduplication.Replicas
-			sinkReplicas := p.Spec.Sink.Replicas
+			dedupReplicas := getDedupReplicas(p)
+			sinkReplicas := getSinkReplicas(p)
 			dedupOutputSubjectPrefix := getDedupOutputSubjectPrefix(p.Spec.ID, s.TopicName)
 			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
 			for n := 0; n < sinkReplicas; n++ {
@@ -186,7 +188,7 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 			// Create dedupReplicas dedup input streams (dedup reads from ingestor output).
 			ingestorSubjectPrefix := getIngestorOutputSubjectPrefix(p.Spec.ID, s.TopicName)
 			dedupInputStreamPrefix := getDedupInputStreamPrefix(p.Spec.ID, s.TopicName)
-			ingestorReplicas := s.Replicas
+			ingestorReplicas := getIngestorReplicas(p, streamIndex)
 			for d := 0; d < dedupReplicas; d++ {
 				streamName := dedupInputStreamPrefix + "_" + strconv.Itoa(d)
 				subjects := getSubjectsForStreamIndex(ingestorSubjectPrefix, ingestorReplicas, dedupReplicas, d)
@@ -258,22 +260,20 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 	}
 
 	// delete the DLQ stream
-	if p.Spec.DLQ != "" {
-		log.Info("deleting NATS DLQ stream", "stream", p.Spec.DLQ)
-		err := r.deleteNATSStream(ctx, log, p.Spec.DLQ)
-		if err != nil {
-			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", p.Spec.DLQ)
-			r.recordMetricsIfEnabled(func(m *observability.Meter) {
-				m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
-			})
-			return fmt.Errorf("failed to cleanup NATS DLQ stream: %w", err)
-		}
-
+	dlqStreamName := getDLQStreamName(p.Spec.ID)
+	log.Info("deleting NATS DLQ stream", "stream", dlqStreamName)
+	err := r.deleteNATSStream(ctx, log, dlqStreamName)
+	if err != nil {
+		log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", dlqStreamName)
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
-			m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
+			m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
 		})
-		log.Info("NATS DLQ stream deleted successfully", "stream", p.Spec.DLQ)
+		return fmt.Errorf("failed to cleanup NATS DLQ stream: %w", err)
 	}
+	r.recordMetricsIfEnabled(func(m *observability.Meter) {
+		m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
+	})
+	log.Info("NATS DLQ stream deleted successfully", "stream", dlqStreamName)
 
 	// delete Ingestor Streams
 	// single-topic no-join no-dedup: delete sinkReplicas sink-input streams
@@ -283,7 +283,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 	useDedupStreams := useDedupNStreamPath(p)
 	for _, stream := range p.Spec.Ingestor.Streams {
 		if useNStreams {
-			sinkReplicas := p.Spec.Sink.Replicas
+			sinkReplicas := getSinkReplicas(p)
 			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
 			for n := 0; n < sinkReplicas; n++ {
 				streamName := streamNamePrefix + "_" + strconv.Itoa(n)
@@ -306,7 +306,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 		if useDedupStreams {
 			// Delete sinkReplicas sink streams and dedupReplicas dedup input streams; do not delete
 			// s.OutputStream or s.Deduplication.OutputStream (we never created them).
-			sinkReplicas := p.Spec.Sink.Replicas
+			sinkReplicas := getSinkReplicas(p)
 			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
 			for n := 0; n < sinkReplicas; n++ {
 				streamName := streamNamePrefix + "_" + strconv.Itoa(n)
@@ -324,7 +324,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 				})
 				log.Info("NATS sink input stream deleted successfully", "stream", streamName)
 			}
-			dedupReplicas := stream.Deduplication.Replicas
+			dedupReplicas := getDedupReplicas(p)
 			dedupInputStreamPrefix := getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)
 			for d := 0; d < dedupReplicas; d++ {
 				streamName := dedupInputStreamPrefix + "_" + strconv.Itoa(d)

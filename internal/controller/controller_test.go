@@ -64,8 +64,7 @@ var _ = Describe("Pipeline Controller", func() {
 						Namespace: "default",
 					},
 					Spec: etlv1alpha1.PipelineSpec{
-						ID:  resourceName,
-						DLQ: resourceName + "-DLQ",
+						ID: resourceName,
 						Ingestor: etlv1alpha1.Sources{
 							Type: "kafka",
 							Streams: []etlv1alpha1.SourceStream{
@@ -73,25 +72,28 @@ var _ = Describe("Pipeline Controller", func() {
 									TopicName:    "test_topic1",
 									OutputStream: "test_topic1",
 									DedupWindow:  2 * time.Hour,
-									Replicas:     1,
 								},
 								{
 									TopicName:    "test_topic2",
 									OutputStream: "test_topic2",
 									DedupWindow:  5 * time.Minute,
-									Replicas:     1,
 								},
 							},
 						},
 						Join: etlv1alpha1.Join{
-							Type:         "temporal",
-							OutputStream: "gf-stream-joined",
-							Replicas:     1,
-							Enabled:      true,
+							Type:    "temporal",
+							Enabled: true,
 						},
 						Sink: etlv1alpha1.Sink{
-							Type:     "clickhouse",
-							Replicas: 1,
+							Type: "clickhouse",
+						},
+						Resources: &etlv1alpha1.PipelineResources{
+							Ingestor: &etlv1alpha1.IngestorResources{
+								Left:  &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
+								Right: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
+							},
+							Join: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
+							Sink: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
 						},
 					},
 				}
