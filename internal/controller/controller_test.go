@@ -69,14 +69,12 @@ var _ = Describe("Pipeline Controller", func() {
 							Type: "kafka",
 							Streams: []etlv1alpha1.SourceStream{
 								{
-									TopicName:    "test_topic1",
-									OutputStream: "test_topic1",
-									DedupWindow:  2 * time.Hour,
+									TopicName:   "test_topic1",
+									DedupWindow: 2 * time.Hour,
 								},
 								{
-									TopicName:    "test_topic2",
-									OutputStream: "test_topic2",
-									DedupWindow:  5 * time.Minute,
+									TopicName:   "test_topic2",
+									DedupWindow: 5 * time.Minute,
 								},
 							},
 						},
