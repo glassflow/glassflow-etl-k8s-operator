@@ -168,7 +168,7 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 		p.SetAnnotations(annotations)
 
 		// Terminate all pipeline components
-		result, err := r.terminatePipelineComponents(ctx, log, *p)
+		result, err := r.terminatePipelineComponents(ctx, log, p)
 		if err != nil || result.Requeue {
 			return result, err
 		}
