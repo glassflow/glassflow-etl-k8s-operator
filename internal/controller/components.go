@@ -53,7 +53,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+				return r.handleOperationTimeout(ctx, log, p)
 			}
 
 			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
@@ -87,7 +87,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for timeout
 		timedOut, _ := r.checkOperationTimeout(log, p)
 		if timedOut {
-			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+			return r.handleOperationTimeout(ctx, log, p)
 		}
 
 		// Check for pending messages first
@@ -129,7 +129,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for timeout before checking pending messages
 		timedOut, _ := r.checkOperationTimeout(log, p)
 		if timedOut {
-			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+			return r.handleOperationTimeout(ctx, log, p)
 		}
 
 		// Check for pending messages first
@@ -152,7 +152,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+				return r.handleOperationTimeout(ctx, log, p)
 			}
 
 			log.Info("deleting join deployment", "namespace", namespace)
@@ -179,7 +179,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 	// Check for timeout before checking pending messages
 	timedOut, _ := r.checkOperationTimeout(log, p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+		return r.handleOperationTimeout(ctx, log, p)
 	}
 
 	// Check for pending messages first
@@ -202,7 +202,7 @@ func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log log
 		// Check for timeout before requeuing
 		timedOut, _ := r.checkOperationTimeout(log, p)
 		if timedOut {
-			return r.handleOperationTimeout(ctx, log, p, constants.OperationStop)
+			return r.handleOperationTimeout(ctx, log, p)
 		}
 
 		log.Info("deleting sink deployment", "namespace", namespace)

@@ -200,27 +200,10 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Check for operation annotations
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		// Determine which operation to perform based on annotations
-		// Helm uninstall has highest priority - it interrupts any ongoing operation
-		var operation string
-		if _, hasHelmUninstall := annotations[constants.PipelineHelmUninstallAnnotation]; hasHelmUninstall {
-			operation = constants.OperationHelmUninstall
+	operation := getPipelineOperationFromAnnotations(p.GetAnnotations())
+	if operation != "" {
+		if operation == constants.OperationHelmUninstall {
 			log.Info("HELM UNINSTALL detected - interrupting any ongoing operations", "pipeline_id", p.Spec.ID)
-		} else if _, hasTerminate := annotations[constants.PipelineDeleteAnnotation]; hasTerminate {
-			operation = constants.OperationDelete
-		} else if _, hasTerminate := annotations[constants.PipelineTerminateAnnotation]; hasTerminate {
-			operation = constants.OperationTerminate
-		} else if _, hasCreate := annotations[constants.PipelineCreateAnnotation]; hasCreate {
-			operation = constants.OperationCreate
-		} else if _, hasStop := annotations[constants.PipelineStopAnnotation]; hasStop {
-			operation = constants.OperationStop
-		} else if _, hasResume := annotations[constants.PipelineResumeAnnotation]; hasResume {
-			operation = constants.OperationResume
-		} else if _, hasEdit := annotations[constants.PipelineEditAnnotation]; hasEdit {
-			operation = constants.OperationEdit
 		}
 
 		// Execute the appropriate operation
@@ -274,7 +257,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationCreate)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -332,7 +315,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationCreate)
+	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -382,7 +365,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationTerminate)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -633,7 +616,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -702,7 +685,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationResume)
+	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -752,7 +735,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationStop)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -827,7 +810,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	// Check for timeout before proceeding
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
+		return r.handleOperationTimeout(ctx, log, &p)
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
@@ -882,7 +865,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret, constants.OperationEdit)
+	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -934,7 +917,6 @@ func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
 	ns v1.Namespace,
 	labels map[string]string,
 	secret v1.Secret,
-	operationName string,
 ) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(p)
 
@@ -970,7 +952,7 @@ func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, &p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, operationName)
+				return r.handleOperationTimeout(ctx, log, &p)
 			}
 
 			log.Info("creating dedup statefulsets", "namespace", namespace)
@@ -994,8 +976,7 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
 	namespace,
-	deploymentName,
-	operationName string,
+	deploymentName string,
 	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
 	ns v1.Namespace,
 	labels map[string]string,
@@ -1013,7 +994,7 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	// Check for timeout before creating
 	timedOut, _ := r.checkOperationTimeout(log, p)
 	if timedOut {
-		_, err := r.handleOperationTimeout(ctx, log, p, operationName)
+		_, err := r.handleOperationTimeout(ctx, log, p)
 		return false, err
 	}
 
@@ -1033,12 +1014,11 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 	ns v1.Namespace,
 	labels map[string]string,
 	secret v1.Secret,
-	operationName string,
 ) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(*p)
 
 	// Step 1: Ensure Sink deployment is ready
-	requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), operationName, r.createSink, ns, labels, secret)
+	requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), r.createSink, ns, labels, secret)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1048,7 +1028,7 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 
 	// Step 2: Ensure Join deployment is ready (if enabled)
 	if p.Spec.Join.Enabled {
-		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), operationName, r.createJoin, ns, labels, secret)
+		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -1058,7 +1038,7 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 	}
 
 	// Step 3: Ensure Dedup StatefulSets are ready
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, *p, ns, labels, secret, operationName)
+	result, err := r.ensureDedupStatefulSetsReady(ctx, log, *p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -1074,7 +1054,7 @@ func (r *PipelineReconciler) ensureAllDeploymentsReady(
 			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, p)
 			if timedOut {
-				return r.handleOperationTimeout(ctx, log, p, operationName)
+				return r.handleOperationTimeout(ctx, log, p)
 			}
 
 			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
