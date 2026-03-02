@@ -79,7 +79,6 @@ func TestGetPipelineOperationFromAnnotations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := getPipelineOperationFromAnnotations(tt.annotations)
@@ -136,7 +135,6 @@ func TestClearOperationAnnotation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
