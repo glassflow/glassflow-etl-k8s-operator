@@ -32,6 +32,56 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
+func getPipelineOperationFromAnnotations(annotations map[string]string) string {
+	if annotations == nil {
+		return ""
+	}
+
+	// avoid switch to ensure priority for annotations / operations
+	if _, exists := annotations[constants.PipelineHelmUninstallAnnotation]; exists {
+		return constants.OperationHelmUninstall
+	}
+	if _, exists := annotations[constants.PipelineDeleteAnnotation]; exists {
+		return constants.OperationDelete
+	}
+	if _, exists := annotations[constants.PipelineTerminateAnnotation]; exists {
+		return constants.OperationTerminate
+	}
+	if _, exists := annotations[constants.PipelineCreateAnnotation]; exists {
+		return constants.OperationCreate
+	}
+	if _, exists := annotations[constants.PipelineStopAnnotation]; exists {
+		return constants.OperationStop
+	}
+	if _, exists := annotations[constants.PipelineResumeAnnotation]; exists {
+		return constants.OperationResume
+	}
+	if _, exists := annotations[constants.PipelineEditAnnotation]; exists {
+		return constants.OperationEdit
+	}
+
+	return ""
+}
+
+func clearOperationAnnotation(annotations map[string]string, operation string) {
+	switch operation {
+	case constants.OperationCreate:
+		delete(annotations, constants.PipelineCreateAnnotation)
+	case constants.OperationResume:
+		delete(annotations, constants.PipelineResumeAnnotation)
+	case constants.OperationStop:
+		delete(annotations, constants.PipelineStopAnnotation)
+	case constants.OperationEdit:
+		delete(annotations, constants.PipelineEditAnnotation)
+	case constants.OperationTerminate:
+		delete(annotations, constants.PipelineTerminateAnnotation)
+	case constants.OperationDelete:
+		delete(annotations, constants.PipelineDeleteAnnotation)
+	case constants.OperationHelmUninstall:
+		delete(annotations, constants.PipelineHelmUninstallAnnotation)
+	}
+}
+
 // checkOperationTimeout checks if an operation has exceeded the timeout duration
 // Returns true if timed out, false otherwise, and the elapsed duration
 func (r *PipelineReconciler) checkOperationTimeout(log logr.Logger, p *etlv1alpha1.Pipeline) (bool, time.Duration) {
@@ -90,8 +140,14 @@ func (r *PipelineReconciler) clearOperationStartTime(p *etlv1alpha1.Pipeline) {
 }
 
 // handleOperationTimeout handles a timed-out operation by updating status to Failed and clearing annotations
-func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, operation string) (ctrl.Result, error) {
+func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
+	operation := getPipelineOperationFromAnnotations(p.GetAnnotations())
+	if operation == "" {
+		log.Info("could not determine operation from pipeline annotations while handling timeout", "pipeline_id", pipelineID)
+		operation = "unknown"
+	}
+
 	log.Error(fmt.Errorf("operation timed out after %v", constants.ReconcileTimeout), "operation timed out", "pipeline_id", pipelineID, "operation", operation)
 
 	// Update status to Failed with error message
@@ -108,16 +164,7 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 	// Clear the operation annotation
 	annotations := p.GetAnnotations()
 	if annotations != nil {
-		switch operation {
-		case constants.OperationCreate:
-			delete(annotations, constants.PipelineCreateAnnotation)
-		case constants.OperationResume:
-			delete(annotations, constants.PipelineResumeAnnotation)
-		case constants.OperationStop:
-			delete(annotations, constants.PipelineStopAnnotation)
-		case constants.OperationEdit:
-			delete(annotations, constants.PipelineEditAnnotation)
-		}
+		clearOperationAnnotation(annotations, operation)
 		p.SetAnnotations(annotations)
 
 		// Terminate all pipeline components
