@@ -6,68 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 )
-
-// pipelineRow represents a row from the pipelines table
-type pipelineRow struct {
-	pipelineID           string
-	name                 string
-	status               string
-	sourceID             uuid.UUID
-	sinkID               uuid.UUID
-	transformationIDsPtr *[]uuid.UUID
-	metadataJSON         []byte
-	createdAt            time.Time
-	updatedAt            time.Time
-}
-
-// loadPipelineRow loads a pipeline row from the database
-func (s *PostgresStorage) loadPipelineRow(ctx context.Context, pipelineID string) (*pipelineRow, error) {
-	var row pipelineRow
-	var transformationIDsArray pgtype.Array[pgtype.UUID]
-
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, status, source_id, sink_id, transformation_ids, metadata, created_at, updated_at
-		FROM pipelines
-		WHERE id = $1
-	`, pipelineID).Scan(
-		&row.pipelineID,
-		&row.name,
-		&row.status,
-		&row.sourceID,
-		&row.sinkID,
-		&transformationIDsArray,
-		&row.metadataJSON,
-		&row.createdAt,
-		&row.updatedAt,
-	)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			s.logger.V(1).Info("pipeline not found", "pipeline_id", pipelineID)
-			return nil, ErrPipelineNotExists
-		}
-		s.logger.Error(err, "failed to load pipeline row", "pipeline_id", pipelineID)
-		return nil, fmt.Errorf("get pipeline: %w", err)
-	}
-
-	// Convert pgtype UUID array to []uuid.UUID
-	if transformationIDsArray.Valid {
-		transformationIDs := make([]uuid.UUID, 0, len(transformationIDsArray.Elements))
-		for _, elem := range transformationIDsArray.Elements {
-			if elem.Valid {
-				transformationIDs = append(transformationIDs, elem.Bytes)
-			}
-		}
-		row.transformationIDsPtr = &transformationIDs
-	}
-
-	return &row, nil
-}
 
 // UpdatePipelineStatus updates the pipeline status and creates a history event
 func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string) error {
