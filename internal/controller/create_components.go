@@ -781,7 +781,7 @@ func (r *PipelineReconciler) reconcileIngestorTeardown(
 		}
 
 		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		result, err = r.ensureDeploymentDeleted(ctx, log, namespace, "ingestor", deploymentName)
+		result, err = r.ensureStatefulSetDeleted(ctx, log, namespace, "ingestor", deploymentName)
 		if err != nil || result.Requeue {
 			return result, err
 		}
@@ -893,7 +893,7 @@ func (r *PipelineReconciler) reconcileSinkTeardown(
 	}
 
 	deploymentName := r.getResourceName(*p, constants.SinkComponent)
-	return r.ensureDeploymentDeleted(ctx, log, namespace, constants.SinkComponent, deploymentName)
+	return r.ensureStatefulSetDeleted(ctx, log, namespace, constants.SinkComponent, deploymentName)
 }
 
 func (r *PipelineReconciler) checkTeardownTimeout(
