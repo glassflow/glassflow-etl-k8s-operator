@@ -91,7 +91,7 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
 		for n := 0; n < sinkReplicas; n++ {
 			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
-			consumerName := baseConsumerName + "_" + strconv.Itoa(n)
+			consumerName := baseConsumerName
 			if err := r.checkConsumerPendingMessages(ctx, streamName, consumerName); err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 		streamNamePrefix := getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)
 		for d := 0; d < dedupReplicas; d++ {
 			streamName := streamNamePrefix + "_" + strconv.Itoa(d)
-			consumerName := baseConsumerName + "_" + strconv.Itoa(d)
+			consumerName := baseConsumerName
 			if err := r.checkConsumerPendingMessages(ctx, streamName, consumerName); err != nil {
 				return err
 			}
