@@ -691,73 +691,6 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 }
 
-func (r *PipelineReconciler) ensureSinkDeploymentReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	namespace := r.getTargetNamespace(*p)
-	deploymentName := r.getResourceName(*p, constants.SinkComponent)
-	return r.ensureDeploymentReady(ctx, log, p, namespace, deploymentName, r.createSink, ns, labels, secret)
-}
-
-func (r *PipelineReconciler) ensureJoinDeploymentReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	if !p.Spec.Join.Enabled {
-		return ctrl.Result{}, nil
-	}
-
-	namespace := r.getTargetNamespace(*p)
-	deploymentName := r.getResourceName(*p, constants.JoinComponent)
-	return r.ensureDeploymentReady(ctx, log, p, namespace, deploymentName, r.createJoin, ns, labels, secret)
-}
-
-func (r *PipelineReconciler) ensureIngestorDeploymentsReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	namespace := r.getTargetNamespace(*p)
-
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if ready {
-			log.Info("ingestor deployment is already ready", "deployment", deploymentName, "namespace", namespace)
-			continue
-		}
-
-		timedOut, _ := r.checkOperationTimeout(log, p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, p)
-		}
-
-		log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-		if err = r.createIngestors(ctx, log, ns, labels, secret, *p); err != nil {
-			return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-		}
-
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
-
-	return ctrl.Result{}, nil
-}
-
 func (r *PipelineReconciler) ensureDeploymentDeleted(
 	ctx context.Context,
 	log logr.Logger,
@@ -827,35 +760,6 @@ func (r *PipelineReconciler) reconcilePipelineTeardown(
 			return result, err
 		}
 		if mode.checkStepTimeout && isPipelineFailed(p) {
-			return ctrl.Result{}, nil
-		}
-	}
-
-	return ctrl.Result{}, nil
-}
-
-// ensureAllDeploymentsReady ensures all required deployments (sink, join, dedup, ingestor) are ready.
-func (r *PipelineReconciler) ensureAllDeploymentsReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	stages := []func(context.Context, logr.Logger, *etlv1alpha1.Pipeline, v1.Namespace, map[string]string, v1.Secret) (ctrl.Result, error){
-		r.ensureSinkDeploymentReady,
-		r.ensureJoinDeploymentReady,
-		r.ensureDedupStatefulSetsReady,
-		r.ensureIngestorDeploymentsReady,
-	}
-
-	for _, stage := range stages {
-		result, err := stage(ctx, log, p, ns, labels, secret)
-		if err != nil || result.Requeue {
-			return result, err
-		}
-		if isPipelineFailed(p) {
 			return ctrl.Result{}, nil
 		}
 	}

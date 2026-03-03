@@ -452,31 +452,6 @@ func (r *PipelineReconciler) createHeadlessService(ctx context.Context, namespac
 	return nil
 }
 
-// isServiceAbsent checks if a service is absent (deleted or not found).
-func (r *PipelineReconciler) isServiceAbsent(ctx context.Context, namespace, name string) (bool, error) {
-	var svc v1.Service
-	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &svc)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
-		return false, fmt.Errorf("get service %s: %w", name, err)
-	}
-	return false, nil
-}
-
-// deleteService safely deletes a service, handling NotFound errors gracefully.
-func (r *PipelineReconciler) deleteService(ctx context.Context, svc *v1.Service) error {
-	err := r.Delete(ctx, svc, &client.DeleteOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("delete service: %w", err)
-	}
-	return nil
-}
-
 // -------------------------------------------------------------------------------------------------------------------
 // StatefulSet Operations
 // -------------------------------------------------------------------------------------------------------------------
