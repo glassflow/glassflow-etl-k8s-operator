@@ -178,6 +178,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
 
 // For more details, check Reconcile and its Result here:
@@ -315,7 +316,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret)
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -534,7 +535,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	// FORCE cleanup - skip normal termination process for helm uninstall
 	log.Info("HELM UNINSTALL: Force deleting pipeline namespace and resources", "pipeline_id", pipelineID)
 
-	// Force delete namespace for this pipeline (this will delete all deployments)
+	// Force delete namespace for this pipeline (this will delete all resources in the namespace: StatefulSets, Services, Deployments, etc.)
 	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		log.Error(err, "failed to delete pipeline namespace during helm uninstall", "pipeline_id", pipelineID)
@@ -688,7 +689,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret)
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -874,7 +875,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	}
 
 	// Ensure all deployments are ready
-	result, err := r.ensureAllDeploymentsReady(ctx, log, &p, ns, labels, secret)
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}

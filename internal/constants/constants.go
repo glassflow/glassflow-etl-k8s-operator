@@ -21,6 +21,8 @@ const (
 
 	// ReconcileTimeout is the maximum duration a reconcile operation can run before timing out
 	ReconcileTimeout = 15 * time.Minute
+
+	DefaultMinReplicas = 1
 )
 
 // Pipeline operation type constants

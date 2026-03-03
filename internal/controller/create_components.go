@@ -1,19 +1,3 @@
-/*
-Copyright 2025.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package controller
 
 import (
@@ -22,17 +6,17 @@ import (
 	"maps"
 	"time"
 
+	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 )
 
 const (
@@ -65,6 +49,61 @@ func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, lo
 	})
 }
 
+func (r *PipelineReconciler) createPipelineComponents(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (ctrl.Result, error) {
+	namespace := r.getTargetNamespace(*p)
+
+	// Step 1: Ensure Sink StatefulSet is ready
+	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), r.createSink, ns, labels, secret)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if requeue {
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	}
+
+	// Step 2: Ensure Join deployment is ready (if enabled)
+	if p.Spec.Join.Enabled {
+		return r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
+	}
+
+	// Step 3: Ensure Dedup StatefulSets are ready
+	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret)
+	if err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Step 4: Ensure Ingestor StatefulSets are ready
+	for i := range p.Spec.Ingestor.Streams {
+		statefulSetName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", statefulSetName, err)
+		}
+		if !ready {
+			timedOut, _ := r.checkOperationTimeout(log, p)
+			if timedOut {
+				return r.handleOperationTimeout(ctx, log, p)
+			}
+			log.Info("creating ingestor statefulset", "statefulset", statefulSetName, "namespace", namespace)
+			err = r.createIngestors(ctx, log, ns, labels, secret, *p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("create ingestor statefulset %s: %w", statefulSetName, err)
+			}
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		}
+		log.Info("ingestor statefulset is already ready", "statefulset", statefulSetName, "namespace", namespace)
+	}
+
+	return ctrl.Result{}, nil
+}
+
 // createIngestors creates ingestor deployments for the pipeline
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
@@ -78,7 +117,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		maps.Copy(ingestorLabels, labels)
 
 		cpuReq, cpuLim, memReq, memLim := r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit
-		ingestorReplicas := t.Replicas
+		ingestorReplicas := constants.DefaultMinReplicas
 		if p.Spec.Resources != nil && p.Spec.Resources.Ingestor != nil {
 			ingRes := p.Spec.Resources.Ingestor
 			var comp *etlv1alpha1.ComponentResources
@@ -104,6 +143,20 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}
 		}
 
+		subjectCountEnvVars := ingestorNATSSubjectCountEnvVars(t, ingestorReplicas)
+		if t.Deduplication != nil && t.Deduplication.Enabled {
+			replicasForSubjects := ingestorReplicas
+			if replicasForSubjects <= 0 {
+				replicasForSubjects = 1
+			}
+			subjectCountEnvVars = []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: fmt.Sprintf("%d", replicasForSubjects)}}
+		}
+
+		err := r.createHeadlessService(ctx, ns.GetName(), resourceRef, ingestorLabels)
+		if err != nil {
+			return fmt.Errorf("create ingestor headless service %s: %w", resourceRef, err)
+		}
+
 		containerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.IngestorImage).
@@ -113,10 +166,11 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				ReadOnly:  true,
 				MountPath: "/config",
 			}).
-			withEnv(append(append([]v1.EnvVar{
+			withEnv(append(append(append(append([]v1.EnvVar{
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
+				{Name: "NATS_SUBJECT_PREFIX", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, t.TopicName)},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
 				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
 				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
@@ -133,16 +187,17 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 						FieldPath: "metadata.name",
 					},
 				}},
-			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			}, subjectCountEnvVars...), r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 			withResources(cpuReq, cpuLim, memReq, memLim)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			containerBuilder = containerBuilder.withVolumeMount(mount)
 		}
 		container := containerBuilder.build()
 
-		depBuilder := newComponentDeploymentBuilder().
+		stsBuilder := newComponentStatefulSetBuilder().
 			withNamespace(ns).
 			withResourceName(resourceRef).
+			withServiceName(resourceRef).
 			withLabels(ingestorLabels).
 			withVolume(v1.Volume{
 				Name: "config",
@@ -157,13 +212,13 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			withContainer(*container).
 			withAffinity(r.IngestorAffinity)
 		if vol, ok := r.getComponentEncryptionVolume(); ok {
-			depBuilder = depBuilder.withVolume(vol)
+			stsBuilder = stsBuilder.withVolume(vol)
 		}
-		deployment := depBuilder.build()
+		statefulSet := stsBuilder.build()
 
-		err := r.createDeployment(ctx, deployment)
+		err = r.createStatefulSet(ctx, statefulSet)
 		if err != nil {
-			return fmt.Errorf("create ingestor deployment: %w", err)
+			return fmt.Errorf("create ingestor statefulset %s: %w", resourceRef, err)
 		}
 	}
 
@@ -257,14 +312,16 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	return nil
 }
 
-// createSink creates a sink deployment for the pipeline
+// createSink creates a sink StatefulSet (and headless Service) for the pipeline.
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	resourceRef := r.getResourceName(p, constants.SinkComponent)
+	namespace := ns.GetName()
 
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 
 	cpuReq, cpuLim, memReq, memLim := r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit
+	sinkReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
 		comp := p.Spec.Resources.Sink
 		if comp.Requests != nil {
@@ -273,9 +330,17 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		if comp.Limits != nil {
 			cpuLim, memLim = comp.Limits.CPU.String(), comp.Limits.Memory.String()
 		}
+		if comp.Replicas != nil {
+			sinkReplicas = int(*comp.Replicas)
+		}
 	}
 
 	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
+
+	err := r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels)
+	if err != nil {
+		return fmt.Errorf("create sink headless service: %w", err)
+	}
 
 	sinkContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
@@ -286,9 +351,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv(append(append([]v1.EnvVar{
+		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "NATS_INPUT_STREAM_PREFIX", Value: getSinkInputStreamPrefix(p.Spec.ID)},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
 			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
 			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
@@ -305,16 +371,17 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		}, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		sinkContainerBuilder = sinkContainerBuilder.withVolumeMount(mount)
 	}
 	sinkContainer := sinkContainerBuilder.build()
 
-	sinkDepBuilder := newComponentDeploymentBuilder().
+	stsBuilder := newComponentStatefulSetBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
+		withServiceName(resourceRef).
 		withLabels(sinkLabels).
 		withVolume(v1.Volume{
 			Name: "config",
@@ -326,18 +393,16 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*sinkContainer).
+		withReplicas(sinkReplicas).
 		withAffinity(r.SinkAffinity)
-	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil && p.Spec.Resources.Sink.Replicas != nil {
-		sinkDepBuilder = sinkDepBuilder.withReplicas(int(*p.Spec.Resources.Sink.Replicas))
-	}
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
-		sinkDepBuilder = sinkDepBuilder.withVolume(vol)
+		stsBuilder = stsBuilder.withVolume(vol)
 	}
-	deployment := sinkDepBuilder.build()
+	statefulSet := stsBuilder.build()
 
-	err := r.createDeployment(ctx, deployment)
+	err = r.createStatefulSet(ctx, statefulSet)
 	if err != nil {
-		return fmt.Errorf("create sink deployment: %w", err)
+		return fmt.Errorf("create sink statefulset: %w", err)
 	}
 
 	return nil
@@ -360,14 +425,19 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		dedupLabels := r.getDedupLabels(stream.TopicName)
 		maps.Copy(dedupLabels, labels)
 
-		replicas := 1
+		replicas := constants.DefaultMinReplicas
+		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
 
-		// Determine storage size: CRD pipeline_resources > stream dedup config > global default
+		err := r.createHeadlessService(ctx, ns.GetName(), serviceName, dedupLabels)
+		if err != nil {
+			return fmt.Errorf("create dedup headless service %s: %w", serviceName, err)
+		}
+
+		// Determine storage size (use pipeline config, fallback to Helm default)
 		storageSize := r.DedupDefaultStorageSize
 		if stream.Deduplication.StorageSize != "" {
 			storageSize = stream.Deduplication.StorageSize
 		}
-		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
 		if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil {
 			comp := p.Spec.Resources.Dedup
 			if comp.Requests != nil {
@@ -390,6 +460,40 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			storageClass = stream.Deduplication.StorageClass
 		}
 
+		dedupEnvBase := []v1.EnvVar{
+			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
+			{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
+			{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
+			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
+
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
+			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+				FieldRef: &v1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			}},
+		}
+		if p.Spec.Join.Enabled {
+			dedupEnvBase = append(dedupEnvBase,
+				v1.EnvVar{Name: "GLASSFLOW_INPUT_STREAM", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "GLASSFLOW_OUTPUT_STREAM", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+			)
+		} else {
+			dedupEnvBase = append(dedupEnvBase,
+				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+			)
+		}
 		dedupContainerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.DedupImage).
@@ -403,31 +507,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				Name:      "data",
 				MountPath: "/data/badger",
 			}).
-			withEnv(append(append([]v1.EnvVar{
-				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
-				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-				{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
-				{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
-				{Name: "GLASSFLOW_INPUT_STREAM", Value: stream.OutputStream},
-				{Name: "GLASSFLOW_OUTPUT_STREAM", Value: stream.Deduplication.OutputStream},
-				{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
-				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
-
-				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
-				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
-				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
-				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
-					FieldRef: &v1.ObjectFieldSelector{
-						FieldPath: "metadata.name",
-					},
-				}},
-			}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			withEnv(append(append(append(dedupEnvBase, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 			withResources(cpuReq, cpuLim, memReq, memLim)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			dedupContainerBuilder = dedupContainerBuilder.withVolumeMount(mount)
@@ -611,73 +691,6 @@ func (r *PipelineReconciler) ensureDeploymentReady(
 	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 }
 
-func (r *PipelineReconciler) ensureSinkDeploymentReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	namespace := r.getTargetNamespace(*p)
-	deploymentName := r.getResourceName(*p, constants.SinkComponent)
-	return r.ensureDeploymentReady(ctx, log, p, namespace, deploymentName, r.createSink, ns, labels, secret)
-}
-
-func (r *PipelineReconciler) ensureJoinDeploymentReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	if !p.Spec.Join.Enabled {
-		return ctrl.Result{}, nil
-	}
-
-	namespace := r.getTargetNamespace(*p)
-	deploymentName := r.getResourceName(*p, constants.JoinComponent)
-	return r.ensureDeploymentReady(ctx, log, p, namespace, deploymentName, r.createJoin, ns, labels, secret)
-}
-
-func (r *PipelineReconciler) ensureIngestorDeploymentsReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	namespace := r.getTargetNamespace(*p)
-
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if ready {
-			log.Info("ingestor deployment is already ready", "deployment", deploymentName, "namespace", namespace)
-			continue
-		}
-
-		timedOut, _ := r.checkOperationTimeout(log, p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, p)
-		}
-
-		log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-		if err = r.createIngestors(ctx, log, ns, labels, secret, *p); err != nil {
-			return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-		}
-
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
-
-	return ctrl.Result{}, nil
-}
-
 func (r *PipelineReconciler) ensureDeploymentDeleted(
 	ctx context.Context,
 	log logr.Logger,
@@ -747,35 +760,6 @@ func (r *PipelineReconciler) reconcilePipelineTeardown(
 			return result, err
 		}
 		if mode.checkStepTimeout && isPipelineFailed(p) {
-			return ctrl.Result{}, nil
-		}
-	}
-
-	return ctrl.Result{}, nil
-}
-
-// ensureAllDeploymentsReady ensures all required deployments (sink, join, dedup, ingestor) are ready.
-func (r *PipelineReconciler) ensureAllDeploymentsReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	stages := []func(context.Context, logr.Logger, *etlv1alpha1.Pipeline, v1.Namespace, map[string]string, v1.Secret) (ctrl.Result, error){
-		r.ensureSinkDeploymentReady,
-		r.ensureJoinDeploymentReady,
-		r.ensureDedupStatefulSetsReady,
-		r.ensureIngestorDeploymentsReady,
-	}
-
-	for _, stage := range stages {
-		result, err := stage(ctx, log, p, ns, labels, secret)
-		if err != nil || result.Requeue {
-			return result, err
-		}
-		if isPipelineFailed(p) {
 			return ctrl.Result{}, nil
 		}
 	}

@@ -117,11 +117,23 @@ func New(ctx context.Context, cfg Config) (*NATSClient, error) {
 	}, nil
 }
 
-func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedupWindow time.Duration) error {
+// CreateOrUpdateStream creates or updates a NATS stream with wildcard subject name+".*".
+// No NATS-level dedup window is applied; deduplication is handled by the dedup component.
+func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, _ time.Duration) error {
+	return n.createOrUpdateStreamWithSubjects(ctx, name, []string{name + ".*"})
+}
+
+// CreateOrUpdateStreamWithSubjects creates or updates a NATS stream with the given explicit subjects.
+// No NATS-level dedup window is applied.
+func (n *NATSClient) CreateOrUpdateStreamWithSubjects(ctx context.Context, name string, subjects []string) error {
+	return n.createOrUpdateStreamWithSubjects(ctx, name, subjects)
+}
+
+func (n *NATSClient) createOrUpdateStreamWithSubjects(ctx context.Context, name string, subjects []string) error {
 	//nolint:exhaustruct // readability
 	sc := jetstream.StreamConfig{
 		Name:     name,
-		Subjects: []string{name + ".*"},
+		Subjects: subjects,
 		Storage:  jetstream.FileStorage,
 
 		MaxAge:   n.maxAge,
@@ -131,10 +143,6 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, dedu
 		Retention:          n.retention,
 		AllowDirect:        n.allowDirect,
 		AllowAtomicPublish: n.allowAtomicPublish,
-	}
-
-	if dedupWindow > 0 {
-		sc.Duplicates = dedupWindow
 	}
 
 	_, err := n.JetStream().CreateOrUpdateStream(ctx, sc)

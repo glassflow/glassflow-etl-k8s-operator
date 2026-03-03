@@ -426,6 +426,33 @@ func (r *PipelineReconciler) deleteDeploymentByName(ctx context.Context, namespa
 }
 
 // -------------------------------------------------------------------------------------------------------------------
+// Headless Service Operations (for StatefulSet)
+// -------------------------------------------------------------------------------------------------------------------
+
+// createHeadlessService creates a headless Service for a StatefulSet (ClusterIP: None, selector = labels).
+func (r *PipelineReconciler) createHeadlessService(ctx context.Context, namespace, name string, labels map[string]string) error {
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: v1.ServiceSpec{
+			ClusterIP: "None",
+			Selector:  labels,
+		},
+	}
+	err := r.Create(ctx, svc, &client.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("create headless service %s: %w", name, err)
+	}
+	return nil
+}
+
+// -------------------------------------------------------------------------------------------------------------------
 // StatefulSet Operations
 // -------------------------------------------------------------------------------------------------------------------
 
@@ -472,9 +499,9 @@ func (r *PipelineReconciler) isStatefulSetAbsent(ctx context.Context, namespace,
 	return false, nil
 }
 
-// deleteStatefulSet deletes a StatefulSet
+// deleteStatefulSet safely deletes a StatefulSet, handling NotFound errors gracefully.
 func (r *PipelineReconciler) deleteStatefulSet(ctx context.Context, sts *appsv1.StatefulSet) error {
-	err := r.Delete(ctx, sts)
+	err := r.Delete(ctx, sts, &client.DeleteOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -505,7 +532,7 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 
 		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
 
-		replicas := 1
+		replicas := getDedupReplicas(p)
 
 		// StatefulSet PVCs have format: data-{statefulset-name}-{ordinal}
 		for replica := 0; replica < replicas; replica++ {
@@ -529,4 +556,39 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 	}
 
 	return nil
+}
+
+// ensureStatefulSetReady checks if a StatefulSet is ready, creates it if not, and handles timeouts.
+func (r *PipelineReconciler) ensureStatefulSetReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace,
+	statefulSetName string,
+	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (bool, error) {
+	ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
+	if err != nil {
+		return false, fmt.Errorf("check %s statefulset: %w", statefulSetName, err)
+	}
+	if ready {
+		log.Info(fmt.Sprintf("%s statefulset is already ready", statefulSetName), "namespace", namespace)
+		return false, nil
+	}
+
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		_, err := r.handleOperationTimeout(ctx, log, p)
+		return false, err
+	}
+
+	log.Info(fmt.Sprintf("creating %s statefulset", statefulSetName), "namespace", namespace)
+	err = createFn(ctx, ns, labels, secret, *p)
+	if err != nil {
+		return false, fmt.Errorf("create %s statefulset: %w", statefulSetName, err)
+	}
+	return true, nil
 }

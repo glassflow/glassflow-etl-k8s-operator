@@ -30,13 +30,8 @@ type PipelineSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// TODO: This CRD accepts "stream" names from API. It must be changed in
-	// future as there is no reason for the app to decide "naming" for infra resources.
-	// Leaks from non-optimal implementation of schema mapper on API side.
-
 	// +kubebuilder:validation:MinLength=5
 	ID       string  `json:"pipeline_id"`
-	DLQ      string  `json:"dlq"`
 	Ingestor Sources `json:"sources"`
 	Join     Join    `json:"join"`
 	Sink     Sink    `json:"sink"`
@@ -59,11 +54,8 @@ type Sources struct {
 
 type SourceStream struct {
 	// +kubebuilder:validation:MinLength=1
-	TopicName    string        `json:"topic_name"`
-	OutputStream string        `json:"stream"`
-	DedupWindow  time.Duration `json:"dedup_window"`
-	// +kubebuilder:validation:Minimum=1
-	Replicas int `json:"replicas"`
+	TopicName   string        `json:"topic_name"`
+	DedupWindow time.Duration `json:"dedup_window"`
 
 	// Operator-specific dedup configuration
 	Deduplication *Deduplication `json:"deduplication,omitempty"`
@@ -71,33 +63,21 @@ type SourceStream struct {
 
 // Deduplication configuration for operator
 type Deduplication struct {
-	Enabled          bool   `json:"enabled"`
-	OutputStream     string `json:"stream"`                  // NATS stream after dedup
-	StorageSize      string `json:"storage_size,omitempty"`  // Default: "10Gi"
-	StorageClass     string `json:"storage_class,omitempty"` // Optional
-	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	StorageSize  string `json:"storage_size,omitempty"`  // Default: "10Gi"
+	StorageClass string `json:"storage_class,omitempty"` // Optional
 }
 
 type Join struct {
-	Type         string `json:"type"`
-	OutputStream string `json:"stream"`
-	// +kubebuilder:validation:Minimum=1
-	Replicas       int           `json:"replicas"`
+	Type           string        `json:"type"`
 	Enabled        bool          `json:"enabled"`
 	LeftBufferTTL  time.Duration `json:"left_buffer_ttl,omitempty"`
 	RightBufferTTL time.Duration `json:"right_buffer_ttl,omitempty"`
-
-	NATSLeftConsumerName  string `json:"nats_left_consumer_name,omitempty"`
-	NATSRightConsumerName string `json:"nats_right_consumer_name,omitempty"`
 }
 
 type Sink struct {
 	// +kubebuilder:validation:Enum=clickhouse
 	Type string `json:"type"`
-	// +kubebuilder:validation:Minimum=1
-	Replicas int `json:"replicas"`
-
-	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
 }
 
 // PipelineResources defines per-component resource configuration for a pipeline.
@@ -160,7 +140,8 @@ type Pipeline struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PipelineSpec   `json:"spec,omitempty"`
+	Spec PipelineSpec `json:"spec,omitempty"`
+	// +optional
 	Status PipelineStatus `json:"status,omitempty"`
 }
 
