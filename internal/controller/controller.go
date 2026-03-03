@@ -201,27 +201,10 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Check for operation annotations
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		// Determine which operation to perform based on annotations
-		// Helm uninstall has highest priority - it interrupts any ongoing operation
-		var operation string
-		if _, hasHelmUninstall := annotations[constants.PipelineHelmUninstallAnnotation]; hasHelmUninstall {
-			operation = constants.OperationHelmUninstall
+	operation := getPipelineOperationFromAnnotations(p.GetAnnotations())
+	if operation != "" {
+		if operation == constants.OperationHelmUninstall {
 			log.Info("HELM UNINSTALL detected - interrupting any ongoing operations", "pipeline_id", p.Spec.ID)
-		} else if _, hasTerminate := annotations[constants.PipelineDeleteAnnotation]; hasTerminate {
-			operation = constants.OperationDelete
-		} else if _, hasTerminate := annotations[constants.PipelineTerminateAnnotation]; hasTerminate {
-			operation = constants.OperationTerminate
-		} else if _, hasCreate := annotations[constants.PipelineCreateAnnotation]; hasCreate {
-			operation = constants.OperationCreate
-		} else if _, hasStop := annotations[constants.PipelineStopAnnotation]; hasStop {
-			operation = constants.OperationStop
-		} else if _, hasResume := annotations[constants.PipelineResumeAnnotation]; hasResume {
-			operation = constants.OperationResume
-		} else if _, hasEdit := annotations[constants.PipelineEditAnnotation]; hasEdit {
-			operation = constants.OperationEdit
 		}
 
 		// Execute the appropriate operation

@@ -7,81 +7,334 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 )
 
-func (r *PipelineReconciler) createPipelineComponents(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
+// stopPipelineComponents stops all pipeline components in the correct order with pending message checks
+// nolint:gocyclo
+func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(*p)
 
-	// Step 1: Ensure Sink StatefulSet is ready
-	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), r.createSink, ns, labels, secret)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if requeue {
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	}
-
-	// Step 2: Ensure Join deployment is ready (if enabled)
-	if p.Spec.Join.Enabled {
-		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if requeue {
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
-	}
-
-	// Step 3: Ensure Dedup StatefulSets are ready
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, *p, ns, labels, secret)
-	if err != nil || result.Requeue {
-		return result, err
-	}
-
-	// Step 4: Ensure Ingestor StatefulSets are ready
+	// Step 1: Stop Ingestor deployments
 	for i := range p.Spec.Ingestor.Streams {
-		statefulSetName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
+		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", statefulSetName, err)
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
 		}
-		if !ready {
+		if !deleted {
+			// Check for timeout before requeuing
 			timedOut, _ := r.checkOperationTimeout(log, p)
 			if timedOut {
 				return r.handleOperationTimeout(ctx, log, p)
 			}
-			log.Info("creating ingestor statefulset", "statefulset", statefulSetName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, *p)
+
+			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			var deployment appsv1.Deployment
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: deploymentName}, &deployment)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor statefulset %s: %w", statefulSetName, err)
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
+				}
+			} else {
+				err = r.deleteDeployment(ctx, &deployment)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
+				}
 			}
+			// Requeue to wait for deployment to be fully deleted
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
 		}
-		log.Info("ingestor statefulset is already ready", "statefulset", statefulSetName, "namespace", namespace)
 	}
 
+	// Step 2: Stop Dedup StatefulSets
+	for i, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+			continue
+		}
+
+		dedupName := r.getResourceName(*p, fmt.Sprintf("dedup-%d", i))
+
+		// Check for timeout
+		timedOut, _ := r.checkOperationTimeout(log, p)
+		if timedOut {
+			return r.handleOperationTimeout(ctx, log, p)
+		}
+
+		// Check for pending messages first
+		err := r.checkDedupPendingMessages(ctx, *p, i)
+		if err != nil {
+			if errs.IsConsumerPendingMessagesError(err) {
+				log.Info("dedup has pending messages, requeuing", "pipeline_id", p.Spec.ID, "stream_index", i, "error", err.Error())
+				return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("check dedup pending messages for stream %d: %w", i, err)
+		}
+
+		deleted, err := r.isStatefulSetAbsent(ctx, namespace, dedupName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check dedup statefulset %s: %w", dedupName, err)
+		}
+		if !deleted {
+			log.Info("deleting dedup statefulset", "statefulset", dedupName, "namespace", namespace)
+			var sts appsv1.StatefulSet
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: dedupName}, &sts)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get dedup statefulset %s: %w", dedupName, err)
+				}
+			} else {
+				err = r.deleteStatefulSet(ctx, &sts)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete dedup statefulset %s: %w", dedupName, err)
+				}
+			}
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("dedup statefulset is already deleted", "statefulset", dedupName, "namespace", namespace)
+		}
+	}
+
+	// Step 3: Check join and stop Join deployment (if enabled)
+	if p.Spec.Join.Enabled {
+		// Check for timeout before checking pending messages
+		timedOut, _ := r.checkOperationTimeout(log, p)
+		if timedOut {
+			return r.handleOperationTimeout(ctx, log, p)
+		}
+
+		// Check for pending messages first
+		err := r.checkJoinPendingMessages(ctx, *p)
+		if err != nil {
+			if errs.IsConsumerPendingMessagesError(err) {
+				log.Info("join has pending messages, requeuing operation",
+					"pipeline_id", p.Spec.ID,
+					"error", err.Error())
+				return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("check join pending messages: %w", err)
+		}
+
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.JoinComponent))
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
+		}
+		if !deleted {
+			// Check for timeout before requeuing
+			timedOut, _ := r.checkOperationTimeout(log, p)
+			if timedOut {
+				return r.handleOperationTimeout(ctx, log, p)
+			}
+
+			log.Info("deleting join deployment", "namespace", namespace)
+			var deployment appsv1.Deployment
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, constants.JoinComponent)}, &deployment)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
+				}
+			} else {
+				err = r.deleteDeployment(ctx, &deployment)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
+				}
+			}
+			// Requeue to wait for deployment to be fully deleted
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already deleted", "namespace", namespace)
+		}
+	}
+
+	// Step 3: Check sink and stop Sink deployment
+	// Check for timeout before checking pending messages
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		return r.handleOperationTimeout(ctx, log, p)
+	}
+
+	// Check for pending messages first
+	err := r.checkSinkPendingMessages(ctx, *p)
+	if err != nil {
+		if errs.IsConsumerPendingMessagesError(err) {
+			log.Info("sink has pending messages, requeuing operation",
+				"pipeline_id", p.Spec.ID,
+				"error", err.Error())
+			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("check sink pending messages: %w", err)
+	}
+
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(*p, constants.SinkComponent))
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+	}
+	if !deleted {
+		// Check for timeout before requeuing
+		timedOut, _ := r.checkOperationTimeout(log, p)
+		if timedOut {
+			return r.handleOperationTimeout(ctx, log, p)
+		}
+
+		log.Info("deleting sink deployment", "namespace", namespace)
+		var deployment appsv1.Deployment
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(*p, constants.SinkComponent)}, &deployment)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
+			}
+		} else {
+			err = r.deleteDeployment(ctx, &deployment)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
+			}
+		}
+		// Requeue to wait for deployment to be fully deleted
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is already deleted", "namespace", namespace)
+	}
+
+	// All deployments are deleted
 	return ctrl.Result{}, nil
 }
 
-// createIngestors creates ingestor StatefulSets (and headless Services) for the pipeline.
+// terminatePipelineComponents terminates all pipeline components immediately
+func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	namespace := r.getTargetNamespace(p)
+
+	// Step 1: Stop Ingestor deployments
+	for i := range p.Spec.Ingestor.Streams {
+		deploymentName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+		}
+		if !deleted {
+			log.Info("deleting ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+			var deployment appsv1.Deployment
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: deploymentName}, &deployment)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get ingestor deployment %s: %w", deploymentName, err)
+				}
+			} else {
+				err = r.deleteDeployment(ctx, &deployment)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete ingestor deployment %s: %w", deploymentName, err)
+				}
+			}
+			// Requeue to wait for deployment to be fully deleted
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("ingestor deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
+		}
+	}
+
+	// Step 2: Stop Dedup StatefulSets (no pending message checks in terminate)
+	for i, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+			continue
+		}
+
+		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+		deleted, err := r.isStatefulSetAbsent(ctx, namespace, dedupName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check dedup statefulset %s: %w", dedupName, err)
+		}
+		if !deleted {
+			log.Info("deleting dedup statefulset", "statefulset", dedupName, "namespace", namespace)
+			var sts appsv1.StatefulSet
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: dedupName}, &sts)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get dedup statefulset %s: %w", dedupName, err)
+				}
+			} else {
+				err = r.deleteStatefulSet(ctx, &sts)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete dedup statefulset %s: %w", dedupName, err)
+				}
+			}
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("dedup statefulset is already deleted", "statefulset", dedupName, "namespace", namespace)
+		}
+	}
+
+	// Step 3: Check join and stop Join deployment (if enabled)
+	if p.Spec.Join.Enabled {
+		deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, constants.JoinComponent))
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
+		}
+		if !deleted {
+			log.Info("deleting join deployment", "namespace", namespace)
+			var deployment appsv1.Deployment
+			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.JoinComponent)}, &deployment)
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return ctrl.Result{}, fmt.Errorf("get join deployment: %w", err)
+				}
+			} else {
+				err = r.deleteDeployment(ctx, &deployment)
+				if err != nil {
+					return ctrl.Result{}, fmt.Errorf("delete join deployment: %w", err)
+				}
+			}
+			// Requeue to wait for deployment to be fully deleted
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		} else {
+			log.Info("join deployment is already deleted", "namespace", namespace)
+		}
+	}
+
+	// Step 3: Check sink and stop Sink deployment
+	deleted, err := r.isDeploymentAbsent(ctx, namespace, r.getResourceName(p, constants.SinkComponent))
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
+	}
+	if !deleted {
+		log.Info("deleting sink deployment", "namespace", namespace)
+		var deployment appsv1.Deployment
+		err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SinkComponent)}, &deployment)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("get sink deployment: %w", err)
+			}
+		} else {
+			err = r.deleteDeployment(ctx, &deployment)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("delete sink deployment: %w", err)
+			}
+		}
+		// Requeue to wait for deployment to be fully deleted
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	} else {
+		log.Info("sink deployment is already deleted", "namespace", namespace)
+	}
+
+	// All deployments are deleted
+	return ctrl.Result{}, nil
+}
+
+// createIngestors creates ingestor deployments for the pipeline
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
-	namespace := ns.GetName()
+
 	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
 
 	for i, t := range ing.Streams {
@@ -91,7 +344,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		maps.Copy(ingestorLabels, labels)
 
 		cpuReq, cpuLim, memReq, memLim := r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit
-		ingestorReplicas := constants.DefaultMinReplicas
+		ingestorReplicas := t.Replicas
 		if p.Spec.Resources != nil && p.Spec.Resources.Ingestor != nil {
 			ingRes := p.Spec.Resources.Ingestor
 			var comp *etlv1alpha1.ComponentResources
