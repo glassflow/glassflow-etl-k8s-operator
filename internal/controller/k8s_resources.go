@@ -415,6 +415,16 @@ func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *a
 	return nil
 }
 
+// deleteDeploymentByName safely deletes a deployment by name.
+func (r *PipelineReconciler) deleteDeploymentByName(ctx context.Context, namespace, name string) error {
+	return r.deleteDeployment(ctx, &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+		},
+	})
+}
+
 // -------------------------------------------------------------------------------------------------------------------
 // StatefulSet Operations
 // -------------------------------------------------------------------------------------------------------------------
@@ -466,9 +476,22 @@ func (r *PipelineReconciler) isStatefulSetAbsent(ctx context.Context, namespace,
 func (r *PipelineReconciler) deleteStatefulSet(ctx context.Context, sts *appsv1.StatefulSet) error {
 	err := r.Delete(ctx, sts)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("delete statefulset: %w", err)
 	}
 	return nil
+}
+
+// deleteStatefulSetByName safely deletes a StatefulSet by name.
+func (r *PipelineReconciler) deleteStatefulSetByName(ctx context.Context, namespace, name string) error {
+	return r.deleteStatefulSet(ctx, &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+		},
+	})
 }
 
 // cleanupDedupPVCs deletes PVCs associated with dedup StatefulSets
