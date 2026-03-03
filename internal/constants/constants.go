@@ -19,10 +19,15 @@ const (
 	// Pipeline operation start time annotation - tracks when an operation started
 	PipelineOperationStartTimeAnnotation = "pipeline.etl.glassflow.io/operation-start-time"
 
-	// ReconcileTimeout is the maximum duration a reconcile operation can run before timing out
-	ReconcileTimeout = 15 * time.Minute
+	// DefaultReconcileTimeout is the default maximum duration a reconcile operation can run before timing out
+	DefaultReconcileTimeout = 15 * time.Minute
 
 	DefaultMinReplicas = 1
+)
+
+var (
+	// ReconcileTimeout is the maximum duration a reconcile operation can run before timing out
+	ReconcileTimeout = DefaultReconcileTimeout
 )
 
 // Pipeline operation type constants
