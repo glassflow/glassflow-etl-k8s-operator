@@ -15,11 +15,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 )
 
 const (
@@ -73,17 +70,11 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 	// Step 2: Ensure Join deployment is ready (if enabled)
 	if p.Spec.Join.Enabled {
-		requeue, err := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if requeue {
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
+		return r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
 	}
 
 	// Step 3: Ensure Dedup StatefulSets are ready
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, *p, ns, labels, secret)
+	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -112,6 +103,7 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 	return ctrl.Result{}, nil
 }
+
 // createIngestors creates ingestor deployments for the pipeline
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
