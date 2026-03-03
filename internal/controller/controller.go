@@ -320,6 +320,9 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	if err != nil || result.Requeue {
 		return result, err
 	}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
+	}
 
 	// All deployments are ready, update status to Running
 	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
@@ -380,7 +383,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	}
 
 	// Stop all pipeline components
-	result, err := r.terminatePipelineComponents(ctx, log, p)
+	result, err := r.terminatePipelineComponents(ctx, log, &p)
 	if err != nil || result.Requeue {
 		return result, err
 	}
@@ -690,6 +693,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	if err != nil || result.Requeue {
 		return result, err
 	}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
+	}
 
 	// All deployments are ready, update status to Running
 	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
@@ -768,6 +774,9 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	result, err := r.stopPipelineComponents(ctx, log, &p)
 	if err != nil || result.Requeue {
 		return result, err
+	}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
 	}
 
 	// Update status to Stopped
@@ -870,6 +879,9 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	if err != nil || result.Requeue {
 		return result, err
 	}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
+	}
 
 	// All deployments are ready, update status to Running
 	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
@@ -903,141 +915,3 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 }
 
 // -------------------------------------------------------------------------------------------------------------------
-
-// ensureDedupStatefulSetsReady ensures all dedup StatefulSets are ready for a pipeline.
-// It checks if any streams have deduplication enabled, verifies their readiness,
-// creates them if needed, and handles timeout checking.
-//
-// Returns:
-//   - ctrl.Result: Requeue result if dedups need more time to become ready
-//   - error: Error if readiness check or creation fails
-func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
-	ctx context.Context,
-	log logr.Logger,
-	p etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	namespace := r.getTargetNamespace(p)
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	anyDedupEnabled := false
-	for _, stream := range p.Spec.Ingestor.Streams {
-		if stream.Deduplication != nil && stream.Deduplication.Enabled {
-			anyDedupEnabled = true
-			break
-		}
-	}
-
-	if anyDedupEnabled {
-		// Check if all dedup StatefulSets are ready
-		allDedupReady := true
-		for i, stream := range p.Spec.Ingestor.Streams {
-			if stream.Deduplication == nil || !stream.Deduplication.Enabled {
-				continue
-			}
-
-			dedupName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
-			ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
-			}
-			if !ready {
-				allDedupReady = false
-				break
-			}
-		}
-
-		if !allDedupReady {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p)
-			}
-
-			log.Info("creating dedup statefulsets", "namespace", namespace)
-			err := r.createDedups(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create dedup statefulsets: %w", err)
-			}
-			log.Info("waiting for dedup statefulsets to be ready", "namespace", namespace)
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("dedup statefulsets are ready", "namespace", namespace)
-		}
-	}
-
-	return ctrl.Result{}, nil
-}
-
-// ensureDeploymentReady checks if a deployment is ready, creates it if not, and handles timeouts.
-func (r *PipelineReconciler) ensureDeploymentReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	namespace,
-	deploymentName string,
-	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (bool, error) {
-	ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-	if err != nil {
-		return false, fmt.Errorf("check %s deployment: %w", deploymentName, err)
-	}
-	if ready {
-		log.Info(fmt.Sprintf("%s deployment is already ready", deploymentName), "namespace", namespace)
-		return false, nil
-	}
-
-	// Check for timeout before creating
-	timedOut, _ := r.checkOperationTimeout(log, p)
-	if timedOut {
-		_, err := r.handleOperationTimeout(ctx, log, p)
-		return false, err
-	}
-
-	log.Info(fmt.Sprintf("creating %s deployment", deploymentName), "namespace", namespace)
-	err = createFn(ctx, ns, labels, secret, *p)
-	if err != nil {
-		return false, fmt.Errorf("create %s deployment: %w", deploymentName, err)
-	}
-	return true, nil
-}
-
-// ensureStatefulSetReady checks if a StatefulSet is ready, creates it if not, and handles timeouts.
-func (r *PipelineReconciler) ensureStatefulSetReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	namespace,
-	statefulSetName string,
-	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (bool, error) {
-	ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
-	if err != nil {
-		return false, fmt.Errorf("check %s statefulset: %w", statefulSetName, err)
-	}
-	if ready {
-		log.Info(fmt.Sprintf("%s statefulset is already ready", statefulSetName), "namespace", namespace)
-		return false, nil
-	}
-
-	timedOut, _ := r.checkOperationTimeout(log, p)
-	if timedOut {
-		_, err := r.handleOperationTimeout(ctx, log, p)
-		return false, err
-	}
-
-	log.Info(fmt.Sprintf("creating %s statefulset", statefulSetName), "namespace", namespace)
-	err = createFn(ctx, ns, labels, secret, *p)
-	if err != nil {
-		return false, fmt.Errorf("create %s statefulset: %w", statefulSetName, err)
-	}
-	return true, nil
-}

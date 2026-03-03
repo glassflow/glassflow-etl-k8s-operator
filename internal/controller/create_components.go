@@ -14,7 +14,43 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 )
+
+const (
+	componentDeleteRequeueDelay = time.Second
+	pendingMessagesRequeueDelay = 10 * time.Second
+)
+
+type pipelineTeardownMode struct {
+	checkPendingMessages bool
+	checkStepTimeout     bool
+}
+
+func isPipelineFailed(p *etlv1alpha1.Pipeline) bool {
+	return p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed)
+}
+
+// stopPipelineComponents stops all pipeline components in the correct order with pending message checks.
+func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	return r.reconcilePipelineTeardown(ctx, log, p, pipelineTeardownMode{
+		checkPendingMessages: true,
+		checkStepTimeout:     true,
+	})
+}
+
+// terminatePipelineComponents terminates all pipeline components immediately.
+func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
+	return r.reconcilePipelineTeardown(ctx, log, p, pipelineTeardownMode{
+		checkPendingMessages: false,
+		checkStepTimeout:     false,
+	})
+}
 
 func (r *PipelineReconciler) createPipelineComponents(
 	ctx context.Context,
@@ -76,7 +112,6 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 	return ctrl.Result{}, nil
 }
-
 // createIngestors creates ingestor deployments for the pipeline
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
@@ -205,6 +240,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	joinLabels := r.getJoinLabels()
 
 	maps.Copy(joinLabels, labels)
+
 	cpuReq, cpuLim, memReq, memLim := r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit
 	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil {
 		comp := p.Spec.Resources.Join
@@ -215,6 +251,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			cpuLim, memLim = comp.Limits.CPU.String(), comp.Limits.Memory.String()
 		}
 	}
+
 	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
 
 	joinContainerBuilder := newComponentContainerBuilder().
@@ -290,6 +327,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
+
 	cpuReq, cpuLim, memReq, memLim := r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit
 	sinkReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
@@ -304,6 +342,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			sinkReplicas = int(*comp.Replicas)
 		}
 	}
+
 	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
 
 	err := r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels)
@@ -553,4 +592,429 @@ func (r *PipelineReconciler) resolveNatsStreamEnvVars(p etlv1alpha1.Pipeline) (n
 		natsMaxBytes = fmt.Sprintf("%d", stream.MaxBytes.Value())
 	}
 	return
+}
+
+func isDedupEnabled(p etlv1alpha1.Pipeline) bool {
+	// TODO - replace this with transform flag once we rename dedup to transform
+	for _, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication != nil && stream.Deduplication.Enabled {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (r *PipelineReconciler) areDedupStatefulSetsReady(
+	ctx context.Context,
+	p etlv1alpha1.Pipeline,
+	namespace string,
+) (bool, error) {
+	for i, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+			continue
+		}
+
+		dedupName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
+		ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
+		if err != nil {
+			return false, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
+		}
+		if !ready {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// ensureDedupStatefulSetsReady ensures all dedup StatefulSets are ready for a pipeline.
+func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (ctrl.Result, error) {
+	if !isDedupEnabled(*p) {
+		return ctrl.Result{}, nil
+	}
+
+	namespace := r.getTargetNamespace(*p)
+	allReady, err := r.areDedupStatefulSetsReady(ctx, *p, namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if allReady {
+		log.Info("dedup statefulsets are ready", "namespace", namespace)
+		return ctrl.Result{}, nil
+	}
+
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		return r.handleOperationTimeout(ctx, log, p)
+	}
+
+	log.Info("creating dedup statefulsets", "namespace", namespace)
+	if err = r.createDedups(ctx, log, ns, labels, secret, *p); err != nil {
+		return ctrl.Result{}, fmt.Errorf("create dedup statefulsets: %w", err)
+	}
+
+	log.Info("waiting for dedup statefulsets to be ready", "namespace", namespace)
+	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+}
+
+// ensureDeploymentReady checks if a deployment is ready, creates it if not, and handles timeouts.
+func (r *PipelineReconciler) ensureDeploymentReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace,
+	deploymentName string,
+	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (ctrl.Result, error) {
+	ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check %s deployment: %w", deploymentName, err)
+	}
+	if ready {
+		log.Info(fmt.Sprintf("%s deployment is already ready", deploymentName), "namespace", namespace)
+		return ctrl.Result{}, nil
+	}
+
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		return r.handleOperationTimeout(ctx, log, p)
+	}
+
+	log.Info(fmt.Sprintf("creating %s deployment", deploymentName), "namespace", namespace)
+	if err = createFn(ctx, ns, labels, secret, *p); err != nil {
+		return ctrl.Result{}, fmt.Errorf("create %s deployment: %w", deploymentName, err)
+	}
+
+	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+}
+
+func (r *PipelineReconciler) ensureSinkDeploymentReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (ctrl.Result, error) {
+	namespace := r.getTargetNamespace(*p)
+	deploymentName := r.getResourceName(*p, constants.SinkComponent)
+	return r.ensureDeploymentReady(ctx, log, p, namespace, deploymentName, r.createSink, ns, labels, secret)
+}
+
+func (r *PipelineReconciler) ensureJoinDeploymentReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (ctrl.Result, error) {
+	if !p.Spec.Join.Enabled {
+		return ctrl.Result{}, nil
+	}
+
+	namespace := r.getTargetNamespace(*p)
+	deploymentName := r.getResourceName(*p, constants.JoinComponent)
+	return r.ensureDeploymentReady(ctx, log, p, namespace, deploymentName, r.createJoin, ns, labels, secret)
+}
+
+func (r *PipelineReconciler) ensureIngestorDeploymentsReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (ctrl.Result, error) {
+	namespace := r.getTargetNamespace(*p)
+
+	for i := range p.Spec.Ingestor.Streams {
+		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
+		}
+		if ready {
+			log.Info("ingestor deployment is already ready", "deployment", deploymentName, "namespace", namespace)
+			continue
+		}
+
+		timedOut, _ := r.checkOperationTimeout(log, p)
+		if timedOut {
+			return r.handleOperationTimeout(ctx, log, p)
+		}
+
+		log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
+		if err = r.createIngestors(ctx, log, ns, labels, secret, *p); err != nil {
+			return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
+		}
+
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) ensureDeploymentDeleted(
+	ctx context.Context,
+	log logr.Logger,
+	namespace,
+	componentType,
+	deploymentName string,
+) (ctrl.Result, error) {
+	absent, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check %s deployment %s: %w", componentType, deploymentName, err)
+	}
+	if absent {
+		log.Info(componentType+" deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("deleting "+componentType+" deployment", "deployment", deploymentName, "namespace", namespace)
+	if err = r.deleteDeploymentByName(ctx, namespace, deploymentName); err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete %s deployment %s: %w", componentType, deploymentName, err)
+	}
+
+	return ctrl.Result{Requeue: true, RequeueAfter: componentDeleteRequeueDelay}, nil
+}
+
+func (r *PipelineReconciler) ensureStatefulSetDeleted(
+	ctx context.Context,
+	log logr.Logger,
+	namespace,
+	componentType,
+	statefulSetName string,
+) (ctrl.Result, error) {
+	absent, err := r.isStatefulSetAbsent(ctx, namespace, statefulSetName)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("check %s statefulset %s: %w", componentType, statefulSetName, err)
+	}
+	if absent {
+		log.Info(componentType+" statefulset is already deleted", "statefulset", statefulSetName, "namespace", namespace)
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("deleting "+componentType+" statefulset", "statefulset", statefulSetName, "namespace", namespace)
+	if err = r.deleteStatefulSetByName(ctx, namespace, statefulSetName); err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete %s statefulset %s: %w", componentType, statefulSetName, err)
+	}
+
+	return ctrl.Result{Requeue: true, RequeueAfter: componentDeleteRequeueDelay}, nil
+}
+
+func (r *PipelineReconciler) reconcilePipelineTeardown(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	mode pipelineTeardownMode,
+) (ctrl.Result, error) {
+	namespace := r.getTargetNamespace(*p)
+
+	stages := []func(context.Context, logr.Logger, *etlv1alpha1.Pipeline, string, pipelineTeardownMode) (ctrl.Result, error){
+		r.reconcileIngestorTeardown,
+		r.reconcileDedupTeardown,
+		r.reconcileJoinTeardown,
+		r.reconcileSinkTeardown,
+	}
+
+	for _, stage := range stages {
+		result, err := stage(ctx, log, p, namespace, mode)
+		if err != nil || result.Requeue {
+			return result, err
+		}
+		if mode.checkStepTimeout && isPipelineFailed(p) {
+			return ctrl.Result{}, nil
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// ensureAllDeploymentsReady ensures all required deployments (sink, join, dedup, ingestor) are ready.
+func (r *PipelineReconciler) ensureAllDeploymentsReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (ctrl.Result, error) {
+	stages := []func(context.Context, logr.Logger, *etlv1alpha1.Pipeline, v1.Namespace, map[string]string, v1.Secret) (ctrl.Result, error){
+		r.ensureSinkDeploymentReady,
+		r.ensureJoinDeploymentReady,
+		r.ensureDedupStatefulSetsReady,
+		r.ensureIngestorDeploymentsReady,
+	}
+
+	for _, stage := range stages {
+		result, err := stage(ctx, log, p, ns, labels, secret)
+		if err != nil || result.Requeue {
+			return result, err
+		}
+		if isPipelineFailed(p) {
+			return ctrl.Result{}, nil
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcileIngestorTeardown(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace string,
+	mode pipelineTeardownMode,
+) (ctrl.Result, error) {
+	for i := range p.Spec.Ingestor.Streams {
+		result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
+		if timedOut || err != nil {
+			return result, err
+		}
+
+		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		result, err = r.ensureDeploymentDeleted(ctx, log, namespace, "ingestor", deploymentName)
+		if err != nil || result.Requeue {
+			return result, err
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcileDedupTeardown(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace string,
+	mode pipelineTeardownMode,
+) (ctrl.Result, error) {
+	for i, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+			continue
+		}
+
+		result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
+		if timedOut || err != nil {
+			return result, err
+		}
+
+		if mode.checkPendingMessages {
+			err = r.checkDedupPendingMessages(ctx, *p, i)
+			if err != nil {
+				if errs.IsConsumerPendingMessagesError(err) {
+					log.Info("dedup has pending messages, requeuing", "pipeline_id", p.Spec.ID, "stream_index", i, "error", err.Error())
+					return ctrl.Result{Requeue: true, RequeueAfter: pendingMessagesRequeueDelay}, nil
+				}
+				return ctrl.Result{}, fmt.Errorf("check dedup pending messages for stream %d: %w", i, err)
+			}
+		}
+
+		statefulSetName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
+		result, err = r.ensureStatefulSetDeleted(ctx, log, namespace, "dedup", statefulSetName)
+		if err != nil || result.Requeue {
+			return result, err
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *PipelineReconciler) reconcileJoinTeardown(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace string,
+	mode pipelineTeardownMode,
+) (ctrl.Result, error) {
+	if !p.Spec.Join.Enabled {
+		return ctrl.Result{}, nil
+	}
+
+	result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
+	if timedOut || err != nil {
+		return result, err
+	}
+
+	if mode.checkPendingMessages {
+		err = r.checkJoinPendingMessages(ctx, *p)
+		if err != nil {
+			if errs.IsConsumerPendingMessagesError(err) {
+				log.Info("join has pending messages, requeuing operation", "pipeline_id", p.Spec.ID, "error", err.Error())
+				return ctrl.Result{Requeue: true, RequeueAfter: pendingMessagesRequeueDelay}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("check join pending messages: %w", err)
+		}
+	}
+
+	result, timedOut, err = r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
+	if timedOut || err != nil {
+		return result, err
+	}
+
+	deploymentName := r.getResourceName(*p, constants.JoinComponent)
+	return r.ensureDeploymentDeleted(ctx, log, namespace, constants.JoinComponent, deploymentName)
+}
+
+func (r *PipelineReconciler) reconcileSinkTeardown(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace string,
+	mode pipelineTeardownMode,
+) (ctrl.Result, error) {
+	result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
+	if timedOut || err != nil {
+		return result, err
+	}
+
+	if mode.checkPendingMessages {
+		err = r.checkSinkPendingMessages(ctx, *p)
+		if err != nil {
+			if errs.IsConsumerPendingMessagesError(err) {
+				log.Info("sink has pending messages, requeuing operation", "pipeline_id", p.Spec.ID, "error", err.Error())
+				return ctrl.Result{Requeue: true, RequeueAfter: pendingMessagesRequeueDelay}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("check sink pending messages: %w", err)
+		}
+	}
+
+	result, timedOut, err = r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
+	if timedOut || err != nil {
+		return result, err
+	}
+
+	deploymentName := r.getResourceName(*p, constants.SinkComponent)
+	return r.ensureDeploymentDeleted(ctx, log, namespace, constants.SinkComponent, deploymentName)
+}
+
+func (r *PipelineReconciler) checkTeardownTimeout(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	checkTimeout bool,
+) (ctrl.Result, bool, error) {
+	if !checkTimeout {
+		return ctrl.Result{}, false, nil
+	}
+
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if !timedOut {
+		return ctrl.Result{}, false, nil
+	}
+
+	result, err := r.handleOperationTimeout(ctx, log, p)
+	return result, true, err
 }
