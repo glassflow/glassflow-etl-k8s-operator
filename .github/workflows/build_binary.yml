@@ -2,6 +2,11 @@ name: Build Operator Binary
 
 on:
   workflow_call:
+    inputs:
+      version:
+        description: 'Version string to embed in the binary (commit SHA)'
+        required: false
+        type: string
 
 jobs:
   build-operator-binary:
@@ -24,20 +29,14 @@ jobs:
         with:
           go-version-file: './go.mod'
           cache-dependency-path: './go.mod'
-      - name: Generate version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            SHA="${{ github.event.pull_request.head.sha }}"
-          else
-            SHA="${{ github.sha }}"
-          fi
-          echo "VERSION=$SHA" >> $GITHUB_OUTPUT
       - name: Build binary
         run: |
           mkdir -p bin
-          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o bin/manager cmd/main.go
+          VERSION="${BUILD_VERSION:-$(git rev-parse HEAD)}"
+          echo "VERSION=${VERSION}"
+          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -ldflags "-X main.version=${VERSION}" -o bin/manager cmd/main.go
         env:
+          BUILD_VERSION: ${{ inputs.version }}
           GOOS: ${{ matrix.platform.os }}
           GOARCH: ${{ matrix.platform.arch }}
       - name: Upload artifact
