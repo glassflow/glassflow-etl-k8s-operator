@@ -68,11 +68,14 @@ func (r *PipelineReconciler) createPipelineComponents(
 		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 	}
 
-	// Step 2: Ensure Join deployment is ready (if enabled)
+	// Step 2: Ensure Join StatefulSet is ready (if enabled)
 	if p.Spec.Join.Enabled {
-		result, errDep := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
-		if errDep != nil || result.Requeue {
-			return result, errDep
+		requeue, err = r.ensureStatefulSetReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if requeue {
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 		}
 	}
 
@@ -228,15 +231,21 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 	return nil
 }
 
-// createJoin creates a join deployment for the pipeline
+// createJoin creates a join StatefulSet (and headless Service) for the pipeline.
 func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+	if len(p.Spec.Ingestor.Streams) < 2 {
+		return fmt.Errorf("join requires at least 2 source streams")
+	}
+
 	resourceRef := r.getResourceName(p, constants.JoinComponent)
+	namespace := ns.GetName()
 
 	joinLabels := r.getJoinLabels()
 
 	maps.Copy(joinLabels, labels)
 
 	cpuReq, cpuLim, memReq, memLim := r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit
+	joinReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil {
 		comp := p.Spec.Resources.Join
 		if comp.Requests != nil {
@@ -245,9 +254,20 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		if comp.Limits != nil {
 			cpuLim, memLim = comp.Limits.CPU.String(), comp.Limits.Memory.String()
 		}
+		if comp.Replicas != nil {
+			joinReplicas = int(*comp.Replicas)
+		}
 	}
 
 	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
+	leftInputStreamPrefix := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[0])
+	rightInputStreamPrefix := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[1])
+	joinOutputSubjectPrefix := getJoinOutputSubjectPrefix(p.Spec.ID)
+
+	err := r.createHeadlessService(ctx, namespace, resourceRef, joinLabels)
+	if err != nil {
+		return fmt.Errorf("create join headless service: %w", err)
+	}
 
 	joinContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
@@ -258,9 +278,12 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv(append(append([]v1.EnvVar{
+		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: leftInputStreamPrefix},
+			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: rightInputStreamPrefix},
+			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutputSubjectPrefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
 			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
 			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
@@ -277,16 +300,17 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 					FieldPath: "metadata.name",
 				},
 			}},
-		}, r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		}, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
 		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		joinContainerBuilder = joinContainerBuilder.withVolumeMount(mount)
 	}
 	joinContainer := joinContainerBuilder.build()
 
-	joinDepBuilder := newComponentDeploymentBuilder().
+	stsBuilder := newComponentStatefulSetBuilder().
 		withNamespace(ns).
 		withResourceName(resourceRef).
+		withServiceName(resourceRef).
 		withLabels(joinLabels).
 		withVolume(v1.Volume{
 			Name: "config",
@@ -298,18 +322,16 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			},
 		}).
 		withContainer(*joinContainer).
+		withReplicas(joinReplicas).
 		withAffinity(r.JoinAffinity)
-	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil && p.Spec.Resources.Join.Replicas != nil {
-		joinDepBuilder = joinDepBuilder.withReplicas(int(*p.Spec.Resources.Join.Replicas))
-	}
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
-		joinDepBuilder = joinDepBuilder.withVolume(vol)
+		stsBuilder = stsBuilder.withVolume(vol)
 	}
-	deployment := joinDepBuilder.build()
+	statefulSet := stsBuilder.build()
 
-	err := r.createDeployment(ctx, deployment)
+	err = r.createStatefulSet(ctx, statefulSet)
 	if err != nil {
-		return fmt.Errorf("create join deployment: %w", err)
+		return fmt.Errorf("create join statefulset: %w", err)
 	}
 
 	return nil
@@ -863,8 +885,8 @@ func (r *PipelineReconciler) reconcileJoinTeardown(
 		return result, err
 	}
 
-	deploymentName := r.getResourceName(*p, constants.JoinComponent)
-	return r.ensureDeploymentDeleted(ctx, log, namespace, constants.JoinComponent, deploymentName)
+	statefulSetName := r.getResourceName(*p, constants.JoinComponent)
+	return r.ensureStatefulSetDeleted(ctx, log, namespace, constants.JoinComponent, statefulSetName)
 }
 
 func (r *PipelineReconciler) reconcileSinkTeardown(
