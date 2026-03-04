@@ -681,65 +681,6 @@ func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
 	log.Info("waiting for dedup statefulsets to be ready", "namespace", namespace)
 	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
 }
-
-// ensureDeploymentReady checks if a deployment is ready, creates it if not, and handles timeouts.
-func (r *PipelineReconciler) ensureDeploymentReady(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	namespace,
-	deploymentName string,
-	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-) (ctrl.Result, error) {
-	ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check %s deployment: %w", deploymentName, err)
-	}
-	if ready {
-		log.Info(fmt.Sprintf("%s deployment is already ready", deploymentName), "namespace", namespace)
-		return ctrl.Result{}, nil
-	}
-
-	timedOut, _ := r.checkOperationTimeout(log, p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, p)
-	}
-
-	log.Info(fmt.Sprintf("creating %s deployment", deploymentName), "namespace", namespace)
-	if err = createFn(ctx, ns, labels, secret, *p); err != nil {
-		return ctrl.Result{}, fmt.Errorf("create %s deployment: %w", deploymentName, err)
-	}
-
-	return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-}
-
-func (r *PipelineReconciler) ensureDeploymentDeleted(
-	ctx context.Context,
-	log logr.Logger,
-	namespace,
-	componentType,
-	deploymentName string,
-) (ctrl.Result, error) {
-	absent, err := r.isDeploymentAbsent(ctx, namespace, deploymentName)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check %s deployment %s: %w", componentType, deploymentName, err)
-	}
-	if absent {
-		log.Info(componentType+" deployment is already deleted", "deployment", deploymentName, "namespace", namespace)
-		return ctrl.Result{}, nil
-	}
-
-	log.Info("deleting "+componentType+" deployment", "deployment", deploymentName, "namespace", namespace)
-	if err = r.deleteDeploymentByName(ctx, namespace, deploymentName); err != nil {
-		return ctrl.Result{}, fmt.Errorf("delete %s deployment %s: %w", componentType, deploymentName, err)
-	}
-
-	return ctrl.Result{Requeue: true, RequeueAfter: componentDeleteRequeueDelay}, nil
-}
-
 func (r *PipelineReconciler) ensureStatefulSetDeleted(
 	ctx context.Context,
 	log logr.Logger,

@@ -120,20 +120,6 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 	return nil
 }
 
-// createDeployment creates a deployment
-func (r *PipelineReconciler) createDeployment(ctx context.Context, deployment *appsv1.Deployment) error {
-	err := r.Create(ctx, deployment, &client.CreateOptions{})
-	if err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return nil
-		}
-
-		return fmt.Errorf("create deployment: %w", err)
-	}
-
-	return nil
-}
-
 // getPipelineConfigFromSecret reads the pipeline configuration from the secret in glassflow namespace
 func (r *PipelineReconciler) getPipelineConfigFromSecret(ctx context.Context, pipelineID string) (string, error) {
 	secretName := fmt.Sprintf("pipeline-config-%s", pipelineID)
@@ -370,59 +356,6 @@ func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx conte
 	}
 
 	return nil
-}
-
-// isDeploymentAbsent checks if a deployment is fully deleted
-func (r *PipelineReconciler) isDeploymentAbsent(ctx context.Context, namespace, name string) (bool, error) {
-	var deployment appsv1.Deployment
-	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &deployment)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
-		return false, fmt.Errorf("get deployment %s: %w", name, err)
-	}
-	return false, nil
-}
-
-// isDeploymentReady checks if a deployment is ready
-func (r *PipelineReconciler) isDeploymentReady(ctx context.Context, namespace, name string) (bool, error) {
-	var deployment appsv1.Deployment
-	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &deployment)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("get deployment %s: %w", name, err)
-	}
-
-	// Check if deployment is ready
-	if deployment.Status.ReadyReplicas == deployment.Status.Replicas && deployment.Status.Replicas > 0 {
-		return true, nil
-	}
-	return false, nil
-}
-
-// deleteDeployment safely deletes a deployment, handling NotFound errors gracefully
-func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *appsv1.Deployment) error {
-	err := r.Delete(ctx, deployment, &client.DeleteOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil // Already deleted, that's fine
-		}
-		return fmt.Errorf("delete deployment: %w", err)
-	}
-	return nil
-}
-
-// deleteDeploymentByName safely deletes a deployment by name.
-func (r *PipelineReconciler) deleteDeploymentByName(ctx context.Context, namespace, name string) error {
-	return r.deleteDeployment(ctx, &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: namespace,
-			Name:      name,
-		},
-	})
 }
 
 // -------------------------------------------------------------------------------------------------------------------

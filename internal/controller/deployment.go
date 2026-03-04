@@ -130,12 +130,6 @@ type componentDeployment struct {
 	dep *appsv1.Deployment
 }
 
-func newComponentDeploymentBuilder() *componentDeployment {
-	return &componentDeployment{
-		dep: &appsv1.Deployment{},
-	}
-}
-
 var _ deploymentBuilder = (*componentDeployment)(nil)
 
 // withNamespace implements deploymentBuilder.
