@@ -24,6 +24,8 @@ jobs:
     needs: [check-merge]
     if: needs.check-merge.outputs.should-build
     uses: ./.github/workflows/build_binary.yml
+    with:
+      version: ${{ github.sha }}
 
   test-operator:
     needs: [check-merge]

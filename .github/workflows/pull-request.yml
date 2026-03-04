@@ -28,6 +28,8 @@ jobs:
   build-operator-binary:
     if: ${{ !contains(github.event.pull_request.labels.*.name || '', 'no-build') }}
     uses: ./.github/workflows/build_binary.yml
+    with:
+      version: ${{ github.event.pull_request.head.sha }}
 
   test-operator:
     if: >-
