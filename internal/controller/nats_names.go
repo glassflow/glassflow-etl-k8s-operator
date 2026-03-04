@@ -36,8 +36,8 @@ const NATSConsumerNamePrefix = "gf-nats"
 // DLQSuffix is the DLQ stream suffix (aligned with glassflow-api).
 const DLQSuffix = "DLQ"
 
-// generateStreamHash returns the first 8 hex chars of SHA256(pipelineID), aligned with glassflow-api GenerateStreamHash.
-func generateStreamHash(pipelineID string) string {
+// generatePipelineHash returns the first 8 hex chars of SHA256(pipelineID), aligned with glassflow-api GenerateStreamHash.
+func generatePipelineHash(pipelineID string) string {
 	hash := sha256.Sum256([]byte(pipelineID))
 	return hex.EncodeToString(hash[:])[:8]
 }
@@ -50,32 +50,32 @@ func sanitizeNATSSubject(topicName string) string {
 // getIngestorOutputSubjectPrefix returns the subject prefix for ingestor output (aligned with glassflow-api GetIngestorStreamName).
 // Ingestor publishes to subjectPrefix.POD_INDEX (e.g. gf-abc12345-topic.0).
 func getIngestorOutputSubjectPrefix(pipelineID, topicName string) string {
-	hash := generateStreamHash(pipelineID)
+	hash := generatePipelineHash(pipelineID)
 	sanitized := sanitizeNATSSubject(topicName)
-	streamName := fmt.Sprintf("%s-%s-%s", PipelineStreamPrefix, hash, sanitized)
-	if len(streamName) > MaxStreamNameLength {
+	subjectName := fmt.Sprintf("%s-%s-%s", PipelineStreamPrefix, hash, sanitized)
+	if len(subjectName) > MaxStreamNameLength {
 		prefix := fmt.Sprintf("%s-%s-", PipelineStreamPrefix, hash)
 		maxTopicLength := MaxStreamNameLength - len(prefix)
 		if maxTopicLength > 0 {
-			streamName = prefix + sanitized[:min(len(sanitized), maxTopicLength)]
+			subjectName = prefix + sanitized[:min(len(sanitized), maxTopicLength)]
 		} else {
-			streamName = prefix[:MaxStreamNameLength]
+			subjectName = prefix[:MaxStreamNameLength]
 		}
 	}
-	return streamName
+	return subjectName
 }
 
 // getSinkInputStreamPrefix returns the stream name prefix for sink input streams (aligned with glassflow-api GetNATSSinkConsumerName).
 // Sink pod index j consumes from stream prefix_j (e.g. gf-abc12345-sink_0).
 func getSinkInputStreamPrefix(pipelineID string) string {
-	hash := generateStreamHash(pipelineID)
+	hash := generatePipelineHash(pipelineID)
 	return fmt.Sprintf("%s-%s-sink", PipelineStreamPrefix, hash)
 }
 
 // getDedupInputStreamPrefix returns the stream name prefix for the dedupReplicas streams that dedup reads from.
 // Stream names are prefix_0, ..., prefix_(dedupReplicas-1). Same length/truncation rules as getIngestorOutputSubjectPrefix.
 func getDedupInputStreamPrefix(pipelineID, topicName string) string {
-	hash := generateStreamHash(pipelineID)
+	hash := generatePipelineHash(pipelineID)
 	sanitized := sanitizeNATSSubject(topicName)
 	streamName := fmt.Sprintf("%s-%s-%s-dedup-in", PipelineStreamPrefix, hash, sanitized)
 	if len(streamName) > MaxStreamNameLength {
@@ -93,29 +93,40 @@ func getDedupInputStreamPrefix(pipelineID, topicName string) string {
 // getDedupOutputSubjectPrefix returns the subject prefix for dedup output. Dedup pod d publishes to prefix.d.
 // Same length/truncation rules as getIngestorOutputSubjectPrefix.
 func getDedupOutputSubjectPrefix(pipelineID, topicName string) string {
-	hash := generateStreamHash(pipelineID)
+	hash := generatePipelineHash(pipelineID)
 	sanitized := sanitizeNATSSubject(topicName)
-	streamName := fmt.Sprintf("%s-%s-%s-dedup-out", PipelineStreamPrefix, hash, sanitized)
-	if len(streamName) > MaxStreamNameLength {
+	subjectName := fmt.Sprintf("%s-%s-%s-dedup-out", PipelineStreamPrefix, hash, sanitized)
+	if len(subjectName) > MaxStreamNameLength {
 		prefix := fmt.Sprintf("%s-%s-", PipelineStreamPrefix, hash)
 		maxTopicLength := MaxStreamNameLength - len(prefix) - len("-dedup-out")
 		if maxTopicLength > 0 {
-			streamName = prefix + sanitized[:min(len(sanitized), maxTopicLength)] + "-dedup-out"
+			subjectName = prefix + sanitized[:min(len(sanitized), maxTopicLength)] + "-dedup-out"
 		} else {
-			streamName = (prefix + "dedup-out")[:MaxStreamNameLength]
+			subjectName = (prefix + "dedup-out")[:MaxStreamNameLength]
 		}
 	}
-	return streamName
+	return subjectName
+}
+
+// getJoinOutputSubjectPrefix returns the subject prefix for join output.
+func getJoinOutputSubjectPrefix(pipelineID string) string {
+	hash := generatePipelineHash(pipelineID)
+	subjectName := fmt.Sprintf("%s-%s-join-out", PipelineStreamPrefix, hash)
+	if len(subjectName) > MaxStreamNameLength {
+		prefix := fmt.Sprintf("%s-%s", PipelineStreamPrefix, hash)
+		subjectName = (prefix + "join-out")[:MaxStreamNameLength]
+	}
+	return subjectName
 }
 
 // getJoinOutputStreamName returns the stream name for join output.
 func getJoinOutputStreamName(pipelineID string) string {
-	hash := generateStreamHash(pipelineID)
+	hash := generatePipelineHash(pipelineID)
 	return fmt.Sprintf("%s-%s-join", PipelineStreamPrefix, hash)
 }
 
 func getDLQStreamName(pipelineID string) string {
-	hash := generateStreamHash(pipelineID)
+	hash := generatePipelineHash(pipelineID)
 	return fmt.Sprintf("%s-%s-%s", PipelineStreamPrefix, hash, DLQSuffix)
 }
 
@@ -135,7 +146,7 @@ func getNATSConsumerName(pipelineID, componentType, streamType string) string {
 		NATSConsumerNamePrefix,
 		componentAbbr[componentType],
 		streamAbbr[streamType],
-		generateStreamHash(pipelineID))
+		generatePipelineHash(pipelineID))
 }
 
 func getNATSSinkConsumerName(pipelineID string) string {
