@@ -70,7 +70,10 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 	// Step 2: Ensure Join deployment is ready (if enabled)
 	if p.Spec.Join.Enabled {
-		return r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
+		result, errDep := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
+		if errDep != nil || result.Requeue {
+			return result, err
+		}
 	}
 
 	// Step 3: Ensure Dedup StatefulSets are ready
