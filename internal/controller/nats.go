@@ -316,29 +316,6 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 	return nil
 }
 
-// cleanupNATSPipelineJoinKeyValueStore cleans up NATS join key value stores
-func (r *PipelineReconciler) cleanupNATSPipelineJoinKeyValueStore(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("cleaning up NATS join key value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-
-	if r.NATSClient == nil {
-		log.Info("NATS client not available, skipping key value store cleanup")
-		return fmt.Errorf("NATS client not available, skipping NATS cleanup")
-	}
-
-	// Since join key-value names are the same as join input stream names.
-	for _, stream := range p.Spec.Ingestor.Streams {
-		streamName := getJoinInputStreamName(p, stream)
-		err := r.NATSClient.JetStream().DeleteKeyValue(ctx, streamName)
-		if err != nil {
-			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "stream", streamName)
-			return fmt.Errorf("failed to delete NATS KV Store: %w", err)
-		}
-	}
-
-	log.Info("NATS join key value store deleted successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-	return nil
-}
-
 // deleteNATSStream deletes a NATS stream
 func (r *PipelineReconciler) deleteNATSStream(ctx context.Context, log logr.Logger, streamName string) error {
 	if r.NATSClient == nil {
