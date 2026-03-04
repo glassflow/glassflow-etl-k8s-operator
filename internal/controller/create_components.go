@@ -72,7 +72,7 @@ func (r *PipelineReconciler) createPipelineComponents(
 	if p.Spec.Join.Enabled {
 		result, errDep := r.ensureDeploymentReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
 		if errDep != nil || result.Requeue {
-			return result, err
+			return result, errDep
 		}
 	}
 
