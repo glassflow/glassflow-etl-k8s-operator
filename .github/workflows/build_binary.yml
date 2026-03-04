@@ -27,8 +27,10 @@ jobs:
       - name: Build binary
         run: |
           mkdir -p bin
-          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -o bin/manager cmd/main.go
+          VERSION="${BUILD_VERSION:-$(git rev-parse HEAD)}"
+          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -ldflags "-X main.version=${VERSION}" -o bin/manager cmd/main.go
         env:
+          BUILD_VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
           GOOS: ${{ matrix.platform.os }}
           GOARCH: ${{ matrix.platform.arch }}
       - name: Upload artifact
