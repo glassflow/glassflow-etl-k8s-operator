@@ -70,6 +70,7 @@ func defaultNamespace(value, fallback string) string {
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+	version  = "dev"
 )
 
 func init() {
@@ -399,6 +400,7 @@ func main() {
 
 	logger := observability.ConfigureLogger(obsConfig)
 	meter := observability.ConfigureMeter(obsConfig, logger)
+	logger.Info("starting app", "version", version)
 
 	//nolint:goconst
 	usageStatsEnabled := getEnvOrDefault("GLASSFLOW_USAGE_STATS_ENABLED", "false") == "true"

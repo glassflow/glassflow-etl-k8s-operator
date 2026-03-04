@@ -31,7 +31,7 @@ jobs:
     uses: ./.github/workflows/test-operator.yml
 
   build-operator-image:
-    needs: [test-operator]
+    needs: [build-operator-binary, test-operator]
     if: needs.check-merge.outputs.should-build
     uses: ./.github/workflows/build-image.yml
     with:
