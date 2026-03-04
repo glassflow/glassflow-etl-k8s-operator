@@ -24,13 +24,20 @@ jobs:
         with:
           go-version-file: './go.mod'
           cache-dependency-path: './go.mod'
+      - name: Generate version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            SHA="${{ github.sha }}"
+          fi
+          echo "VERSION=$SHA" >> $GITHUB_OUTPUT
       - name: Build binary
         run: |
           mkdir -p bin
-          VERSION="${BUILD_VERSION:-$(git rev-parse HEAD)}"
-          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -ldflags "-X main.version=${VERSION}" -o bin/manager cmd/main.go
+          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" -o bin/manager cmd/main.go
         env:
-          BUILD_VERSION: ${{ github.event.pull_request.head.sha || github.sha }}
           GOOS: ${{ matrix.platform.os }}
           GOARCH: ${{ matrix.platform.arch }}
       - name: Upload artifact
