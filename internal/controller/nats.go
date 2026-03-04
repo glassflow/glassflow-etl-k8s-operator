@@ -30,9 +30,6 @@ import (
 )
 
 func getJoinInputStreamName(p etlv1alpha1.Pipeline, stream etlv1alpha1.SourceStream) string {
-	if stream.Deduplication != nil && stream.Deduplication.Enabled {
-		return getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
-	}
 	return getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
 }
 
