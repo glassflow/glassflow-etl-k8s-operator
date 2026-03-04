@@ -335,11 +335,25 @@ func main() {
 		"COMPONENT_ENCRYPTION_SECRET_NAMESPACE", ""),
 		"Namespace of the encryption secret (default: operator namespace)")
 
+	// Reconcile timeout configuration
+	var reconcileTimeout string
+	flag.StringVar(&reconcileTimeout, "reconcile-timeout", getEnvOrDefault(
+		"RECONCILE_TIMEOUT", constants.DefaultReconcileTimeout.String()),
+		"Maximum duration a reconcile operation can run before timing out (e.g. 15m, 1h)")
+
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	parsedReconcileTimeout, err := time.ParseDuration(reconcileTimeout)
+	if err != nil {
+		setupLog.Error(err, "unable to parse reconcile timeout, using default",
+			"value", reconcileTimeout, "default", constants.DefaultReconcileTimeout.String())
+		parsedReconcileTimeout = constants.DefaultReconcileTimeout
+	}
+	constants.ReconcileTimeout = parsedReconcileTimeout
 
 	// Get pod identity - use POD_NAME env var if set, otherwise fallback to hostname
 	podName := os.Getenv("POD_NAME")

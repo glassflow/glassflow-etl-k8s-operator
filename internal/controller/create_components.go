@@ -8,7 +8,6 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -114,8 +113,6 @@ func (r *PipelineReconciler) createPipelineComponents(
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
 
-	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
-
 	for i, t := range ing.Streams {
 		resourceRef := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 
@@ -178,8 +175,6 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
 				{Name: "NATS_SUBJECT_PREFIX", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, t.TopicName)},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
-				{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -259,7 +254,6 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		}
 	}
 
-	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
 	leftInputStreamPrefix := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[0])
 	rightInputStreamPrefix := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[1])
 	joinOutputSubjectPrefix := getJoinOutputSubjectPrefix(p.Spec.ID)
@@ -285,8 +279,6 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: rightInputStreamPrefix},
 			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutputSubjectPrefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -360,8 +352,6 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		}
 	}
 
-	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
-
 	err := r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels)
 	if err != nil {
 		return fmt.Errorf("create sink headless service: %w", err)
@@ -381,8 +371,6 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "NATS_INPUT_STREAM_PREFIX", Value: getSinkInputStreamPrefix(p.Spec.ID)},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -436,7 +424,6 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 // createDedups creates dedup StatefulSets for the pipeline (one per ingestor stream with dedup enabled)
 func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
-	natsMaxAge, natsMaxBytes := r.resolveNatsStreamEnvVars(p)
 
 	for i, stream := range ing.Streams {
 		// Skip if dedup not enabled for this stream
@@ -492,8 +479,6 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
 			{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_AGE", Value: natsMaxAge},
-			{Name: "GLASSFLOW_NATS_MAX_STREAM_BYTES", Value: natsMaxBytes},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
 			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
@@ -591,24 +576,6 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 	}
 
 	return nil
-}
-
-// resolveNatsStreamEnvVars returns NATS stream env var values, applying per-pipeline CRD overrides
-// on top of the operator-level defaults.
-func (r *PipelineReconciler) resolveNatsStreamEnvVars(p etlv1alpha1.Pipeline) (natsMaxAge, natsMaxBytes string) {
-	natsMaxAge = r.NATSMaxStreamAge
-	natsMaxBytes = utils.ConvertBytesToString(r.NATSMaxStreamBytes)
-	if p.Spec.Resources == nil || p.Spec.Resources.Nats == nil || p.Spec.Resources.Nats.Stream == nil {
-		return
-	}
-	stream := p.Spec.Resources.Nats.Stream
-	if stream.MaxAge.Duration != 0 {
-		natsMaxAge = stream.MaxAge.Duration.String()
-	}
-	if !stream.MaxBytes.IsZero() {
-		natsMaxBytes = fmt.Sprintf("%d", stream.MaxBytes.Value())
-	}
-	return
 }
 
 func isDedupEnabled(p etlv1alpha1.Pipeline) bool {

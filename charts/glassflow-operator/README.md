@@ -39,3 +39,13 @@ global:
 ```
 
 In shared mode, resource names are prefixed with `gf-pipeline-<id>-` to avoid conflicts between pipelines.
+
+### Reconcile Timeout
+
+You can configure the reconcile timeout used by the operator:
+
+```yaml
+controllerManager:
+  manager:
+    reconcileTimeout: 15m # Go duration format, e.g. 30m, 1h
+```
