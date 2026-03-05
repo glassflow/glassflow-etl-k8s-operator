@@ -785,8 +785,8 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, nil
 	}
 
-	// Remove all NATS streams/KV stores for this pipeline before marking it Stopped.
-	err = r.cleanupNATSPipelineResources(ctx, log, p)
+	// Remove NATS streams/KV stores for this pipeline before marking it Stopped, while preserving DLQ.
+	err = r.cleanupNATSPipelineResourcesKeepDLQ(ctx, log, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for stop: %w", err)
 	}

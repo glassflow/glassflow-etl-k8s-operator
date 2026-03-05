@@ -233,8 +233,22 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 	return nil
 }
 
-// cleanupNATSPipelineResources cleans up all NATS resources for a pipeline
+// cleanupNATSPipelineResources cleans up all NATS resources for a pipeline, including DLQ.
 func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, true)
+}
+
+// cleanupNATSPipelineResourcesKeepDLQ cleans up pipeline NATS resources while preserving DLQ.
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepDLQ(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, false)
+}
+
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
+	ctx context.Context,
+	log logr.Logger,
+	p etlv1alpha1.Pipeline,
+	deleteDLQ bool,
+) error {
 	log.Info("cleaning up NATS streams", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
 	if r.NATSClient == nil {
@@ -242,28 +256,32 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 		return fmt.Errorf("NATS client not available, skipping stream cleanup")
 	}
 
-	// delete the DLQ stream
-	dlqStreamName := getDLQStreamName(p.Spec.ID)
-	log.Info("deleting NATS DLQ stream", "stream", dlqStreamName)
-	err := r.deleteNATSStream(ctx, log, dlqStreamName)
-	if err != nil {
-		log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", dlqStreamName)
+	if deleteDLQ {
+		// delete the DLQ stream
+		dlqStreamName := getDLQStreamName(p.Spec.ID)
+		log.Info("deleting NATS DLQ stream", "stream", dlqStreamName)
+		err := r.deleteNATSStream(ctx, log, dlqStreamName)
+		if err != nil {
+			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", dlqStreamName)
+			r.recordMetricsIfEnabled(func(m *observability.Meter) {
+				m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
+			})
+			return fmt.Errorf("failed to cleanup NATS DLQ stream: %w", err)
+		}
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
-			m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
+			m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
 		})
-		return fmt.Errorf("failed to cleanup NATS DLQ stream: %w", err)
+		log.Info("NATS DLQ stream deleted successfully", "stream", dlqStreamName)
+	} else {
+		log.Info("skipping NATS DLQ stream cleanup", "pipeline_id", p.Spec.ID)
 	}
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
-	})
-	log.Info("NATS DLQ stream deleted successfully", "stream", dlqStreamName)
 
 	// delete Join Streams and key value stores
 	if p.Spec.Join.Enabled {
 		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
 		streamName := streamNamePrefix + "_0"
 
-		err = r.deleteNATSStream(ctx, log, streamName)
+		err := r.deleteNATSStream(ctx, log, streamName)
 		if err != nil {
 			return fmt.Errorf("delete stream %s: %w", streamName, err)
 		}
