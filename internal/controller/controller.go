@@ -388,6 +388,12 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 		return result, err
 	}
 
+	// Remove all NATS streams/KV stores for this pipeline before marking it Stopped.
+	err = r.cleanupNATSPipelineResources(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for terminate: %w", err)
+	}
+
 	// Update pipeline status to "Stopped"
 	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil)
 	if err != nil {
@@ -777,6 +783,12 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	}
 	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
 		return ctrl.Result{}, nil
+	}
+
+	// Remove all NATS streams/KV stores for this pipeline before marking it Stopped.
+	err = r.cleanupNATSPipelineResources(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for stop: %w", err)
 	}
 
 	// Update status to Stopped

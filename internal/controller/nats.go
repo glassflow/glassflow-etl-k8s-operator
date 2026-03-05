@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/nats-io/nats.go/jetstream"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
@@ -270,7 +272,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 		for _, stream := range p.Spec.Ingestor.Streams {
 			kvStreamName := getJoinInputStreamName(p, stream)
 
-			err := r.NATSClient.JetStream().DeleteKeyValue(ctx, kvStreamName)
+			err := r.deleteNATSKeyValueStore(ctx, log, kvStreamName)
 			if err != nil {
 				log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "stream", streamName)
 				return fmt.Errorf("failed to delete NATS KV Store: %w", err)
@@ -322,8 +324,31 @@ func (r *PipelineReconciler) deleteNATSStream(ctx context.Context, log logr.Logg
 
 	err := r.NATSClient.JetStream().DeleteStream(ctx, streamName)
 	if err != nil {
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
+			log.V(1).Info("NATS stream already deleted", "stream", streamName)
+			return nil
+		}
 		log.Error(err, "failed to delete NATS output stream", "stream", streamName)
 		return fmt.Errorf("failed to delete NATS output stream: %w", err)
+	}
+
+	return nil
+}
+
+func (r *PipelineReconciler) deleteNATSKeyValueStore(ctx context.Context, log logr.Logger, bucketName string) error {
+	if r.NATSClient == nil {
+		log.Info("NATS client not available, skipping key value store cleanup")
+		return fmt.Errorf("NATS client not available, skipping NATS cleanup")
+	}
+
+	err := r.NATSClient.JetStream().DeleteKeyValue(ctx, bucketName)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrBucketNotFound) {
+			log.V(1).Info("NATS key value store already deleted", "bucket", bucketName)
+			return nil
+		}
+		log.Error(err, "failed to delete NATS key value store", "bucket", bucketName)
+		return fmt.Errorf("failed to delete NATS key value store: %w", err)
 	}
 
 	return nil
