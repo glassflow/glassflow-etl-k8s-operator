@@ -536,7 +536,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := natsClient.CreateOrUpdateStream(ctx, constants.ComponentSignalsStream, 0); err != nil {
+	defaultMaxAge, defaultMaxBytes := natsClient.DefaultStreamLimits()
+	if err := natsClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
+		Name:     constants.ComponentSignalsStream,
+		MaxAge:   defaultMaxAge,
+		MaxBytes: defaultMaxBytes,
+	}); err != nil {
 		setupLog.Error(err, "unable to create component signals messages stream")
 		os.Exit(1)
 	}
