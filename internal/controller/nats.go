@@ -26,6 +26,7 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 )
 
@@ -127,12 +128,35 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 	return r.checkConsumerPendingMessages(ctx, inputStreamName, baseConsumerName)
 }
 
+// resolveStreamLimits returns effective stream limits for a pipeline, with CRD values
+// taking precedence over operator-level defaults.
+func (r *PipelineReconciler) resolveStreamLimits(p etlv1alpha1.Pipeline) (time.Duration, int64) {
+	maxAge, maxBytes := r.NATSClient.DefaultStreamLimits()
+	if p.Spec.Resources != nil && p.Spec.Resources.Nats != nil && p.Spec.Resources.Nats.Stream != nil {
+		s := p.Spec.Resources.Nats.Stream
+		if s.MaxAge.Duration != 0 {
+			maxAge = s.MaxAge.Duration
+		}
+		if !s.MaxBytes.IsZero() {
+			maxBytes = s.MaxBytes.Value()
+		}
+	}
+
+	return maxAge, maxBytes
+}
+
 // createNATSStreams creates all NATS streams and KV stores for a pipeline
 func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	maxAge, maxBytes := r.resolveStreamLimits(p)
+
 	dlqStreamName := getDLQStreamName(p.Spec.ID)
 
 	// create DLQ
-	err := r.NATSClient.CreateOrUpdateStream(ctx, dlqStreamName, 0)
+	err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
+		Name:     dlqStreamName,
+		MaxAge:   maxAge,
+		MaxBytes: maxBytes,
+	})
 	if err != nil {
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "create_stream", "failure", p.Spec.ID)
@@ -152,7 +176,12 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 		streamName := streamNamePrefix + "_0"
 		subjects := getSubjectsForStreamIndex(subjectPrefix, 1, 1, 0)
 
-		err = r.NATSClient.CreateOrUpdateStreamWithSubjects(ctx, streamName, subjects)
+		err = r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
+			Name:     streamName,
+			Subjects: subjects,
+			MaxAge:   maxAge,
+			MaxBytes: maxBytes,
+		})
 		if err != nil {
 			return fmt.Errorf("create stream %s: %w", streamName, err)
 		}
@@ -178,7 +207,12 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 			subjectPrefix = getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
 			subjects = getSubjectsForStreamIndex(subjectPrefix, 1, 1, 0)
 
-			err = r.NATSClient.CreateOrUpdateStreamWithSubjects(ctx, kvStreamName, subjects)
+			err = r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
+				Name:     kvStreamName,
+				Subjects: subjects,
+				MaxAge:   maxAge,
+				MaxBytes: maxBytes,
+			})
 			if err != nil {
 				return fmt.Errorf("create stream %s: %w", kvStreamName, err)
 			}
@@ -199,7 +233,12 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 				if len(subjects) == 0 {
 					continue
 				}
-				err := r.NATSClient.CreateOrUpdateStreamWithSubjects(ctx, streamName, subjects)
+				err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
+					Name:     streamName,
+					Subjects: subjects,
+					MaxAge:   maxAge,
+					MaxBytes: maxBytes,
+				})
 				if err != nil {
 					return fmt.Errorf("create stream %s: %w", streamName, err)
 				}
@@ -221,7 +260,12 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 			if len(subjects) == 0 {
 				continue
 			}
-			err := r.NATSClient.CreateOrUpdateStreamWithSubjects(ctx, streamName, subjects)
+			err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
+				Name:     streamName,
+				Subjects: subjects,
+				MaxAge:   maxAge,
+				MaxBytes: maxBytes,
+			})
 			if err != nil {
 				return fmt.Errorf("create stream %s: %w", streamName, err)
 			}

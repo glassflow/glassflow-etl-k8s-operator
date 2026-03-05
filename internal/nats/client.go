@@ -117,27 +117,34 @@ func New(ctx context.Context, cfg Config) (*NATSClient, error) {
 	}, nil
 }
 
-// CreateOrUpdateStream creates or updates a NATS stream with wildcard subject name+".*".
-// No NATS-level dedup window is applied; deduplication is handled by the dedup component.
-func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, name string, _ time.Duration) error {
-	return n.createOrUpdateStreamWithSubjects(ctx, name, []string{name + ".*"})
+// StreamConfig holds configuration for creating or updating a NATS stream.
+type StreamConfig struct {
+	Name     string
+	Subjects []string // if empty, defaults to []string{Name + ".*"}
+	MaxAge   time.Duration
+	MaxBytes int64
 }
 
-// CreateOrUpdateStreamWithSubjects creates or updates a NATS stream with the given explicit subjects.
-// No NATS-level dedup window is applied.
-func (n *NATSClient) CreateOrUpdateStreamWithSubjects(ctx context.Context, name string, subjects []string) error {
-	return n.createOrUpdateStreamWithSubjects(ctx, name, subjects)
+// DefaultStreamLimits returns the operator-level default stream limits.
+func (n *NATSClient) DefaultStreamLimits() (time.Duration, int64) {
+	return n.maxAge, n.maxBytes
 }
 
-func (n *NATSClient) createOrUpdateStreamWithSubjects(ctx context.Context, name string, subjects []string) error {
+// CreateOrUpdateStream creates or updates a NATS stream using the provided StreamConfig.
+// If Subjects is empty, defaults to []string{cfg.Name + ".*"}.
+func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, cfg StreamConfig) error {
+	subjects := cfg.Subjects
+	if len(subjects) == 0 {
+		subjects = []string{cfg.Name + ".*"}
+	}
 	//nolint:exhaustruct // readability
 	sc := jetstream.StreamConfig{
-		Name:     name,
+		Name:     cfg.Name,
 		Subjects: subjects,
 		Storage:  jetstream.FileStorage,
 
-		MaxAge:   n.maxAge,
-		MaxBytes: n.maxBytes,
+		MaxAge:   cfg.MaxAge,
+		MaxBytes: cfg.MaxBytes,
 		Discard:  jetstream.DiscardOld,
 
 		Retention:          n.retention,
@@ -150,12 +157,12 @@ func (n *NATSClient) createOrUpdateStreamWithSubjects(ctx context.Context, name 
 		// Skip if update fails for old pipelines with existing streams with different retention policy
 		var apiErr *jetstream.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode == JSErrCodeStreamRetentionPolicyChange {
-			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", name)
+			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", cfg.Name)
 			return nil
 		}
 		// Fallback: check error string for err_code=10052 in case error structure varies
 		if strings.Contains(err.Error(), "10052") && strings.Contains(err.Error(), "retention policy") {
-			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", name)
+			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", cfg.Name)
 			return nil
 		}
 
