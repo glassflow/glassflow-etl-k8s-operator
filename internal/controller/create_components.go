@@ -495,8 +495,8 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		}
 		if p.Spec.Join.Enabled {
 			dedupEnvBase = append(dedupEnvBase,
-				v1.EnvVar{Name: "GLASSFLOW_INPUT_STREAM", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
-				v1.EnvVar{Name: "GLASSFLOW_OUTPUT_STREAM", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
+				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
 			)
 		} else {
 			dedupEnvBase = append(dedupEnvBase,
