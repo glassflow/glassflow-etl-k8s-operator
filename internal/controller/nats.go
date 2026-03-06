@@ -82,11 +82,11 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	baseConsumerName := getNATSSinkConsumerName(p.Spec.ID)
 	if p.Spec.Join.Enabled {
-		sinkStreamName := getJoinOutputStreamName(p.Spec.ID)
+		sinkStreamName := getSinkInputStreamPrefix(p.Spec.ID) + "_0"
 		return r.checkConsumerPendingMessages(ctx, sinkStreamName, baseConsumerName)
 	}
 	if useNStreamSinkPath(p) || useDedupNStreamPath(p) {
-		// sinkReplicas streams, per-pod consumer name = baseConsumerName + "_" + podIndex
+		// sinkReplicas streams; sink uses the same durable consumer name on each stream.
 		sinkReplicas := getSinkReplicas(p)
 		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
 		for n := 0; n < sinkReplicas; n++ {
@@ -99,13 +99,12 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 		return nil
 	}
 
-	// Single stream path.
-	sinkStreamName := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[0])
+	sinkStreamName := getSinkInputStreamPrefix(p.Spec.ID) + "_0"
 	return r.checkConsumerPendingMessages(ctx, sinkStreamName, baseConsumerName)
 }
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
-// When useDedupNStreamPath: dedup pod d reads from getDedupInputStreamPrefix_d with consumer base+"_"+d;
+// When useDedupNStreamPath: dedup pod d reads from getDedupInputStreamPrefix_d with shared consumer base name;
 // check all dedupReplicas streams.
 func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
 	stream := p.Spec.Ingestor.Streams[streamIndex]
