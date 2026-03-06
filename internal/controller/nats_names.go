@@ -119,12 +119,6 @@ func getJoinOutputSubjectPrefix(pipelineID string) string {
 	return subjectName
 }
 
-// getJoinOutputStreamName returns the stream name for join output.
-func getJoinOutputStreamName(pipelineID string) string {
-	hash := generatePipelineHash(pipelineID)
-	return fmt.Sprintf("%s-%s-join", PipelineStreamPrefix, hash)
-}
-
 func getDLQStreamName(pipelineID string) string {
 	hash := generatePipelineHash(pipelineID)
 	return fmt.Sprintf("%s-%s-%s", PipelineStreamPrefix, hash, DLQSuffix)
