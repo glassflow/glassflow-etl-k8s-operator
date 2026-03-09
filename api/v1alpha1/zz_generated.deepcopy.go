@@ -260,11 +260,7 @@ func (in *PipelineSpec) DeepCopyInto(out *PipelineSpec) {
 	in.Ingestor.DeepCopyInto(&out.Ingestor)
 	out.Join = in.Join
 	out.Sink = in.Sink
-	if in.Transform != nil {
-		in, out := &in.Transform, &out.Transform
-		*out = new(Transform)
-		**out = **in
-	}
+	out.Transform = in.Transform
 	if in.Resources != nil {
 		in, out := &in.Resources, &out.Resources
 		*out = new(PipelineResources)
