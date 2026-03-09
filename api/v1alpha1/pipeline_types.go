@@ -31,11 +31,11 @@ type PipelineSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// +kubebuilder:validation:MinLength=5
-	ID        string     `json:"pipeline_id"`
-	Ingestor  Sources    `json:"sources"`
-	Join      Join       `json:"join"`
-	Sink      Sink       `json:"sink"`
-	Transform *Transform `json:"transform,omitempty"`
+	ID        string    `json:"pipeline_id"`
+	Ingestor  Sources   `json:"sources"`
+	Join      Join      `json:"join"`
+	Sink      Sink      `json:"sink"`
+	Transform Transform `json:"transform,omitempty"`
 	// Config will be deprecated. Initial Pipeline configuration is now read from a Kubernetes Secret
 	// in the glassflow namespace (pipeline-config-{pipeline_id}). This field is kept for
 	// backward compatibility and will be used as a fallback if the secret is not found.
