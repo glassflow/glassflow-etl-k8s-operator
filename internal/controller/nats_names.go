@@ -25,7 +25,7 @@ import (
 )
 
 // PipelineStreamPrefix is the NATS stream/subject prefix (aligned with glassflow-api).
-const PipelineStreamPrefix = "gf"
+const PipelineStreamPrefix = "gfm"
 
 // MaxStreamNameLength is the maximum NATS stream name length (aligned with glassflow-api).
 const MaxStreamNameLength = 256
