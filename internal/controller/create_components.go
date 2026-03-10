@@ -424,6 +424,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 // createDedups creates dedup StatefulSets for the pipeline (one per ingestor stream with dedup enabled)
 func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
+	dedupStorageEnabled := p.Spec.Transform.IsDedupEnabled
 
 	for i, stream := range ing.Streams {
 		// Skip if dedup not enabled for this stream
@@ -524,27 +525,6 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		}
 		container := dedupContainerBuilder.build()
 
-		// Parse storage size
-		storageSizeQuantity, err := resource.ParseQuantity(storageSize)
-		if err != nil {
-			return fmt.Errorf("parse storage size for dedup-%d: %w", i, err)
-		}
-
-		// Create PVC template
-		pvcTemplate := v1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: "data"},
-			Spec: v1.PersistentVolumeClaimSpec{
-				AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
-				Resources: v1.VolumeResourceRequirements{
-					Requests: v1.ResourceList{v1.ResourceStorage: storageSizeQuantity},
-				},
-			},
-		}
-
-		if storageClass != "" {
-			pvcTemplate.Spec.StorageClassName = &storageClass
-		}
-
 		stsBuilder := newComponentStatefulSetBuilder().
 			withNamespace(ns).
 			withResourceName(resourceRef).
@@ -561,8 +541,38 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			}).
 			withReplicas(replicas).
 			withContainer(*container).
-			withAffinity(r.DedupAffinity).
-			withVolumeClaimTemplate(pvcTemplate)
+			withAffinity(r.DedupAffinity)
+
+		if dedupStorageEnabled {
+			// Parse storage size
+			storageSizeQuantity, err := resource.ParseQuantity(storageSize)
+			if err != nil {
+				return fmt.Errorf("parse storage size for dedup-%d: %w", i, err)
+			}
+
+			// Create PVC template
+			pvcTemplate := v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "data"},
+				Spec: v1.PersistentVolumeClaimSpec{
+					AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
+					Resources: v1.VolumeResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceStorage: storageSizeQuantity},
+					},
+				},
+			}
+			if storageClass != "" {
+				pvcTemplate.Spec.StorageClassName = &storageClass
+			}
+			stsBuilder = stsBuilder.withVolumeClaimTemplate(pvcTemplate)
+		} else {
+			stsBuilder = stsBuilder.withVolume(v1.Volume{
+				Name: "data",
+				VolumeSource: v1.VolumeSource{
+					EmptyDir: &v1.EmptyDirVolumeSource{},
+				},
+			})
+		}
+
 		if vol, ok := r.getComponentEncryptionVolume(); ok {
 			stsBuilder = stsBuilder.withVolume(vol)
 		}

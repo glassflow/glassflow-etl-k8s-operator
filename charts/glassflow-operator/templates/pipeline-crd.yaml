@@ -476,6 +476,19 @@ spec:
                     - topics
                     - type
                   type: object
+                transform:
+                  properties:
+                    is_dedup_enabled:
+                      type: boolean
+                    is_filter_enabled:
+                      type: boolean
+                    is_stateless_transform_enabled:
+                      type: boolean
+                  required:
+                    - is_dedup_enabled
+                    - is_filter_enabled
+                    - is_stateless_transform_enabled
+                  type: object
               required:
                 - join
                 - pipeline_id
