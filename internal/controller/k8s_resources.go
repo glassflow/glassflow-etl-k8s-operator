@@ -456,6 +456,11 @@ func (r *PipelineReconciler) deleteStatefulSetByName(ctx context.Context, namesp
 
 // cleanupDedupPVCs deletes PVCs associated with dedup StatefulSets
 func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	if !p.Spec.Transform.IsDedupEnabled {
+		log.Info("dedup PVC cleanup skipped: dedup persistent storage disabled", "pipeline_id", p.Spec.ID)
+		return nil
+	}
+
 	namespace := r.getTargetNamespace(p)
 
 	for i, stream := range p.Spec.Ingestor.Streams {
