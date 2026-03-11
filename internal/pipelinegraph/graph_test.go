@@ -1,0 +1,722 @@
+package pipelinegraph
+
+import (
+	"reflect"
+	"testing"
+)
+
+// Topology:
+//
+//	┌───────────────┐         ┌───────────┐
+//	│ ingestor_0 x2 ├── in ──►│ sink_0 x2 │
+//	└───────────────┘         └───────────┘
+func TestGraphIngestorSinkTwoTwo(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-1",
+		Nodes: []NodeConfig{
+			{
+				ID:       "ingestor_0",
+				Type:     NodeTypeIngestor,
+				Replicas: 2,
+				Name:     "orders.events",
+			},
+			{
+				ID:       "sink_0",
+				Type:     NodeTypeSink,
+				Replicas: 2,
+			},
+		},
+		Edges: []EdgeConfig{
+			{
+				ID:              "e1",
+				SourceID:        "ingestor_0",
+				TargetID:        "sink_0",
+				TargetInputType: InputTypeIn,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	output, err := graph.GetOutput("ingestor_0")
+	if err != nil {
+		t.Fatalf("GetOutput returned error: %v", err)
+	}
+
+	wantStreams := []StreamBinding{
+		{
+			Name:          "gfm-1528386a-ingestor_0-out_0",
+			SubjectPrefix: "gfm-1528386a-ingestor_0-out_0",
+			Subjects: []string{
+				"gfm-1528386a-ingestor_0-out_0.0",
+			},
+		},
+		{
+			Name:          "gfm-1528386a-ingestor_0-out_1",
+			SubjectPrefix: "gfm-1528386a-ingestor_0-out_1",
+			Subjects: []string{
+				"gfm-1528386a-ingestor_0-out_1.1",
+			},
+		},
+	}
+	if !reflect.DeepEqual(output.Streams, wantStreams) {
+		t.Fatalf("output.Streams = %#v, want %#v", output.Streams, wantStreams)
+	}
+
+	sinkInput, err := graph.GetInput("sink_0")
+	if err != nil {
+		t.Fatalf("GetInput(sink_0) returned error: %v", err)
+	}
+	wantSinkInput := InputBinding{
+		Streams: wantStreams,
+	}
+	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
+		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
+	}
+}
+
+// Topology:
+//
+//	┌───────────────┐
+//	│ ingestor_0 x3 ├──── left ────┐
+//	└───────────────┘              │
+//	                           ┌───▼──────┐         ┌───────────┐
+//	                           │ join_0 x1├── in ──►│ sink_0 x1 │
+//	                           └───▲──────┘         └───────────┘
+//	┌───────────────┐              │
+//	│ ingestor_1 x2 ├──── right  ──┘
+//	└───────────────┘
+func TestGraphTwoIngestorsJoinSink(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-join",
+		Nodes: []NodeConfig{
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 3, Name: "users"},
+			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 2, Name: "accounts"},
+			{ID: "join_0", Type: NodeTypeJoin, Replicas: 1},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "ingestor_0", TargetID: "join_0", TargetInputType: InputTypeLeft},
+			{ID: "e2", SourceID: "ingestor_1", TargetID: "join_0", TargetInputType: InputTypeRight},
+			{ID: "e3", SourceID: "join_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	inputs, err := graph.GetJoinInput("join_0")
+	if err != nil {
+		t.Fatalf("GetJoinInput returned error: %v", err)
+	}
+
+	left := inputs.Left
+
+	wantLeftStreams := []StreamBinding{
+		{
+			Name:          "gfm-2802cd7f-ingestor_0-out_0",
+			SubjectPrefix: "gfm-2802cd7f-ingestor_0-out_0",
+			Subjects: []string{
+				"gfm-2802cd7f-ingestor_0-out_0.0",
+				"gfm-2802cd7f-ingestor_0-out_0.1",
+				"gfm-2802cd7f-ingestor_0-out_0.2",
+			},
+		},
+	}
+	if !reflect.DeepEqual(left.Streams, wantLeftStreams) {
+		t.Fatalf("left.Streams = %#v, want %#v", left.Streams, wantLeftStreams)
+	}
+
+	right := inputs.Right
+	wantRightStreams := []StreamBinding{
+		{
+			Name:          "gfm-2802cd7f-ingestor_1-out_0",
+			SubjectPrefix: "gfm-2802cd7f-ingestor_1-out_0",
+			Subjects: []string{
+				"gfm-2802cd7f-ingestor_1-out_0.0",
+				"gfm-2802cd7f-ingestor_1-out_0.1",
+			},
+		},
+	}
+	if !reflect.DeepEqual(right.Streams, wantRightStreams) {
+		t.Fatalf("right.Streams = %#v, want %#v", right.Streams, wantRightStreams)
+	}
+
+	joinOutput, err := graph.GetOutput("join_0")
+	if err != nil {
+		t.Fatalf("GetOutput(join_0) returned error: %v", err)
+	}
+	wantJoinStreams := []StreamBinding{
+		{
+			Name:          "gfm-2802cd7f-join_0-out_0",
+			SubjectPrefix: "gfm-2802cd7f-join_0-out_0",
+			Subjects: []string{
+				"gfm-2802cd7f-join_0-out_0.0",
+			},
+		},
+	}
+	if !reflect.DeepEqual(joinOutput.Streams, wantJoinStreams) {
+		t.Fatalf("joinOutput.Streams = %#v, want %#v", joinOutput.Streams, wantJoinStreams)
+	}
+
+	sinkInput, err := graph.GetInput("sink_0")
+	if err != nil {
+		t.Fatalf("GetInput(sink_0) returned error: %v", err)
+	}
+	wantSinkInput := InputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-2802cd7f-join_0-out_0",
+				SubjectPrefix: "gfm-2802cd7f-join_0-out_0",
+				Subjects: []string{
+					"gfm-2802cd7f-join_0-out_0.0",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
+		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
+	}
+}
+
+// Topology:
+//
+//	┌───────────────┐         ┌────────────┐         ┌───────────┐
+//	│ ingestor_0 x2 ├── in ──►│ dedup_0 x2 ├── in ──►│ sink_0 x2 │
+//	└───────────────┘         └────────────┘         └───────────┘
+func TestGraphDedupOutputNamingTwoTwo(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-1",
+		Nodes: []NodeConfig{
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 2, Name: "orders.events"},
+			{ID: "dedup_0", Type: NodeTypeDedup, Replicas: 2},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 2},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "ingestor_0", TargetID: "dedup_0", TargetInputType: InputTypeIn},
+			{ID: "e2", SourceID: "dedup_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	output, err := graph.GetOutput("dedup_0")
+	if err != nil {
+		t.Fatalf("GetOutput returned error: %v", err)
+	}
+
+	wantStreams := []StreamBinding{
+		{
+			Name:          "gfm-1528386a-dedup_0-out_0",
+			SubjectPrefix: "gfm-1528386a-dedup_0-out_0",
+			Subjects: []string{
+				"gfm-1528386a-dedup_0-out_0.0",
+			},
+		},
+		{
+			Name:          "gfm-1528386a-dedup_0-out_1",
+			SubjectPrefix: "gfm-1528386a-dedup_0-out_1",
+			Subjects: []string{
+				"gfm-1528386a-dedup_0-out_1.1",
+			},
+		},
+	}
+	if !reflect.DeepEqual(output.Streams, wantStreams) {
+		t.Fatalf("output.Streams = %#v, want %#v", output.Streams, wantStreams)
+	}
+}
+
+// Topology:
+//
+//	┌───────────────┐         ┌────────────┐         ┌───────────┐
+//	│ ingestor_0 x3 ├── in ──►│ dedup_0 x2 ├── in ──►│ sink_0 x1 │
+//	└───────────────┘         └────────────┘         └───────────┘
+func TestGraphIngestorDedupSinkThreeTwoOne(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(
+		Config{
+			PipelineID: "pipe-1",
+			Nodes: []NodeConfig{
+				{
+					ID:       "ingestor_0",
+					Type:     NodeTypeIngestor,
+					Replicas: 3,
+				},
+				{
+					ID:       "dedup_0",
+					Type:     NodeTypeDedup,
+					Replicas: 2,
+				},
+				{
+					ID:       "sink_0",
+					Type:     NodeTypeSink,
+					Replicas: 1,
+				},
+			},
+			Edges: []EdgeConfig{
+				{
+					ID:              "e1",
+					SourceID:        "ingestor_0",
+					TargetID:        "dedup_0",
+					TargetInputType: InputTypeIn,
+				},
+				{
+					ID:              "e2",
+					SourceID:        "dedup_0",
+					TargetID:        "sink_0",
+					TargetInputType: InputTypeIn,
+				},
+			},
+		})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	ingestorOutput, err := graph.GetOutput("ingestor_0")
+	if err != nil {
+		t.Fatalf("GetOutput(ingestor_0) returned error: %v", err)
+	}
+	wantIngestorOutput := OutputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-1528386a-ingestor_0-out_0",
+				SubjectPrefix: "gfm-1528386a-ingestor_0-out_0",
+				Subjects: []string{
+					"gfm-1528386a-ingestor_0-out_0.0",
+					"gfm-1528386a-ingestor_0-out_0.2",
+				},
+			},
+			{
+				Name:          "gfm-1528386a-ingestor_0-out_1",
+				SubjectPrefix: "gfm-1528386a-ingestor_0-out_1",
+				Subjects: []string{
+					"gfm-1528386a-ingestor_0-out_1.1",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(ingestorOutput, wantIngestorOutput) {
+		t.Fatalf("ingestorOutput = %#v, want %#v", ingestorOutput, wantIngestorOutput)
+	}
+
+	dedupInput, err := graph.GetInput("dedup_0")
+	if err != nil {
+		t.Fatalf("GetInput(dedup_0) returned error: %v", err)
+	}
+	wantDedupInput := InputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-1528386a-ingestor_0-out_0",
+				SubjectPrefix: "gfm-1528386a-ingestor_0-out_0",
+				Subjects: []string{
+					"gfm-1528386a-ingestor_0-out_0.0",
+					"gfm-1528386a-ingestor_0-out_0.2",
+				},
+			},
+			{
+				Name:          "gfm-1528386a-ingestor_0-out_1",
+				SubjectPrefix: "gfm-1528386a-ingestor_0-out_1",
+				Subjects: []string{
+					"gfm-1528386a-ingestor_0-out_1.1",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(dedupInput, wantDedupInput) {
+		t.Fatalf("dedupInput = %#v, want %#v", dedupInput, wantDedupInput)
+	}
+
+	dedupOutput, err := graph.GetOutput("dedup_0")
+	if err != nil {
+		t.Fatalf("GetOutput(dedup_0) returned error: %v", err)
+	}
+	wantDedupOutput := OutputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-1528386a-dedup_0-out_0",
+				SubjectPrefix: "gfm-1528386a-dedup_0-out_0",
+				Subjects: []string{
+					"gfm-1528386a-dedup_0-out_0.0",
+					"gfm-1528386a-dedup_0-out_0.1",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(dedupOutput, wantDedupOutput) {
+		t.Fatalf("dedupOutput = %#v, want %#v", dedupOutput, wantDedupOutput)
+	}
+
+	sinkInput, err := graph.GetInput("sink_0")
+	if err != nil {
+		t.Fatalf("GetInput(sink_0) returned error: %v", err)
+	}
+	wantSinkInput := InputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-1528386a-dedup_0-out_0",
+				SubjectPrefix: "gfm-1528386a-dedup_0-out_0",
+				Subjects: []string{
+					"gfm-1528386a-dedup_0-out_0.0",
+					"gfm-1528386a-dedup_0-out_0.1",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
+		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
+	}
+}
+
+// Topology:
+//
+//	┌───────────────┐         ┌────────────┐
+//	│ ingestor_0 x2 ├── in ──►│ dedup_0 x2 ├──── left  ────┐
+//	└───────────────┘         └────────────┘               │
+//	                                                    ┌───▼──────┐         ┌───────────┐
+//	                                                    │ join_0 x1├── in ──►│ sink_0 x1 │
+//	                                                    └───▲──────┘         └───────────┘
+//	┌───────────────┐         ┌────────────┐               │
+//	│ ingestor_1 x3 ├── in ──►│ dedup_1 x3 ├──── right  ───┘
+//	└───────────────┘         └────────────┘
+func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-join",
+		Nodes: []NodeConfig{
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 2, Name: "users"},
+			{ID: "dedup_0", Type: NodeTypeDedup, Replicas: 2},
+			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 3, Name: "accounts"},
+			{ID: "dedup_1", Type: NodeTypeDedup, Replicas: 3},
+			{ID: "join_0", Type: NodeTypeJoin, Replicas: 1},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "ingestor_0", TargetID: "dedup_0", TargetInputType: InputTypeIn},
+			{ID: "e2", SourceID: "dedup_0", TargetID: "join_0", TargetInputType: InputTypeLeft},
+			{ID: "e3", SourceID: "ingestor_1", TargetID: "dedup_1", TargetInputType: InputTypeIn},
+			{ID: "e4", SourceID: "dedup_1", TargetID: "join_0", TargetInputType: InputTypeRight},
+			{ID: "e5", SourceID: "join_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	ingestor0Output, err := graph.GetOutput("ingestor_0")
+	if err != nil {
+		t.Fatalf("GetOutput(ingestor_0) returned error: %v", err)
+	}
+	wantIngestor0Output := OutputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-2802cd7f-ingestor_0-out_0",
+				SubjectPrefix: "gfm-2802cd7f-ingestor_0-out_0",
+				Subjects: []string{
+					"gfm-2802cd7f-ingestor_0-out_0.0",
+				},
+			},
+			{
+				Name:          "gfm-2802cd7f-ingestor_0-out_1",
+				SubjectPrefix: "gfm-2802cd7f-ingestor_0-out_1",
+				Subjects: []string{
+					"gfm-2802cd7f-ingestor_0-out_1.1",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(ingestor0Output, wantIngestor0Output) {
+		t.Fatalf("ingestor0Output = %#v, want %#v", ingestor0Output, wantIngestor0Output)
+	}
+
+	dedup0Input, err := graph.GetInput("dedup_0")
+	if err != nil {
+		t.Fatalf("GetInput(dedup_0) returned error: %v", err)
+	}
+	wantDedup0Input := InputBinding(wantIngestor0Output)
+	if !reflect.DeepEqual(dedup0Input, wantDedup0Input) {
+		t.Fatalf("dedup0Input = %#v, want %#v", dedup0Input, wantDedup0Input)
+	}
+
+	dedup0Output, err := graph.GetOutput("dedup_0")
+	if err != nil {
+		t.Fatalf("GetOutput(dedup_0) returned error: %v", err)
+	}
+	wantDedup0Output := OutputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-2802cd7f-dedup_0-out_0",
+				SubjectPrefix: "gfm-2802cd7f-dedup_0-out_0",
+				Subjects: []string{
+					"gfm-2802cd7f-dedup_0-out_0.0",
+					"gfm-2802cd7f-dedup_0-out_0.1",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(dedup0Output, wantDedup0Output) {
+		t.Fatalf("dedup0Output = %#v, want %#v", dedup0Output, wantDedup0Output)
+	}
+
+	ingestor1Output, err := graph.GetOutput("ingestor_1")
+	if err != nil {
+		t.Fatalf("GetOutput(ingestor_1) returned error: %v", err)
+	}
+	wantIngestor1Output := OutputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-2802cd7f-ingestor_1-out_0",
+				SubjectPrefix: "gfm-2802cd7f-ingestor_1-out_0",
+				Subjects: []string{
+					"gfm-2802cd7f-ingestor_1-out_0.0",
+				},
+			},
+			{
+				Name:          "gfm-2802cd7f-ingestor_1-out_1",
+				SubjectPrefix: "gfm-2802cd7f-ingestor_1-out_1",
+				Subjects: []string{
+					"gfm-2802cd7f-ingestor_1-out_1.1",
+				},
+			},
+			{
+				Name:          "gfm-2802cd7f-ingestor_1-out_2",
+				SubjectPrefix: "gfm-2802cd7f-ingestor_1-out_2",
+				Subjects: []string{
+					"gfm-2802cd7f-ingestor_1-out_2.2",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(ingestor1Output, wantIngestor1Output) {
+		t.Fatalf("ingestor1Output = %#v, want %#v", ingestor1Output, wantIngestor1Output)
+	}
+
+	dedup1Input, err := graph.GetInput("dedup_1")
+	if err != nil {
+		t.Fatalf("GetInput(dedup_1) returned error: %v", err)
+	}
+	wantDedup1Input := InputBinding(wantIngestor1Output)
+	if !reflect.DeepEqual(dedup1Input, wantDedup1Input) {
+		t.Fatalf("dedup1Input = %#v, want %#v", dedup1Input, wantDedup1Input)
+	}
+
+	dedup1Output, err := graph.GetOutput("dedup_1")
+	if err != nil {
+		t.Fatalf("GetOutput(dedup_1) returned error: %v", err)
+	}
+	wantDedup1Output := OutputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-2802cd7f-dedup_1-out_0",
+				SubjectPrefix: "gfm-2802cd7f-dedup_1-out_0",
+				Subjects: []string{
+					"gfm-2802cd7f-dedup_1-out_0.0",
+					"gfm-2802cd7f-dedup_1-out_0.1",
+					"gfm-2802cd7f-dedup_1-out_0.2",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(dedup1Output, wantDedup1Output) {
+		t.Fatalf("dedup1Output = %#v, want %#v", dedup1Output, wantDedup1Output)
+	}
+
+	joinInput, err := graph.GetJoinInput("join_0")
+	if err != nil {
+		t.Fatalf("GetJoinInput(join_0) returned error: %v", err)
+	}
+	wantJoinInput := JoinInputBinding{
+		Left:  InputBinding(wantDedup0Output),
+		Right: InputBinding(wantDedup1Output),
+	}
+	if !reflect.DeepEqual(joinInput, wantJoinInput) {
+		t.Fatalf("joinInput = %#v, want %#v", joinInput, wantJoinInput)
+	}
+
+	joinOutput, err := graph.GetOutput("join_0")
+	if err != nil {
+		t.Fatalf("GetOutput(join_0) returned error: %v", err)
+	}
+	wantJoinOutput := OutputBinding{
+		Streams: []StreamBinding{
+			{
+				Name:          "gfm-2802cd7f-join_0-out_0",
+				SubjectPrefix: "gfm-2802cd7f-join_0-out_0",
+				Subjects: []string{
+					"gfm-2802cd7f-join_0-out_0.0",
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(joinOutput, wantJoinOutput) {
+		t.Fatalf("joinOutput = %#v, want %#v", joinOutput, wantJoinOutput)
+	}
+
+	sinkInput, err := graph.GetInput("sink_0")
+	if err != nil {
+		t.Fatalf("GetInput(sink_0) returned error: %v", err)
+	}
+	wantSinkInput := InputBinding(wantJoinOutput)
+	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
+		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
+	}
+}
+
+func TestGraphGetOutputIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	config := Config{
+		PipelineID: "pipe-1",
+		Nodes: []NodeConfig{
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 3, Name: "orders.events"},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 2},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "ingestor_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	}
+
+	firstGraph, err := New(config)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	first, err := firstGraph.GetOutput("ingestor_0")
+	if err != nil {
+		t.Fatalf("first GetOutput returned error: %v", err)
+	}
+
+	secondGraph, err := New(config)
+	if err != nil {
+		t.Fatalf("second New returned error: %v", err)
+	}
+
+	second, err := secondGraph.GetOutput("ingestor_0")
+	if err != nil {
+		t.Fatalf("second GetOutput returned error: %v", err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("GetOutput returned different results across calls: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestNewRejectsCycle(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(Config{
+		PipelineID: "pipe-cycle",
+		Nodes: []NodeConfig{
+			{ID: "dedup_0", Type: NodeTypeDedup, Replicas: 1},
+			{ID: "dedup_1", Type: NodeTypeDedup, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "dedup_0", TargetID: "dedup_1", TargetInputType: InputTypeIn},
+			{ID: "e2", SourceID: "dedup_1", TargetID: "dedup_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err == nil {
+		t.Fatal("New returned nil error, want cycle validation error")
+	}
+	if got, want := err.Error(), "graph contains a cycle"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func TestResolveOutputRejectsMissingNodes(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-1",
+		Nodes: []NodeConfig{
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1, Name: "orders.events"},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "ingestor_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	_, err = graph.resolveOutput(EdgeConfig{ID: "broken", SourceID: "missing", TargetID: "sink_0", TargetInputType: InputTypeIn})
+	if err == nil {
+		t.Fatal("resolveOutput returned nil error for missing source node")
+	}
+	if got, want := err.Error(), `edge "broken" source node "missing" not found`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+
+	_, err = graph.resolveOutput(EdgeConfig{ID: "broken", SourceID: "ingestor_0", TargetID: "missing", TargetInputType: InputTypeIn})
+	if err == nil {
+		t.Fatal("resolveOutput returned nil error for missing target node")
+	}
+	if got, want := err.Error(), `edge "broken" target node "missing" not found`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func TestGetInputRejectsJoinNode(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-join",
+		Nodes: []NodeConfig{
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1, Name: "users"},
+			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 1, Name: "accounts"},
+			{ID: "join_0", Type: NodeTypeJoin, Replicas: 1},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "ingestor_0", TargetID: "join_0", TargetInputType: InputTypeLeft},
+			{ID: "e2", SourceID: "ingestor_1", TargetID: "join_0", TargetInputType: InputTypeRight},
+			{ID: "e3", SourceID: "join_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	_, err = graph.GetInput("join_0")
+	if err == nil {
+		t.Fatal("GetInput returned nil error for join node")
+	}
+	if got, want := err.Error(), `join node "join_0" requires GetJoinInput`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func TestGetJoinInputRejectsNonJoinNode(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-1",
+		Nodes: []NodeConfig{
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1, Name: "orders.events"},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "ingestor_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	_, err = graph.GetJoinInput("sink_0")
+	if err == nil {
+		t.Fatal("GetJoinInput returned nil error for non-join node")
+	}
+	if got, want := err.Error(), `node "sink_0" is not a join node`; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
