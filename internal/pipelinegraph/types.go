@@ -17,6 +17,10 @@ const (
 	InputTypeRight InputType = "right"
 )
 
+func (it InputType) String() string {
+	return string(it)
+}
+
 type Config struct {
 	PipelineID string       `json:"pipeline_id"`
 	Nodes      []NodeConfig `json:"nodes"`
@@ -27,7 +31,6 @@ type NodeConfig struct {
 	ID       string   `json:"id"`
 	Type     NodeType `json:"type"`
 	Replicas int      `json:"replicas"`
-	Name     string   `json:"name,omitempty"`
 }
 
 type EdgeConfig struct {

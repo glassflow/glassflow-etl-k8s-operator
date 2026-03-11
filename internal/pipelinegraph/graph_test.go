@@ -20,7 +20,6 @@ func TestGraphIngestorSinkTwoTwo(t *testing.T) {
 				ID:       "ingestor_0",
 				Type:     NodeTypeIngestor,
 				Replicas: 2,
-				Name:     "orders.events",
 			},
 			{
 				ID:       "sink_0",
@@ -95,8 +94,8 @@ func TestGraphTwoIngestorsJoinSink(t *testing.T) {
 	graph, err := New(Config{
 		PipelineID: "pipe-join",
 		Nodes: []NodeConfig{
-			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 3, Name: "users"},
-			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 2, Name: "accounts"},
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 3},
+			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 2},
 			{ID: "join_0", Type: NodeTypeJoin, Replicas: 1},
 			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
 		},
@@ -195,7 +194,7 @@ func TestGraphDedupOutputNamingTwoTwo(t *testing.T) {
 	graph, err := New(Config{
 		PipelineID: "pipe-1",
 		Nodes: []NodeConfig{
-			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 2, Name: "orders.events"},
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 2},
 			{ID: "dedup_0", Type: NodeTypeDedup, Replicas: 2},
 			{ID: "sink_0", Type: NodeTypeSink, Replicas: 2},
 		},
@@ -393,9 +392,9 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	graph, err := New(Config{
 		PipelineID: "pipe-join",
 		Nodes: []NodeConfig{
-			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 2, Name: "users"},
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 2},
 			{ID: "dedup_0", Type: NodeTypeDedup, Replicas: 2},
-			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 3, Name: "accounts"},
+			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 3},
 			{ID: "dedup_1", Type: NodeTypeDedup, Replicas: 3},
 			{ID: "join_0", Type: NodeTypeJoin, Replicas: 1},
 			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
@@ -577,7 +576,7 @@ func TestGraphGetOutputIsDeterministic(t *testing.T) {
 	config := Config{
 		PipelineID: "pipe-1",
 		Nodes: []NodeConfig{
-			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 3, Name: "orders.events"},
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 3},
 			{ID: "sink_0", Type: NodeTypeSink, Replicas: 2},
 		},
 		Edges: []EdgeConfig{
@@ -637,7 +636,7 @@ func TestResolveOutputRejectsMissingNodes(t *testing.T) {
 	graph, err := New(Config{
 		PipelineID: "pipe-1",
 		Nodes: []NodeConfig{
-			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1, Name: "orders.events"},
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1},
 			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
 		},
 		Edges: []EdgeConfig{
@@ -671,8 +670,8 @@ func TestGetInputRejectsJoinNode(t *testing.T) {
 	graph, err := New(Config{
 		PipelineID: "pipe-join",
 		Nodes: []NodeConfig{
-			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1, Name: "users"},
-			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 1, Name: "accounts"},
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1},
+			{ID: "ingestor_1", Type: NodeTypeIngestor, Replicas: 1},
 			{ID: "join_0", Type: NodeTypeJoin, Replicas: 1},
 			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
 		},
@@ -701,7 +700,7 @@ func TestGetJoinInputRejectsNonJoinNode(t *testing.T) {
 	graph, err := New(Config{
 		PipelineID: "pipe-1",
 		Nodes: []NodeConfig{
-			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1, Name: "orders.events"},
+			{ID: "ingestor_0", Type: NodeTypeIngestor, Replicas: 1},
 			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
 		},
 		Edges: []EdgeConfig{
