@@ -173,8 +173,8 @@ func (r *PipelineReconciler) isOperatorManagedNamespace(ns v1.Namespace) bool {
 }
 
 // getResourceName generates a unique resource name for the given pipeline
-func (r *PipelineReconciler) getResourceName(p etlv1alpha1.Pipeline, baseName string) string {
-	return r.getPipelineScopedResourceName(p, baseName, maxK8sResourceNameLength)
+func (r *PipelineReconciler) getResourceName(p etlv1alpha1.Pipeline) string {
+	return r.getPipelineScopedResourceName(p, constants.SecretSuffix, maxK8sResourceNameLength)
 }
 
 // getStatefulSetResourceName generates a StatefulSet resource name that keeps

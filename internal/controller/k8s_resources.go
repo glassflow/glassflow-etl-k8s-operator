@@ -267,7 +267,7 @@ func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, 
 		return nil
 	}
 
-	secretName := types.NamespacedName{Namespace: r.PipelinesNamespaceName, Name: r.getResourceName(p, constants.SecretSuffix)}
+	secretName := types.NamespacedName{Namespace: r.PipelinesNamespaceName, Name: r.getResourceName(p)}
 	var secret v1.Secret
 	err := r.Get(ctx, secretName, &secret)
 	if err != nil {

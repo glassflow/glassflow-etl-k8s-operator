@@ -50,7 +50,7 @@ func TestGetResourceNameDoesNotTruncateCurrentSecretNames(t *testing.T) {
 		},
 	}
 
-	name := reconciler.getResourceName(pipeline, "secret")
+	name := reconciler.getResourceName(pipeline)
 
 	expectedName := fmt.Sprintf("%s%s-%s", pipelineScopedResourcePrefix, pipeline.Spec.ID, "secret")
 	if name != expectedName {
@@ -74,7 +74,7 @@ func TestPipelineScopedResourceNameAutoNamespaceUsesBaseName(t *testing.T) {
 		},
 	}
 
-	if got, want := reconciler.getResourceName(pipeline, "secret"), "secret"; got != want {
+	if got, want := reconciler.getResourceName(pipeline), "secret"; got != want {
 		t.Fatalf("unexpected resource name: got=%q want=%q", got, want)
 	}
 	if got, want := reconciler.getStatefulSetResourceName(pipeline, "ingestor-0"), "ingestor-0"; got != want {
