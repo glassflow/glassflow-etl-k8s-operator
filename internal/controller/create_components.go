@@ -59,7 +59,7 @@ func (r *PipelineReconciler) createPipelineComponents(
 	namespace := r.getTargetNamespace(*p)
 
 	// Step 1: Ensure Sink StatefulSet is ready
-	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, r.getResourceName(*p, constants.SinkComponent), r.createSink, ns, labels, secret)
+	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, r.getStatefulSetResourceName(*p, constants.SinkComponent), r.createSink, ns, labels, secret)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -69,7 +69,7 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 	// Step 2: Ensure Join StatefulSet is ready (if enabled)
 	if p.Spec.Join.Enabled {
-		requeue, err = r.ensureStatefulSetReady(ctx, log, p, namespace, r.getResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
+		requeue, err = r.ensureStatefulSetReady(ctx, log, p, namespace, r.getStatefulSetResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -86,7 +86,7 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 	// Step 4: Ensure Ingestor StatefulSets are ready
 	for i := range p.Spec.Ingestor.Streams {
-		statefulSetName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		statefulSetName := r.getStatefulSetResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("check ingestor statefulset %s: %w", statefulSetName, err)
@@ -114,7 +114,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 	ing := p.Spec.Ingestor
 
 	for i, t := range ing.Streams {
-		resourceRef := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		resourceRef := r.getStatefulSetResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
@@ -232,7 +232,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		return fmt.Errorf("join requires at least 2 source streams")
 	}
 
-	resourceRef := r.getResourceName(p, constants.JoinComponent)
+	resourceRef := r.getStatefulSetResourceName(p, constants.JoinComponent)
 	namespace := ns.GetName()
 
 	joinLabels := r.getJoinLabels()
@@ -331,7 +331,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 // createSink creates a sink StatefulSet (and headless Service) for the pipeline.
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	resourceRef := r.getResourceName(p, constants.SinkComponent)
+	resourceRef := r.getStatefulSetResourceName(p, constants.SinkComponent)
 	namespace := ns.GetName()
 
 	sinkLabels := r.getSinkLabels()
@@ -432,7 +432,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			continue
 		}
 
-		resourceRef := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+		resourceRef := r.getStatefulSetResourceName(p, fmt.Sprintf("dedup-%d", i))
 		serviceName := resourceRef
 
 		dedupLabels := r.getDedupLabels(stream.TopicName)
@@ -609,7 +609,7 @@ func (r *PipelineReconciler) areDedupStatefulSetsReady(
 			continue
 		}
 
-		dedupName := r.getResourceName(p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
+		dedupName := r.getStatefulSetResourceName(p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
 		ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
 		if err != nil {
 			return false, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
@@ -723,7 +723,7 @@ func (r *PipelineReconciler) reconcileIngestorTeardown(
 			return result, err
 		}
 
-		deploymentName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
+		deploymentName := r.getStatefulSetResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		result, err = r.ensureStatefulSetDeleted(ctx, log, namespace, "ingestor", deploymentName)
 		if err != nil || result.Requeue {
 			return result, err
@@ -761,7 +761,7 @@ func (r *PipelineReconciler) reconcileDedupTeardown(
 			}
 		}
 
-		statefulSetName := r.getResourceName(*p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
+		statefulSetName := r.getStatefulSetResourceName(*p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
 		result, err = r.ensureStatefulSetDeleted(ctx, log, namespace, "dedup", statefulSetName)
 		if err != nil || result.Requeue {
 			return result, err
@@ -803,7 +803,7 @@ func (r *PipelineReconciler) reconcileJoinTeardown(
 		return result, err
 	}
 
-	statefulSetName := r.getResourceName(*p, constants.JoinComponent)
+	statefulSetName := r.getStatefulSetResourceName(*p, constants.JoinComponent)
 	return r.ensureStatefulSetDeleted(ctx, log, namespace, constants.JoinComponent, statefulSetName)
 }
 
@@ -835,7 +835,7 @@ func (r *PipelineReconciler) reconcileSinkTeardown(
 		return result, err
 	}
 
-	deploymentName := r.getResourceName(*p, constants.SinkComponent)
+	deploymentName := r.getStatefulSetResourceName(*p, constants.SinkComponent)
 	return r.ensureStatefulSetDeleted(ctx, log, namespace, constants.SinkComponent, deploymentName)
 }
 

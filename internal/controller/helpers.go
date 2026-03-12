@@ -27,6 +27,12 @@ import (
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 )
 
+const (
+	pipelineScopedResourcePrefix       = "gf-"
+	maxK8sResourceNameLength           = 63
+	maxStatefulSetNameLengthForRevHash = 52 // controller-revision-hash label value is "<sts-name>-<10 chars>"
+)
+
 // getKafkaIngestorLabels returns labels for Kafka ingestor components
 func (r *PipelineReconciler) getKafkaIngestorLabels(topic string) map[string]string {
 	labels := map[string]string{
@@ -168,10 +174,32 @@ func (r *PipelineReconciler) isOperatorManagedNamespace(ns v1.Namespace) bool {
 
 // getResourceName generates a unique resource name for the given pipeline
 func (r *PipelineReconciler) getResourceName(p etlv1alpha1.Pipeline, baseName string) string {
+	return r.getPipelineScopedResourceName(p, baseName, maxK8sResourceNameLength)
+}
+
+// getStatefulSetResourceName generates a StatefulSet resource name that keeps
+// controller-revision-hash label values within Kubernetes' 63-char limit.
+func (r *PipelineReconciler) getStatefulSetResourceName(p etlv1alpha1.Pipeline, baseName string) string {
+	return r.getPipelineScopedResourceName(p, baseName, maxStatefulSetNameLengthForRevHash)
+}
+
+func (r *PipelineReconciler) getPipelineScopedResourceName(p etlv1alpha1.Pipeline, baseName string, maxLen int) string {
 	if r.PipelinesNamespaceAuto {
 		return baseName
 	}
-	return fmt.Sprintf("gf-pipeline-%s-%s", p.Spec.ID, baseName)
+
+	// Format: gf-<pipeline-id>-<baseName>
+	reserved := len(pipelineScopedResourcePrefix) + 1 + len(baseName)
+	availableForPipelineID := maxLen - reserved
+	pipelineID := p.Spec.ID
+	if availableForPipelineID < 1 {
+		availableForPipelineID = 1
+	}
+	if len(pipelineID) > availableForPipelineID {
+		pipelineID = pipelineID[:availableForPipelineID]
+	}
+
+	return fmt.Sprintf("%s%s-%s", pipelineScopedResourcePrefix, pipelineID, baseName)
 }
 
 // ptrInt32 returns a pointer to an int32

@@ -468,7 +468,7 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 			continue
 		}
 
-		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+		dedupName := r.getStatefulSetResourceName(p, fmt.Sprintf("dedup-%d", i))
 
 		replicas := getDedupReplicas(p)
 
