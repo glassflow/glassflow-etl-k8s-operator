@@ -300,7 +300,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 
 	labels := preparePipelineLabels(p)
 
-	secretName := r.getResourceName(p, constants.SecretSuffix)
+	secretName := r.getResourceName(p)
 	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: secretName}, labels, p)
 	if err != nil {
 		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
@@ -661,7 +661,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Get secret
-	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SecretSuffix)}
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p)}
 	var secret v1.Secret
 	err = r.Get(ctx, secretName, &secret)
 	if err != nil {
@@ -840,7 +840,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	// Update the pipeline config secret with new config
 	labels := preparePipelineLabels(p)
-	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, constants.SecretSuffix)}
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p)}
 	secret, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
 		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
