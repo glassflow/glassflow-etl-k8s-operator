@@ -20,21 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go/jetstream"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/pipelinegraph"
 )
-
-func getJoinInputStreamName(p etlv1alpha1.Pipeline, stream etlv1alpha1.SourceStream) string {
-	return getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
-}
 
 // checkConsumerPendingMessages checks if a specific consumer has pending messages
 func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, streamName, consumerName string) error {
@@ -49,29 +43,44 @@ func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, s
 	return nil
 }
 
+func (r *PipelineReconciler) checkInputBindingPendingMessages(
+	ctx context.Context,
+	binding pipelinegraph.InputBinding,
+	consumerName string,
+) error {
+	for _, stream := range binding.Streams {
+		if err := r.checkConsumerPendingMessages(ctx, stream.Name, consumerName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // checkJoinPendingMessages checks if join consumers have pending messages
 func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	if !p.Spec.Join.Enabled {
 		return nil // No join, nothing to check
 	}
 
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for join checks: %w", err)
+	}
+	inputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve join input: %w", err)
+	}
+
 	// Consumer names are generated from pipeline ID (aligned with glassflow-api).
 	leftConsumerName := getNATSJoinLeftConsumerName(p.Spec.ID)
 	rightConsumerName := getNATSJoinRightConsumerName(p.Spec.ID)
 
-	// Use generated stream names resolved by operator naming rules.
-	leftStreamName := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[0])
-	rightStreamName := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[1])
-
-	// Check left stream
-	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
-	if err != nil {
+	if err := r.checkInputBindingPendingMessages(ctx, inputs.Left, leftConsumerName); err != nil {
 		return err
 	}
 
-	// Check right stream
-	err = r.checkConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
-	if err != nil {
+	if err := r.checkInputBindingPendingMessages(ctx, inputs.Right, rightConsumerName); err != nil {
 		return err
 	}
 
@@ -81,31 +90,19 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 // checkSinkPendingMessages checks if sink consumer(s) have pending messages.
 func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	baseConsumerName := getNATSSinkConsumerName(p.Spec.ID)
-	if p.Spec.Join.Enabled {
-		sinkStreamName := getSinkInputStreamPrefix(p.Spec.ID) + "_0"
-		return r.checkConsumerPendingMessages(ctx, sinkStreamName, baseConsumerName)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for sink checks: %w", err)
 	}
-	if useNStreamSinkPath(p) || useDedupNStreamPath(p) {
-		// sinkReplicas streams; sink uses the same durable consumer name on each stream.
-		sinkReplicas := getSinkReplicas(p)
-		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-		for n := 0; n < sinkReplicas; n++ {
-			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
-			consumerName := baseConsumerName
-			if err := r.checkConsumerPendingMessages(ctx, streamName, consumerName); err != nil {
-				return err
-			}
-		}
-		return nil
+	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve sink input: %w", err)
 	}
 
-	sinkStreamName := getSinkInputStreamPrefix(p.Spec.ID) + "_0"
-	return r.checkConsumerPendingMessages(ctx, sinkStreamName, baseConsumerName)
+	return r.checkInputBindingPendingMessages(ctx, sinkInput, baseConsumerName)
 }
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
-// When useDedupNStreamPath: dedup pod d reads from getDedupInputStreamPrefix_d with shared consumer base name;
-// check all dedupReplicas streams.
 func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
 	stream := p.Spec.Ingestor.Streams[streamIndex]
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
@@ -113,163 +110,48 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 	}
 
 	baseConsumerName := getNATSDedupConsumerName(p.Spec.ID)
-	if useDedupNStreamPath(p) {
-		dedupReplicas := getDedupReplicas(p)
-		streamNamePrefix := getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)
-		for d := 0; d < dedupReplicas; d++ {
-			streamName := streamNamePrefix + "_" + strconv.Itoa(d)
-			consumerName := baseConsumerName
-			if err := r.checkConsumerPendingMessages(ctx, streamName, consumerName); err != nil {
-				return err
-			}
-		}
-		return nil
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for dedup checks: %w", err)
 	}
-	inputStreamName := getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
-	return r.checkConsumerPendingMessages(ctx, inputStreamName, baseConsumerName)
-}
-
-// resolveStreamLimits returns effective stream limits for a pipeline, with CRD values
-// taking precedence over operator-level defaults.
-func (r *PipelineReconciler) resolveStreamLimits(p etlv1alpha1.Pipeline) (time.Duration, int64) {
-	maxAge, maxBytes := r.NATSClient.DefaultStreamLimits()
-	if p.Spec.Resources != nil && p.Spec.Resources.Nats != nil && p.Spec.Resources.Nats.Stream != nil {
-		s := p.Spec.Resources.Nats.Stream
-		if s.MaxAge.Duration != 0 {
-			maxAge = s.MaxAge.Duration
-		}
-		if !s.MaxBytes.IsZero() {
-			maxBytes = s.MaxBytes.Value()
-		}
+	dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, streamIndex))
+	if err != nil {
+		return fmt.Errorf("resolve dedup input for stream %d: %w", streamIndex, err)
 	}
 
-	return maxAge, maxBytes
+	return r.checkInputBindingPendingMessages(ctx, dedupInput, baseConsumerName)
 }
 
-// createNATSStreams creates all NATS streams and KV stores for a pipeline
+// createNATSStreams creates all NATS streams and KV stores for a pipeline.
 func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
-	maxAge, maxBytes := r.resolveStreamLimits(p)
-
-	dlqStreamName := getDLQStreamName(p.Spec.ID)
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return fmt.Errorf("build NATS resource plan: %w", err)
+	}
 
 	// create DLQ
-	err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-		Name:     dlqStreamName,
-		MaxAge:   maxAge,
-		MaxBytes: maxBytes,
-	})
+	err = r.NATSClient.CreateOrUpdateStream(ctx, plan.DLQStream)
 	if err != nil {
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "create_stream", "failure", p.Spec.ID)
 		})
-		return fmt.Errorf("create stream %s: %w", dlqStreamName, err)
+		return fmt.Errorf("create stream %s: %w", plan.DLQStream.Name, err)
 	}
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordNATSOperation(ctx, "create_dlq_stream", "success", p.Spec.ID)
 	})
 
-	// create join stream
-	if p.Spec.Join.Enabled {
-
-		subjectPrefix := getJoinOutputSubjectPrefix(p.Spec.ID)
-		// create sink input stream (join output stream)
-		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-		streamName := streamNamePrefix + "_0"
-		subjects := getSubjectsForStreamIndex(subjectPrefix, 1, 1, 0)
-
-		err = r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-			Name:     streamName,
-			Subjects: subjects,
-			MaxAge:   maxAge,
-			MaxBytes: maxBytes,
-		})
+	for _, stream := range plan.Streams {
+		err = r.NATSClient.CreateOrUpdateStream(ctx, stream)
 		if err != nil {
-			return fmt.Errorf("create stream %s: %w", streamName, err)
+			return fmt.Errorf("create stream %s: %w", stream.Name, err)
 		}
+	}
 
-		// create join KV stores for each source stream
-		// The join KV store names are the same as the stream names
-		for streamIndex, stream := range p.Spec.Ingestor.Streams {
-			// Use LeftBufferTTL for the first stream, RightBufferTTL for the second
-			var ttl time.Duration
-			if streamIndex == 0 {
-				ttl = p.Spec.Join.LeftBufferTTL
-			} else {
-				ttl = p.Spec.Join.RightBufferTTL
-			}
-
-			kvStreamName := getJoinInputStreamName(p, stream)
-
-			err = r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStreamName, ttl)
-			if err != nil {
-				return fmt.Errorf("create join KV store %s: %w", kvStreamName, err)
-			}
-
-			subjectPrefix = getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
-			subjects = getSubjectsForStreamIndex(subjectPrefix, 1, 1, 0)
-
-			err = r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-				Name:     kvStreamName,
-				Subjects: subjects,
-				MaxAge:   maxAge,
-				MaxBytes: maxBytes,
-			})
-			if err != nil {
-				return fmt.Errorf("create stream %s: %w", kvStreamName, err)
-			}
-		}
-	} else {
-		source := p.Spec.Ingestor.Streams[0]
-		var subjectPrefix string
-		var subjectCount int
-		if isDedupEnabled(p) {
-			// create dedup input / ingestor output streams
-			ingestorSubjectPrefix := getIngestorOutputSubjectPrefix(p.Spec.ID, source.TopicName)
-			dedupInputStreamPrefix := getDedupInputStreamPrefix(p.Spec.ID, source.TopicName)
-			ingestorReplicas := getIngestorReplicas(p, 0)
-			dedupReplicas := getDedupReplicas(p)
-			for d := 0; d < dedupReplicas; d++ {
-				streamName := dedupInputStreamPrefix + "_" + strconv.Itoa(d)
-				subjects := getSubjectsForStreamIndex(ingestorSubjectPrefix, ingestorReplicas, dedupReplicas, d)
-				if len(subjects) == 0 {
-					continue
-				}
-				err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-					Name:     streamName,
-					Subjects: subjects,
-					MaxAge:   maxAge,
-					MaxBytes: maxBytes,
-				})
-				if err != nil {
-					return fmt.Errorf("create stream %s: %w", streamName, err)
-				}
-			}
-
-			subjectPrefix = getDedupOutputSubjectPrefix(p.Spec.ID, source.TopicName)
-			subjectCount = getDedupReplicas(p)
-		} else {
-			subjectPrefix = getIngestorOutputSubjectPrefix(p.Spec.ID, source.TopicName)
-			subjectCount = getIngestorReplicas(p, 0)
-		}
-
-		// create sink input stream (ingestor/dedup output stream)
-		sinkReplicas := getSinkReplicas(p)
-		for n := 0; n < sinkReplicas; n++ {
-			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
-			subjects := getSubjectsForStreamIndex(subjectPrefix, subjectCount, sinkReplicas, n)
-			if len(subjects) == 0 {
-				continue
-			}
-			err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-				Name:     streamName,
-				Subjects: subjects,
-				MaxAge:   maxAge,
-				MaxBytes: maxBytes,
-			})
-			if err != nil {
-				return fmt.Errorf("create stream %s: %w", streamName, err)
-			}
+	for _, kvStore := range plan.JoinKVStores {
+		err = r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStore.Name, kvStore.TTL)
+		if err != nil {
+			return fmt.Errorf("create join KV store %s: %w", kvStore.Name, err)
 		}
 	}
 
@@ -299,13 +181,17 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		return fmt.Errorf("NATS client not available, skipping stream cleanup")
 	}
 
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return fmt.Errorf("build NATS resource plan: %w", err)
+	}
+
 	if deleteDLQ {
 		// delete the DLQ stream
-		dlqStreamName := getDLQStreamName(p.Spec.ID)
-		log.Info("deleting NATS DLQ stream", "stream", dlqStreamName)
-		err := r.deleteNATSStream(ctx, log, dlqStreamName)
+		log.Info("deleting NATS DLQ stream", "stream", plan.DLQStream.Name)
+		err = r.deleteNATSStream(ctx, log, plan.DLQStream.Name)
 		if err != nil {
-			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", dlqStreamName)
+			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", plan.DLQStream.Name)
 			r.recordMetricsIfEnabled(func(m *observability.Meter) {
 				m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
 			})
@@ -314,62 +200,23 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
 		})
-		log.Info("NATS DLQ stream deleted successfully", "stream", dlqStreamName)
+		log.Info("NATS DLQ stream deleted successfully", "stream", plan.DLQStream.Name)
 	} else {
 		log.Info("skipping NATS DLQ stream cleanup", "pipeline_id", p.Spec.ID)
 	}
 
-	// delete Join Streams and key value stores
-	if p.Spec.Join.Enabled {
-		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-		streamName := streamNamePrefix + "_0"
-
-		err := r.deleteNATSStream(ctx, log, streamName)
+	for _, kvStore := range plan.JoinKVStores {
+		err = r.deleteNATSKeyValueStore(ctx, log, kvStore.Name)
 		if err != nil {
-			return fmt.Errorf("delete stream %s: %w", streamName, err)
+			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "bucket", kvStore.Name)
+			return fmt.Errorf("failed to delete NATS KV Store: %w", err)
 		}
+	}
 
-		// delete join KV stores
-		for _, stream := range p.Spec.Ingestor.Streams {
-			kvStreamName := getJoinInputStreamName(p, stream)
-
-			err := r.deleteNATSKeyValueStore(ctx, log, kvStreamName)
-			if err != nil {
-				log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "stream", streamName)
-				return fmt.Errorf("failed to delete NATS KV Store: %w", err)
-			}
-
-			err = r.deleteNATSStream(ctx, log, kvStreamName)
-			if err != nil {
-				return fmt.Errorf("delete stream %s: %w", kvStreamName, err)
-			}
-		}
-
-	} else {
-		source := p.Spec.Ingestor.Streams[0]
-		if isDedupEnabled(p) {
-			// create dedup input / ingestor output streams
-			dedupInputStreamPrefix := getDedupInputStreamPrefix(p.Spec.ID, source.TopicName)
-			dedupReplicas := getDedupReplicas(p)
-			for d := 0; d < dedupReplicas; d++ {
-				streamName := dedupInputStreamPrefix + "_" + strconv.Itoa(d)
-
-				err := r.deleteNATSStream(ctx, log, streamName)
-				if err != nil {
-					return fmt.Errorf("delete stream %s: %w", streamName, err)
-				}
-			}
-		}
-
-		// create sink input stream (ingestor/dedup output stream)
-		sinkReplicas := getSinkReplicas(p)
-		for n := 0; n < sinkReplicas; n++ {
-			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
-			err := r.deleteNATSStream(ctx, log, streamName)
-			if err != nil {
-				return fmt.Errorf("delete stream %s: %w", streamName, err)
-			}
+	for _, stream := range plan.Streams {
+		err = r.deleteNATSStream(ctx, log, stream.Name)
+		if err != nil {
+			return fmt.Errorf("delete stream %s: %w", stream.Name, err)
 		}
 	}
 
