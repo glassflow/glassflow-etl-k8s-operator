@@ -113,31 +113,6 @@ func getSinkReplicas(p etlv1alpha1.Pipeline) int {
 	return replicas
 }
 
-func getIngestorReplicas(p etlv1alpha1.Pipeline, streamIndex int) int {
-	replicas := constants.DefaultMinReplicas
-	if p.Spec.Resources == nil || p.Spec.Resources.Ingestor == nil {
-		return replicas
-	}
-	ingRes := p.Spec.Resources.Ingestor
-	var comp *etlv1alpha1.ComponentResources
-	if p.Spec.Join.Enabled {
-		if streamIndex == 0 {
-			comp = ingRes.Left
-		} else {
-			comp = ingRes.Right
-		}
-	} else {
-		comp = ingRes.Base
-	}
-	if comp != nil && comp.Replicas != nil {
-		replicas = int(*comp.Replicas)
-	}
-	if replicas <= 0 {
-		return constants.DefaultMinReplicas
-	}
-	return replicas
-}
-
 func getDedupReplicas(p etlv1alpha1.Pipeline) int {
 	replicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil && p.Spec.Resources.Dedup.Replicas != nil {
