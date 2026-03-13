@@ -259,7 +259,17 @@ func isStreamDedupEnabled(stream etlv1alpha1.SourceStream) bool {
 }
 
 func transformsAreEnabled(spec etlv1alpha1.PipelineSpec) bool {
-	return spec.Transform.IsStatelessTransformEnabled ||
+	if spec.Transform.IsStatelessTransformEnabled ||
 		spec.Transform.IsFilterEnabled ||
-		spec.Transform.IsDedupEnabled
+		spec.Transform.IsDedupEnabled {
+		return true
+	}
+
+	for _, stream := range spec.Ingestor.Streams {
+		if stream.Deduplication != nil && stream.Deduplication.Enabled {
+			return true
+		}
+	}
+
+	return false
 }
