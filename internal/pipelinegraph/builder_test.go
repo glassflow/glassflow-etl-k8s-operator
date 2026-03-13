@@ -58,6 +58,9 @@ func TestConfigFromJoinlessPipelineSpecIngestorDedupSink(t *testing.T) {
 				},
 			},
 		},
+		Transform: etlv1alpha1.Transform{
+			IsDedupEnabled: true,
+		},
 		Resources: &etlv1alpha1.PipelineResources{
 			Ingestor: &etlv1alpha1.IngestorResources{
 				Base: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(3)},
