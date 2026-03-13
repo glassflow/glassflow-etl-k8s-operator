@@ -20,7 +20,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -157,18 +156,4 @@ func getNATSJoinRightConsumerName(pipelineID string) string {
 
 func getNATSDedupConsumerName(pipelineID string) string {
 	return getNATSConsumerName(pipelineID, "dedup", "input")
-}
-
-// getSubjectsForStreamIndex returns the list of subjects that map to stream index s
-// (round-robin: subject i -> stream i%targetStreamCount).
-// subjectPrefix is the subject prefix; subjects are subjectPrefix.0, ... subjectPrefix.(sourceSubjectCount-1).
-func getSubjectsForStreamIndex(subjectPrefix string, sourceSubjectCount, targetStreamCount, streamIndex int) []string {
-	if targetStreamCount <= 0 || streamIndex < 0 || streamIndex >= targetStreamCount {
-		return nil
-	}
-	var subjects []string
-	for i := streamIndex; i < sourceSubjectCount; i += targetStreamCount {
-		subjects = append(subjects, subjectPrefix+"."+strconv.Itoa(i))
-	}
-	return subjects
 }

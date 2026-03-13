@@ -21,14 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go/jetstream"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 )
 
@@ -129,147 +127,36 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 	return r.checkConsumerPendingMessages(ctx, inputStreamName, baseConsumerName)
 }
 
-// resolveStreamLimits returns effective stream limits for a pipeline, with CRD values
-// taking precedence over operator-level defaults.
-func (r *PipelineReconciler) resolveStreamLimits(p etlv1alpha1.Pipeline) (time.Duration, int64) {
-	maxAge, maxBytes := r.NATSClient.DefaultStreamLimits()
-	if p.Spec.Resources != nil && p.Spec.Resources.Nats != nil && p.Spec.Resources.Nats.Stream != nil {
-		s := p.Spec.Resources.Nats.Stream
-		if s.MaxAge.Duration != 0 {
-			maxAge = s.MaxAge.Duration
-		}
-		if !s.MaxBytes.IsZero() {
-			maxBytes = s.MaxBytes.Value()
-		}
+// createNATSStreams creates all NATS streams and KV stores for a pipeline.
+func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return fmt.Errorf("build NATS resource plan: %w", err)
 	}
 
-	return maxAge, maxBytes
-}
-
-// createNATSStreams creates all NATS streams and KV stores for a pipeline
-func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
-	maxAge, maxBytes := r.resolveStreamLimits(p)
-
-	dlqStreamName := getDLQStreamName(p.Spec.ID)
-
 	// create DLQ
-	err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-		Name:     dlqStreamName,
-		MaxAge:   maxAge,
-		MaxBytes: maxBytes,
-	})
+	err = r.NATSClient.CreateOrUpdateStream(ctx, plan.DLQStream)
 	if err != nil {
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "create_stream", "failure", p.Spec.ID)
 		})
-		return fmt.Errorf("create stream %s: %w", dlqStreamName, err)
+		return fmt.Errorf("create stream %s: %w", plan.DLQStream.Name, err)
 	}
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordNATSOperation(ctx, "create_dlq_stream", "success", p.Spec.ID)
 	})
 
-	// create join stream
-	if p.Spec.Join.Enabled {
-
-		subjectPrefix := getJoinOutputSubjectPrefix(p.Spec.ID)
-		// create sink input stream (join output stream)
-		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-		streamName := streamNamePrefix + "_0"
-		subjects := getSubjectsForStreamIndex(subjectPrefix, 1, 1, 0)
-
-		err = r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-			Name:     streamName,
-			Subjects: subjects,
-			MaxAge:   maxAge,
-			MaxBytes: maxBytes,
-		})
+	for _, stream := range plan.Streams {
+		err = r.NATSClient.CreateOrUpdateStream(ctx, stream)
 		if err != nil {
-			return fmt.Errorf("create stream %s: %w", streamName, err)
+			return fmt.Errorf("create stream %s: %w", stream.Name, err)
 		}
+	}
 
-		// create join KV stores for each source stream
-		// The join KV store names are the same as the stream names
-		for streamIndex, stream := range p.Spec.Ingestor.Streams {
-			// Use LeftBufferTTL for the first stream, RightBufferTTL for the second
-			var ttl time.Duration
-			if streamIndex == 0 {
-				ttl = p.Spec.Join.LeftBufferTTL
-			} else {
-				ttl = p.Spec.Join.RightBufferTTL
-			}
-
-			kvStreamName := getJoinInputStreamName(p, stream)
-
-			err = r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStreamName, ttl)
-			if err != nil {
-				return fmt.Errorf("create join KV store %s: %w", kvStreamName, err)
-			}
-
-			subjectPrefix = getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
-			subjects = getSubjectsForStreamIndex(subjectPrefix, 1, 1, 0)
-
-			err = r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-				Name:     kvStreamName,
-				Subjects: subjects,
-				MaxAge:   maxAge,
-				MaxBytes: maxBytes,
-			})
-			if err != nil {
-				return fmt.Errorf("create stream %s: %w", kvStreamName, err)
-			}
-		}
-	} else {
-		source := p.Spec.Ingestor.Streams[0]
-		var subjectPrefix string
-		var subjectCount int
-		if isDedupEnabled(p) {
-			// create dedup input / ingestor output streams
-			ingestorSubjectPrefix := getIngestorOutputSubjectPrefix(p.Spec.ID, source.TopicName)
-			dedupInputStreamPrefix := getDedupInputStreamPrefix(p.Spec.ID, source.TopicName)
-			ingestorReplicas := getIngestorReplicas(p, 0)
-			dedupReplicas := getDedupReplicas(p)
-			for d := 0; d < dedupReplicas; d++ {
-				streamName := dedupInputStreamPrefix + "_" + strconv.Itoa(d)
-				subjects := getSubjectsForStreamIndex(ingestorSubjectPrefix, ingestorReplicas, dedupReplicas, d)
-				if len(subjects) == 0 {
-					continue
-				}
-				err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-					Name:     streamName,
-					Subjects: subjects,
-					MaxAge:   maxAge,
-					MaxBytes: maxBytes,
-				})
-				if err != nil {
-					return fmt.Errorf("create stream %s: %w", streamName, err)
-				}
-			}
-
-			subjectPrefix = getDedupOutputSubjectPrefix(p.Spec.ID, source.TopicName)
-			subjectCount = getDedupReplicas(p)
-		} else {
-			subjectPrefix = getIngestorOutputSubjectPrefix(p.Spec.ID, source.TopicName)
-			subjectCount = getIngestorReplicas(p, 0)
-		}
-
-		// create sink input stream (ingestor/dedup output stream)
-		sinkReplicas := getSinkReplicas(p)
-		for n := 0; n < sinkReplicas; n++ {
-			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
-			subjects := getSubjectsForStreamIndex(subjectPrefix, subjectCount, sinkReplicas, n)
-			if len(subjects) == 0 {
-				continue
-			}
-			err := r.NATSClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
-				Name:     streamName,
-				Subjects: subjects,
-				MaxAge:   maxAge,
-				MaxBytes: maxBytes,
-			})
-			if err != nil {
-				return fmt.Errorf("create stream %s: %w", streamName, err)
-			}
+	for _, kvStore := range plan.JoinKVStores {
+		err = r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStore.Name, kvStore.TTL)
+		if err != nil {
+			return fmt.Errorf("create join KV store %s: %w", kvStore.Name, err)
 		}
 	}
 
@@ -299,13 +186,17 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		return fmt.Errorf("NATS client not available, skipping stream cleanup")
 	}
 
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return fmt.Errorf("build NATS resource plan: %w", err)
+	}
+
 	if deleteDLQ {
 		// delete the DLQ stream
-		dlqStreamName := getDLQStreamName(p.Spec.ID)
-		log.Info("deleting NATS DLQ stream", "stream", dlqStreamName)
-		err := r.deleteNATSStream(ctx, log, dlqStreamName)
+		log.Info("deleting NATS DLQ stream", "stream", plan.DLQStream.Name)
+		err = r.deleteNATSStream(ctx, log, plan.DLQStream.Name)
 		if err != nil {
-			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", dlqStreamName)
+			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", plan.DLQStream.Name)
 			r.recordMetricsIfEnabled(func(m *observability.Meter) {
 				m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
 			})
@@ -314,62 +205,23 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
 		})
-		log.Info("NATS DLQ stream deleted successfully", "stream", dlqStreamName)
+		log.Info("NATS DLQ stream deleted successfully", "stream", plan.DLQStream.Name)
 	} else {
 		log.Info("skipping NATS DLQ stream cleanup", "pipeline_id", p.Spec.ID)
 	}
 
-	// delete Join Streams and key value stores
-	if p.Spec.Join.Enabled {
-		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-		streamName := streamNamePrefix + "_0"
-
-		err := r.deleteNATSStream(ctx, log, streamName)
+	for _, kvStore := range plan.JoinKVStores {
+		err = r.deleteNATSKeyValueStore(ctx, log, kvStore.Name)
 		if err != nil {
-			return fmt.Errorf("delete stream %s: %w", streamName, err)
+			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "bucket", kvStore.Name)
+			return fmt.Errorf("failed to delete NATS KV Store: %w", err)
 		}
+	}
 
-		// delete join KV stores
-		for _, stream := range p.Spec.Ingestor.Streams {
-			kvStreamName := getJoinInputStreamName(p, stream)
-
-			err := r.deleteNATSKeyValueStore(ctx, log, kvStreamName)
-			if err != nil {
-				log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "stream", streamName)
-				return fmt.Errorf("failed to delete NATS KV Store: %w", err)
-			}
-
-			err = r.deleteNATSStream(ctx, log, kvStreamName)
-			if err != nil {
-				return fmt.Errorf("delete stream %s: %w", kvStreamName, err)
-			}
-		}
-
-	} else {
-		source := p.Spec.Ingestor.Streams[0]
-		if isDedupEnabled(p) {
-			// create dedup input / ingestor output streams
-			dedupInputStreamPrefix := getDedupInputStreamPrefix(p.Spec.ID, source.TopicName)
-			dedupReplicas := getDedupReplicas(p)
-			for d := 0; d < dedupReplicas; d++ {
-				streamName := dedupInputStreamPrefix + "_" + strconv.Itoa(d)
-
-				err := r.deleteNATSStream(ctx, log, streamName)
-				if err != nil {
-					return fmt.Errorf("delete stream %s: %w", streamName, err)
-				}
-			}
-		}
-
-		// create sink input stream (ingestor/dedup output stream)
-		sinkReplicas := getSinkReplicas(p)
-		for n := 0; n < sinkReplicas; n++ {
-			streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
-			err := r.deleteNATSStream(ctx, log, streamName)
-			if err != nil {
-				return fmt.Errorf("delete stream %s: %w", streamName, err)
-			}
+	for _, stream := range plan.Streams {
+		err = r.deleteNATSStream(ctx, log, stream.Name)
+		if err != nil {
+			return fmt.Errorf("delete stream %s: %w", stream.Name, err)
 		}
 	}
 
