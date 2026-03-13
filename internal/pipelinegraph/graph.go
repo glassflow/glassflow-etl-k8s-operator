@@ -141,7 +141,10 @@ func (g *Graph) getInputByType(nodeID string, inputType InputType) (InputBinding
 		return InputBinding{}, err
 	}
 
-	return InputBinding(output), nil
+	return InputBinding{
+		StreamPrefix: output.StreamPrefix,
+		Streams:      output.Streams,
+	}, nil
 }
 
 func (g *Graph) addEdge(edge EdgeConfig) error {
@@ -226,17 +229,19 @@ func (g *Graph) resolveOutput(edge EdgeConfig) (OutputBinding, error) {
 		return OutputBinding{}, fmt.Errorf("edge %q target node %q not found", edge.ID, edge.TargetID)
 	}
 
-	streamPrefix, err := g.buildStreamPrefix(source)
+	basePrefix, err := g.buildOutputPrefix(source)
 	if err != nil {
 		return OutputBinding{}, err
 	}
 
 	return OutputBinding{
-		Streams: buildStreams(streamPrefix, source.Replicas, target.Replicas),
+		StreamPrefix:  basePrefix,
+		SubjectPrefix: basePrefix,
+		Streams:       buildStreams(basePrefix, source.Replicas, target.Replicas),
 	}, nil
 }
 
-// buildStreams assigns subject to streams round-robin (subject r → stream r%streamCount).
+// buildStreams assigns subjects to streams round-robin (subject r -> stream r%streamCount).
 // e.g. 3 subjects and 2 streams
 // [subject_0, subject_1, subject_2]
 // [stream_0, stream_1]
@@ -247,11 +252,10 @@ func buildStreams(prefix string, sourceReplicas, streamCount int) []StreamBindin
 	streams := make([]StreamBinding, min(sourceReplicas, streamCount))
 	for i := range streams {
 		streams[i].Name = fmt.Sprintf("%s_%d", prefix, i)
-		streams[i].SubjectPrefix = streams[i].Name
 	}
 	for r := range sourceReplicas {
 		s := &streams[r%streamCount]
-		s.Subjects = append(s.Subjects, s.Name+"."+strconv.Itoa(r))
+		s.Subjects = append(s.Subjects, prefix+"."+strconv.Itoa(r))
 	}
 	return streams
 }
@@ -273,7 +277,7 @@ func validateNode(node NodeConfig) error {
 	return nil
 }
 
-func (g *Graph) buildStreamPrefix(node NodeConfig) (string, error) {
+func (g *Graph) buildOutputPrefix(node NodeConfig) (string, error) {
 	hash := generatePipelineHash(g.pipelineID)
 	baseName := truncateName(fmt.Sprintf("%s-%s-%s-%s", namePrefix, hash, sanitizeName(node.ID), nodeOutSuffix))
 

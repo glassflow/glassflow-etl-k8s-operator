@@ -6,16 +6,18 @@ import (
 	"maps"
 	"time"
 
-	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/pipelinegraph"
 )
 
 const (
@@ -112,6 +114,10 @@ func (r *PipelineReconciler) createPipelineComponents(
 // createIngestors creates ingestor deployments for the pipeline
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for ingestors: %w", err)
+	}
 
 	for i, t := range ing.Streams {
 		resourceRef := r.getStatefulSetResourceName(p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
@@ -155,7 +161,12 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			subjectCountEnvVars = []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: fmt.Sprintf("%d", replicasForSubjects)}}
 		}
 
-		err := r.createHeadlessService(ctx, ns.GetName(), resourceRef, ingestorLabels)
+		outputBinding, err := graph.GetOutput(pipelinegraph.IngestorNodeID(p.Spec, i))
+		if err != nil {
+			return fmt.Errorf("resolve ingestor output for stream %d: %w", i, err)
+		}
+
+		err = r.createHeadlessService(ctx, ns.GetName(), resourceRef, ingestorLabels)
 		if err != nil {
 			return fmt.Errorf("create ingestor headless service %s: %w", resourceRef, err)
 		}
@@ -173,7 +184,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
-				{Name: "NATS_SUBJECT_PREFIX", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, t.TopicName)},
+				{Name: "NATS_SUBJECT_PREFIX", Value: outputBinding.SubjectPrefix},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
 
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
@@ -232,6 +243,11 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		return fmt.Errorf("join requires at least 2 source streams")
 	}
 
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for join: %w", err)
+	}
+
 	resourceRef := r.getStatefulSetResourceName(p, constants.JoinComponent)
 	namespace := ns.GetName()
 
@@ -254,11 +270,16 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		}
 	}
 
-	leftInputStreamPrefix := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[0])
-	rightInputStreamPrefix := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[1])
-	joinOutputSubjectPrefix := getJoinOutputSubjectPrefix(p.Spec.ID)
+	joinInputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve join input: %w", err)
+	}
+	joinOutput, err := graph.GetOutput(pipelinegraph.JoinNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve join output: %w", err)
+	}
 
-	err := r.createHeadlessService(ctx, namespace, resourceRef, joinLabels)
+	err = r.createHeadlessService(ctx, namespace, resourceRef, joinLabels)
 	if err != nil {
 		return fmt.Errorf("create join headless service: %w", err)
 	}
@@ -275,9 +296,9 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: leftInputStreamPrefix},
-			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: rightInputStreamPrefix},
-			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutputSubjectPrefix},
+			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.StreamPrefix},
+			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.StreamPrefix},
+			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
@@ -331,6 +352,11 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 // createSink creates a sink StatefulSet (and headless Service) for the pipeline.
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for sink: %w", err)
+	}
+
 	resourceRef := r.getStatefulSetResourceName(p, constants.SinkComponent)
 	namespace := ns.GetName()
 
@@ -352,7 +378,12 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		}
 	}
 
-	err := r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels)
+	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve sink input: %w", err)
+	}
+
+	err = r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels)
 	if err != nil {
 		return fmt.Errorf("create sink headless service: %w", err)
 	}
@@ -369,7 +400,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "NATS_INPUT_STREAM_PREFIX", Value: getSinkInputStreamPrefix(p.Spec.ID)},
+			{Name: "NATS_INPUT_STREAM_PREFIX", Value: sinkInput.StreamPrefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
@@ -425,6 +456,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Ingestor
 	dedupStorageEnabled := p.Spec.Transform.IsDedupEnabled
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for dedups: %w", err)
+	}
 
 	for i, stream := range ing.Streams {
 		// Skip if dedup not enabled for this stream
@@ -441,7 +476,16 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		replicas := constants.DefaultMinReplicas
 		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
 
-		err := r.createHeadlessService(ctx, ns.GetName(), serviceName, dedupLabels)
+		dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, i))
+		if err != nil {
+			return fmt.Errorf("resolve dedup input for stream %d: %w", i, err)
+		}
+		dedupOutput, err := graph.GetOutput(pipelinegraph.DedupNodeID(p.Spec, i))
+		if err != nil {
+			return fmt.Errorf("resolve dedup output for stream %d: %w", i, err)
+		}
+
+		err = r.createHeadlessService(ctx, ns.GetName(), serviceName, dedupLabels)
 		if err != nil {
 			return fmt.Errorf("create dedup headless service %s: %w", serviceName, err)
 		}
@@ -494,17 +538,10 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 				},
 			}},
 		}
-		if p.Spec.Join.Enabled {
-			dedupEnvBase = append(dedupEnvBase,
-				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
-				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
-			)
-		} else {
-			dedupEnvBase = append(dedupEnvBase,
-				v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)},
-				v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: getDedupOutputSubjectPrefix(p.Spec.ID, stream.TopicName)},
-			)
-		}
+		dedupEnvBase = append(dedupEnvBase,
+			v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: dedupInput.StreamPrefix},
+			v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: dedupOutput.SubjectPrefix},
+		)
 		dedupContainerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.DedupImage).

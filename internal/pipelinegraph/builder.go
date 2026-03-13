@@ -14,6 +14,32 @@ const (
 	dedupNodeID    = "dedup"
 )
 
+// IngestorNodeID returns the graph node ID for the ingestor serving streamIndex.
+func IngestorNodeID(spec etlv1alpha1.PipelineSpec, streamIndex int) string {
+	if spec.Join.Enabled {
+		return ingestorNodeID + "_" + joinSide(streamIndex).String()
+	}
+	return ingestorNodeID
+}
+
+// DedupNodeID returns the graph node ID for the dedup serving streamIndex.
+func DedupNodeID(spec etlv1alpha1.PipelineSpec, streamIndex int) string {
+	if spec.Join.Enabled {
+		return dedupNodeID + "_" + joinSide(streamIndex).String()
+	}
+	return dedupNodeID
+}
+
+// JoinNodeID returns the graph node ID for the join component.
+func JoinNodeID() string {
+	return joinNodeID
+}
+
+// SinkNodeID returns the graph node ID for the sink component.
+func SinkNodeID() string {
+	return sinkNodeID
+}
+
 // ConfigFromPipelineSpec converts a PipelineSpec into a graph topology config.
 func ConfigFromPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 	if spec.Join.Enabled {
@@ -25,42 +51,46 @@ func ConfigFromPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 
 // ConfigFromJoinlessPipelineSpec builds a graph config for a single-source pipeline:
 func ConfigFromJoinlessPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
+	ingestorID := IngestorNodeID(spec, 0)
+	sinkID := SinkNodeID()
+
 	config := Config{
 		PipelineID: spec.ID,
 		Nodes: []NodeConfig{
 			{
-				ID:       ingestorNodeID,
+				ID:       ingestorID,
 				Type:     NodeTypeIngestor,
 				Replicas: getIngestorReplicas(spec, 0),
 			},
 		},
 	}
 
-	upstreamID := ingestorNodeID
+	upstreamID := ingestorID
 	if transformsAreEnabled(spec) {
+		dedupID := DedupNodeID(spec, 0)
 		config.Nodes = append(config.Nodes, NodeConfig{
-			ID:       dedupNodeID,
+			ID:       dedupID,
 			Type:     NodeTypeDedup,
 			Replicas: getDedupReplicas(spec),
 		})
 		config.Edges = append(config.Edges, EdgeConfig{
-			ID:              edgeID(ingestorNodeID, dedupNodeID),
-			SourceID:        ingestorNodeID,
-			TargetID:        dedupNodeID,
+			ID:              edgeID(ingestorID, dedupID),
+			SourceID:        ingestorID,
+			TargetID:        dedupID,
 			TargetInputType: InputTypeIn,
 		})
-		upstreamID = dedupNodeID
+		upstreamID = dedupID
 	}
 
 	config.Nodes = append(config.Nodes, NodeConfig{
-		ID:       sinkNodeID,
+		ID:       sinkID,
 		Type:     NodeTypeSink,
 		Replicas: getSinkReplicas(spec),
 	})
 	config.Edges = append(config.Edges, EdgeConfig{
-		ID:              edgeID(upstreamID, sinkNodeID),
+		ID:              edgeID(upstreamID, sinkID),
 		SourceID:        upstreamID,
-		TargetID:        sinkNodeID,
+		TargetID:        sinkID,
 		TargetInputType: InputTypeIn,
 	})
 
@@ -77,8 +107,7 @@ func ConfigFromJoinPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 
 	upstreamNodeIDs := make([]string, 0, len(spec.Ingestor.Streams))
 	for i, stream := range spec.Ingestor.Streams {
-		side := joinSide(i)
-		ingestorID := ingestorNodeID + "_" + side.String()
+		ingestorID := IngestorNodeID(spec, i)
 		config.Nodes = append(config.Nodes, NodeConfig{
 			ID:       ingestorID,
 			Type:     NodeTypeIngestor,
@@ -87,7 +116,7 @@ func ConfigFromJoinPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 
 		upstreamID := ingestorID
 		if isStreamDedupEnabled(stream) {
-			dedupID := dedupNodeID + "_" + side.String()
+			dedupID := DedupNodeID(spec, i)
 			config.Nodes = append(config.Nodes, NodeConfig{
 				ID:       dedupID,
 				Type:     NodeTypeDedup,
@@ -106,7 +135,7 @@ func ConfigFromJoinPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 	}
 
 	config.Nodes = append(config.Nodes, NodeConfig{
-		ID:       joinNodeID,
+		ID:       JoinNodeID(),
 		Type:     NodeTypeJoin,
 		Replicas: getJoinReplicas(spec),
 	})
@@ -114,16 +143,16 @@ func ConfigFromJoinPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 	config.Edges = append(config.Edges, joinEdgeConfig(upstreamNodeIDs[1], 1))
 
 	config.Nodes = append(config.Nodes, NodeConfig{
-		ID:       sinkNodeID,
+		ID:       SinkNodeID(),
 		Type:     NodeTypeSink,
 		Replicas: getSinkReplicas(spec),
 	})
 
-	sinkSourceID := joinNodeID
+	sinkSourceID := JoinNodeID()
 	config.Edges = append(config.Edges, EdgeConfig{
-		ID:              edgeID(sinkSourceID, sinkNodeID),
+		ID:              edgeID(sinkSourceID, SinkNodeID()),
 		SourceID:        sinkSourceID,
-		TargetID:        sinkNodeID,
+		TargetID:        SinkNodeID(),
 		TargetInputType: InputTypeIn,
 	})
 
@@ -143,9 +172,9 @@ func NewFromPipelineSpec(spec etlv1alpha1.PipelineSpec) (*Graph, error) {
 func joinEdgeConfig(sourceID string, streamIndex int) EdgeConfig {
 	inputType := joinSide(streamIndex)
 	return EdgeConfig{
-		ID:              edgeID(sourceID, joinNodeID),
+		ID:              edgeID(sourceID, JoinNodeID()),
 		SourceID:        sourceID,
-		TargetID:        joinNodeID,
+		TargetID:        JoinNodeID(),
 		TargetInputType: inputType,
 	}
 }

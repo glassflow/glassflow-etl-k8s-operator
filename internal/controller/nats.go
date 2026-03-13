@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go/jetstream"
@@ -28,11 +27,8 @@ import (
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/pipelinegraph"
 )
-
-func getJoinInputStreamName(p etlv1alpha1.Pipeline, stream etlv1alpha1.SourceStream) string {
-	return getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
-}
 
 // checkConsumerPendingMessages checks if a specific consumer has pending messages
 func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, streamName, consumerName string) error {
@@ -47,29 +43,44 @@ func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, s
 	return nil
 }
 
+func (r *PipelineReconciler) checkInputBindingPendingMessages(
+	ctx context.Context,
+	binding pipelinegraph.InputBinding,
+	consumerName string,
+) error {
+	for _, stream := range binding.Streams {
+		if err := r.checkConsumerPendingMessages(ctx, stream.Name, consumerName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // checkJoinPendingMessages checks if join consumers have pending messages
 func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	if !p.Spec.Join.Enabled {
 		return nil // No join, nothing to check
 	}
 
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for join checks: %w", err)
+	}
+	inputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve join input: %w", err)
+	}
+
 	// Consumer names are generated from pipeline ID (aligned with glassflow-api).
 	leftConsumerName := getNATSJoinLeftConsumerName(p.Spec.ID)
 	rightConsumerName := getNATSJoinRightConsumerName(p.Spec.ID)
 
-	// Use generated stream names resolved by operator naming rules.
-	leftStreamName := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[0])
-	rightStreamName := getJoinInputStreamName(p, p.Spec.Ingestor.Streams[1])
-
-	// Check left stream
-	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
-	if err != nil {
+	if err := r.checkInputBindingPendingMessages(ctx, inputs.Left, leftConsumerName); err != nil {
 		return err
 	}
 
-	// Check right stream
-	err = r.checkConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
-	if err != nil {
+	if err := r.checkInputBindingPendingMessages(ctx, inputs.Right, rightConsumerName); err != nil {
 		return err
 	}
 
@@ -79,31 +90,19 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 // checkSinkPendingMessages checks if sink consumer(s) have pending messages.
 func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	baseConsumerName := getNATSSinkConsumerName(p.Spec.ID)
-	if p.Spec.Join.Enabled {
-		sinkStreamName := getSinkInputStreamPrefix(p.Spec.ID) + "_0"
-		return r.checkConsumerPendingMessages(ctx, sinkStreamName, baseConsumerName)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for sink checks: %w", err)
 	}
-	if useNStreamSinkPath(p) || useDedupNStreamPath(p) {
-		// sinkReplicas streams; sink uses the same durable consumer name on each stream.
-		sinkReplicas := getSinkReplicas(p)
-		streamNamePrefix := getSinkInputStreamPrefix(p.Spec.ID)
-		for n := 0; n < sinkReplicas; n++ {
-			streamName := streamNamePrefix + "_" + strconv.Itoa(n)
-			consumerName := baseConsumerName
-			if err := r.checkConsumerPendingMessages(ctx, streamName, consumerName); err != nil {
-				return err
-			}
-		}
-		return nil
+	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve sink input: %w", err)
 	}
 
-	sinkStreamName := getSinkInputStreamPrefix(p.Spec.ID) + "_0"
-	return r.checkConsumerPendingMessages(ctx, sinkStreamName, baseConsumerName)
+	return r.checkInputBindingPendingMessages(ctx, sinkInput, baseConsumerName)
 }
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
-// When useDedupNStreamPath: dedup pod d reads from getDedupInputStreamPrefix_d with shared consumer base name;
-// check all dedupReplicas streams.
 func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
 	stream := p.Spec.Ingestor.Streams[streamIndex]
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
@@ -111,20 +110,16 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 	}
 
 	baseConsumerName := getNATSDedupConsumerName(p.Spec.ID)
-	if useDedupNStreamPath(p) {
-		dedupReplicas := getDedupReplicas(p)
-		streamNamePrefix := getDedupInputStreamPrefix(p.Spec.ID, stream.TopicName)
-		for d := 0; d < dedupReplicas; d++ {
-			streamName := streamNamePrefix + "_" + strconv.Itoa(d)
-			consumerName := baseConsumerName
-			if err := r.checkConsumerPendingMessages(ctx, streamName, consumerName); err != nil {
-				return err
-			}
-		}
-		return nil
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return fmt.Errorf("build pipeline graph for dedup checks: %w", err)
 	}
-	inputStreamName := getIngestorOutputSubjectPrefix(p.Spec.ID, stream.TopicName)
-	return r.checkConsumerPendingMessages(ctx, inputStreamName, baseConsumerName)
+	dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, streamIndex))
+	if err != nil {
+		return fmt.Errorf("resolve dedup input for stream %d: %w", streamIndex, err)
+	}
+
+	return r.checkInputBindingPendingMessages(ctx, dedupInput, baseConsumerName)
 }
 
 // createNATSStreams creates all NATS streams and KV stores for a pipeline.

@@ -2,8 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
@@ -165,22 +163,9 @@ func buildOutputStreams(
 }
 
 func inputBindingPrefix(binding pipelinegraph.InputBinding) (string, error) {
-	if len(binding.Streams) == 0 {
-		return "", fmt.Errorf("input binding has no streams")
+	if binding.StreamPrefix == "" {
+		return "", fmt.Errorf("input binding has no stream prefix")
 	}
 
-	return streamNamePrefix(binding.Streams[0].Name)
-}
-
-func streamNamePrefix(streamName string) (string, error) {
-	idx := strings.LastIndex(streamName, "_")
-	if idx == -1 || idx == len(streamName)-1 {
-		return "", fmt.Errorf("stream name %q is missing replica suffix", streamName)
-	}
-
-	if _, err := strconv.Atoi(streamName[idx+1:]); err != nil {
-		return "", fmt.Errorf("stream name %q has invalid replica suffix: %w", streamName, err)
-	}
-
-	return streamName[:idx], nil
+	return binding.StreamPrefix, nil
 }

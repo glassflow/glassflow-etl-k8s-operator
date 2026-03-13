@@ -41,17 +41,19 @@ type EdgeConfig struct {
 }
 
 type StreamBinding struct {
-	Name          string   `json:"name"`
-	SubjectPrefix string   `json:"subject_prefix"`
-	Subjects      []string `json:"subjects"`
+	Name     string   `json:"name"`
+	Subjects []string `json:"subjects"`
 }
 
 type OutputBinding struct {
-	Streams []StreamBinding `json:"streams"`
+	StreamPrefix  string          `json:"stream_prefix"`
+	SubjectPrefix string          `json:"subject_prefix"`
+	Streams       []StreamBinding `json:"streams"`
 }
 
 type InputBinding struct {
-	Streams []StreamBinding `json:"streams"`
+	StreamPrefix string          `json:"stream_prefix"`
+	Streams      []StreamBinding `json:"streams"`
 }
 
 type JoinInputBinding struct {

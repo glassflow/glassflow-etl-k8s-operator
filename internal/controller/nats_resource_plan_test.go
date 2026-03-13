@@ -60,13 +60,13 @@ func TestBuildNATSResourcePlanJoinless(t *testing.T) {
 	wantStreams := []nats.StreamConfig{
 		{
 			Name:     fmt.Sprintf("gfm-%s-ingestor-out_0", hash),
-			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor-out_0.0", hash)},
+			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor-out.0", hash)},
 			MaxAge:   5 * time.Minute,
 			MaxBytes: 42,
 		},
 		{
 			Name:     fmt.Sprintf("gfm-%s-ingestor-out_1", hash),
-			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor-out_1.1", hash)},
+			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor-out.1", hash)},
 			MaxAge:   5 * time.Minute,
 			MaxBytes: 42,
 		},
@@ -126,31 +126,31 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 		{
 			Name: fmt.Sprintf("gfm-%s-ingestor_left-out_0", hash),
 			Subjects: []string{
-				fmt.Sprintf("gfm-%s-ingestor_left-out_0.0", hash),
-				fmt.Sprintf("gfm-%s-ingestor_left-out_0.1", hash),
+				fmt.Sprintf("gfm-%s-ingestor_left-out.0", hash),
+				fmt.Sprintf("gfm-%s-ingestor_left-out.1", hash),
 			},
 		},
 		{
 			Name: fmt.Sprintf("gfm-%s-ingestor_right-out_0", hash),
 			Subjects: []string{
-				fmt.Sprintf("gfm-%s-ingestor_right-out_0.0", hash),
-				fmt.Sprintf("gfm-%s-ingestor_right-out_0.2", hash),
+				fmt.Sprintf("gfm-%s-ingestor_right-out.0", hash),
+				fmt.Sprintf("gfm-%s-ingestor_right-out.2", hash),
 			},
 		},
 		{
 			Name:     fmt.Sprintf("gfm-%s-ingestor_right-out_1", hash),
-			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor_right-out_1.1", hash)},
+			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor_right-out.1", hash)},
 		},
 		{
 			Name: fmt.Sprintf("gfm-%s-dedup_right-out_0", hash),
 			Subjects: []string{
-				fmt.Sprintf("gfm-%s-dedup_right-out_0.0", hash),
-				fmt.Sprintf("gfm-%s-dedup_right-out_0.1", hash),
+				fmt.Sprintf("gfm-%s-dedup_right-out.0", hash),
+				fmt.Sprintf("gfm-%s-dedup_right-out.1", hash),
 			},
 		},
 		{
 			Name:     fmt.Sprintf("gfm-%s-join-out_0", hash),
-			Subjects: []string{fmt.Sprintf("gfm-%s-join-out_0.0", hash)},
+			Subjects: []string{fmt.Sprintf("gfm-%s-join-out.0", hash)},
 		},
 	}
 	if !reflect.DeepEqual(plan.Streams, wantStreams) {
