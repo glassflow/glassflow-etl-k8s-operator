@@ -274,6 +274,12 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 	if err != nil {
 		return fmt.Errorf("resolve join input: %w", err)
 	}
+	if len(joinInputs.Left.Streams) == 0 {
+		return fmt.Errorf("resolve join input: left input has no streams")
+	}
+	if len(joinInputs.Right.Streams) == 0 {
+		return fmt.Errorf("resolve join input: right input has no streams")
+	}
 	joinOutput, err := graph.GetOutput(pipelinegraph.JoinNodeID())
 	if err != nil {
 		return fmt.Errorf("resolve join output: %w", err)
@@ -296,8 +302,8 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.StreamPrefix},
-			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.StreamPrefix},
+			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.Streams[0].Name},
+			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.Streams[0].Name},
 			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
 
