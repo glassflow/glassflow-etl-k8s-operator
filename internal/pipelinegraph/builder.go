@@ -25,7 +25,6 @@ func ConfigFromPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 
 // ConfigFromJoinlessPipelineSpec builds a graph config for a single-source pipeline:
 func ConfigFromJoinlessPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
-	stream := spec.Ingestor.Streams[0]
 	config := Config{
 		PipelineID: spec.ID,
 		Nodes: []NodeConfig{
@@ -38,7 +37,7 @@ func ConfigFromJoinlessPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, erro
 	}
 
 	upstreamID := ingestorNodeID
-	if isStreamDedupEnabled(stream) {
+	if isTransformsAreEnabled(spec) {
 		config.Nodes = append(config.Nodes, NodeConfig{
 			ID:       dedupNodeID,
 			Type:     NodeTypeDedup,
@@ -228,4 +227,10 @@ func getSinkReplicas(spec etlv1alpha1.PipelineSpec) int {
 
 func isStreamDedupEnabled(stream etlv1alpha1.SourceStream) bool {
 	return stream.Deduplication != nil && stream.Deduplication.Enabled
+}
+
+func isTransformsAreEnabled(spec etlv1alpha1.PipelineSpec) bool {
+	return spec.Transform.IsStatelessTransformEnabled ||
+		spec.Transform.IsFilterEnabled ||
+		spec.Transform.IsDedupEnabled
 }
