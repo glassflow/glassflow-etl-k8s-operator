@@ -41,7 +41,7 @@ func (r *PipelineReconciler) createNamespace(ctx context.Context, p etlv1alpha1.
 	targetNamespace := r.getTargetNamespace(p)
 
 	// If auto=false, we don't create namespaces, just return the target namespace
-	if !r.PipelinesNamespaceAuto {
+	if !r.Config.Namespaces.Auto {
 		var ns v1.Namespace
 		err := r.Get(ctx, types.NamespacedName{Name: targetNamespace}, &ns)
 		if err != nil {
@@ -88,7 +88,7 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 	log.Info("deleting pipeline namespace", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "namespace", targetNamespace)
 
 	// If auto=false, we don't delete namespaces, just clean up resources
-	if !r.PipelinesNamespaceAuto {
+	if !r.Config.Namespaces.Auto {
 		log.Info("auto=false, skipping namespace deletion", "namespace", targetNamespace)
 		return nil
 	}
@@ -125,14 +125,14 @@ func (r *PipelineReconciler) getPipelineConfigFromSecret(ctx context.Context, pi
 	secretName := fmt.Sprintf("pipeline-config-%s", pipelineID)
 	secretNamespacedName := types.NamespacedName{
 		Name:      secretName,
-		Namespace: r.GlassflowNamespace,
+		Namespace: r.Config.GlassflowNamespace,
 	}
 
 	var secret v1.Secret
 	err := r.Get(ctx, secretNamespacedName, &secret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", fmt.Errorf("%w: %s in namespace %s (may need to wait for API to create it)", ErrPipelineConfigSecretNotFound, secretName, r.GlassflowNamespace)
+			return "", fmt.Errorf("%w: %s in namespace %s (may need to wait for API to create it)", ErrPipelineConfigSecretNotFound, secretName, r.Config.GlassflowNamespace)
 		}
 		return "", fmt.Errorf("get pipeline config secret %s: %w", secretNamespacedName, err)
 	}
@@ -262,12 +262,12 @@ func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName ty
 // deleteSecret deletes a secret for a pipeline
 func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
 	// ns deletion takes care of deleting the secret
-	if r.PipelinesNamespaceAuto {
+	if r.Config.Namespaces.Auto {
 		log.Info("namespaceauto=true, skipping secret deletion", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 		return nil
 	}
 
-	secretName := types.NamespacedName{Namespace: r.PipelinesNamespaceName, Name: r.getResourceName(p)}
+	secretName := types.NamespacedName{Namespace: r.Config.Namespaces.Name, Name: r.getResourceName(p)}
 	var secret v1.Secret
 	err := r.Get(ctx, secretName, &secret)
 	if err != nil {
@@ -287,7 +287,7 @@ func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, 
 // targetNamespace is r.getTargetNamespace(p). Works for both per-pipeline and single shared namespace.
 func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx context.Context, targetNamespace string) error {
 	// Database: create secret from operator's DatabaseURL (same as GLASSFLOW_DATABASE_URL used by API)
-	if r.DatabaseURL != "" {
+	if r.Config.DatabaseURL != "" {
 		name := constants.ComponentDatabaseSecretName
 		key := constants.ComponentDatabaseSecretKey
 		nn := types.NamespacedName{Namespace: targetNamespace, Name: name}
@@ -299,14 +299,14 @@ func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx conte
 			}
 			s := v1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace},
-				Data:       map[string][]byte{key: []byte(r.DatabaseURL)},
+				Data:       map[string][]byte{key: []byte(r.Config.DatabaseURL)},
 				Type:       v1.SecretTypeOpaque,
 			}
 			if err = r.Create(ctx, &s, &client.CreateOptions{}); err != nil {
 				return fmt.Errorf("create secret %s: %w", nn, err)
 			}
-		} else if string(existing.Data[key]) != r.DatabaseURL {
-			existing.Data[key] = []byte(r.DatabaseURL)
+		} else if string(existing.Data[key]) != r.Config.DatabaseURL {
+			existing.Data[key] = []byte(r.Config.DatabaseURL)
 			if err = r.Update(ctx, &existing); err != nil {
 				return fmt.Errorf("update secret %s: %w", nn, err)
 			}
@@ -314,8 +314,8 @@ func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx conte
 	}
 
 	// Encryption: copy secret from operator namespace (same as API volume)
-	if r.EncryptionEnabled && r.EncryptionSecretName != "" {
-		srcNN := types.NamespacedName{Namespace: r.EncryptionSecretNamespace, Name: r.EncryptionSecretName}
+	if r.Config.Encryption.Enabled && r.Config.Encryption.Name != "" {
+		srcNN := types.NamespacedName{Namespace: r.Config.Encryption.Namespace, Name: r.Config.Encryption.Name}
 		var src v1.Secret
 		if err := r.Get(ctx, srcNN, &src); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -323,7 +323,7 @@ func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx conte
 			}
 			return fmt.Errorf("get encryption secret %s: %w", srcNN, err)
 		}
-		key := r.EncryptionSecretKey
+		key := r.Config.Encryption.Key
 		if key == "" {
 			key = constants.ComponentEncryptionSecretKey
 		}

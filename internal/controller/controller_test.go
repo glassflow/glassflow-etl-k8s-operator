@@ -111,26 +111,40 @@ var _ = Describe("Pipeline Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &PipelineReconciler{
-				Client:                      k8sClient,
-				Scheme:                      k8sClient.Scheme(),
-				NATSClient:                  nc,
-				ComponentNATSAddr:           "nats://nats.default.svc.cluster.local:4222",
-				IngestorImage:               "ghcr.io/glassflow/glassflow-etl-ingestor:latest",
-				JoinImage:                   "ghcr.io/glassflow/glassflow-etl-join:latest",
-				SinkImage:                   "ghcr.io/glassflow/glassflow-etl-sink:latest",
-				IngestorPullPolicy:          "IfNotPresent",
-				JoinPullPolicy:              "IfNotPresent",
-				SinkPullPolicy:              "IfNotPresent",
-				DedupPullPolicy:             "IfNotPresent",
-				ObservabilityLogsEnabled:    "true",
-				ObservabilityMetricsEnabled: "true",
-				ObservabilityOTelEndpoint:   "http://otel-collector.observability.svc.cluster.local:4318",
-				IngestorLogLevel:            "info",
-				JoinLogLevel:                "info",
-				SinkLogLevel:                "info",
-				IngestorImageTag:            "latest",
-				JoinImageTag:                "latest",
-				SinkImageTag:                "latest",
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				NATSClient: nc,
+				Config: ReconcilerConfig{
+					NATS: NATSSettings{
+						ComponentAddr: "nats://nats.default.svc.cluster.local:4222",
+					},
+					Images: ComponentImages{
+						Ingestor: "ghcr.io/glassflow/glassflow-etl-ingestor:latest",
+						Join:     "ghcr.io/glassflow/glassflow-etl-join:latest",
+						Sink:     "ghcr.io/glassflow/glassflow-etl-sink:latest",
+					},
+					PullPolicies: ComponentPullPolicies{
+						Ingestor: "IfNotPresent",
+						Join:     "IfNotPresent",
+						Sink:     "IfNotPresent",
+						Dedup:    "IfNotPresent",
+					},
+					Observability: ComponentObservability{
+						LogsEnabled:    "true",
+						MetricsEnabled: "true",
+						OTelEndpoint:   "http://otel-collector.observability.svc.cluster.local:4318",
+						LogLevels: ComponentLogLevels{
+							Ingestor: "info",
+							Join:     "info",
+							Sink:     "info",
+						},
+						ImageTags: ComponentImageTags{
+							Ingestor: "latest",
+							Join:     "latest",
+							Sink:     "latest",
+						},
+					},
+				},
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

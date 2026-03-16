@@ -125,7 +125,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
 
-		cpuReq, cpuLim, memReq, memLim := r.IngestorCPURequest, r.IngestorCPULimit, r.IngestorMemoryRequest, r.IngestorMemoryLimit
+		cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Ingestor.CPURequest, r.Config.ResourceDefaults.Ingestor.CPULimit, r.Config.ResourceDefaults.Ingestor.MemoryRequest, r.Config.ResourceDefaults.Ingestor.MemoryLimit
 		ingestorReplicas := constants.DefaultMinReplicas
 		if p.Spec.Resources != nil && p.Spec.Resources.Ingestor != nil {
 			ingRes := p.Spec.Resources.Ingestor
@@ -173,25 +173,25 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 
 		containerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
-			withImage(r.IngestorImage).
-			withImagePullPolicy(r.IngestorPullPolicy).
+			withImage(r.Config.Images.Ingestor).
+			withImagePullPolicy(r.Config.PullPolicies.Ingestor).
 			withVolumeMount(v1.VolumeMount{
 				Name:      "config",
 				ReadOnly:  true,
 				MountPath: "/config",
 			}).
 			withEnv(append(append(append(append([]v1.EnvVar{
-				{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+				{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
 				{Name: "NATS_SUBJECT_PREFIX", Value: outputBinding.SubjectPrefix},
-				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.IngestorLogLevel},
+				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Ingestor},
 
-				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
-				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
-				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
+				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
+				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.IngestorComponent},
-				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.IngestorImageTag},
+				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Ingestor},
 				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
@@ -222,7 +222,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}).
 			withReplicas(ingestorReplicas).
 			withContainer(*container).
-			withAffinity(r.IngestorAffinity)
+			withAffinity(r.Config.Affinity.Ingestor)
 		if vol, ok := r.getComponentEncryptionVolume(); ok {
 			stsBuilder = stsBuilder.withVolume(vol)
 		}
@@ -255,7 +255,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	maps.Copy(joinLabels, labels)
 
-	cpuReq, cpuLim, memReq, memLim := r.JoinCPURequest, r.JoinCPULimit, r.JoinMemoryRequest, r.JoinMemoryLimit
+	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Join.CPURequest, r.Config.ResourceDefaults.Join.CPULimit, r.Config.ResourceDefaults.Join.MemoryRequest, r.Config.ResourceDefaults.Join.MemoryLimit
 	joinReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil {
 		comp := p.Spec.Resources.Join
@@ -292,26 +292,26 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	joinContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage(r.JoinImage).
-		withImagePullPolicy(r.JoinPullPolicy).
+		withImage(r.Config.Images.Join).
+		withImagePullPolicy(r.Config.PullPolicies.Join).
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
 		withEnv(append(append(append([]v1.EnvVar{
-			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.Streams[0].Name},
 			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.Streams[0].Name},
 			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
-			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.JoinLogLevel},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Join},
 
-			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
-			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
-			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.JoinComponent},
-			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.JoinImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Join},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
@@ -342,7 +342,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		}).
 		withContainer(*joinContainer).
 		withReplicas(joinReplicas).
-		withAffinity(r.JoinAffinity)
+		withAffinity(r.Config.Affinity.Join)
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
 		stsBuilder = stsBuilder.withVolume(vol)
 	}
@@ -369,7 +369,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 
-	cpuReq, cpuLim, memReq, memLim := r.SinkCPURequest, r.SinkCPULimit, r.SinkMemoryRequest, r.SinkMemoryLimit
+	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Sink.CPURequest, r.Config.ResourceDefaults.Sink.CPULimit, r.Config.ResourceDefaults.Sink.MemoryRequest, r.Config.ResourceDefaults.Sink.MemoryLimit
 	sinkReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
 		comp := p.Spec.Resources.Sink
@@ -396,24 +396,24 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 
 	sinkContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
-		withImage(r.SinkImage).
-		withImagePullPolicy(r.SinkPullPolicy).
+		withImage(r.Config.Images.Sink).
+		withImagePullPolicy(r.Config.PullPolicies.Sink).
 		withVolumeMount(v1.VolumeMount{
 			Name:      "config",
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
 		withEnv(append(append(append([]v1.EnvVar{
-			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "NATS_INPUT_STREAM_PREFIX", Value: sinkInput.StreamPrefix},
-			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.SinkLogLevel},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Sink},
 
-			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
-			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
-			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.SinkComponent},
-			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.SinkImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Sink},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
@@ -444,7 +444,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		}).
 		withContainer(*sinkContainer).
 		withReplicas(sinkReplicas).
-		withAffinity(r.SinkAffinity)
+		withAffinity(r.Config.Affinity.Sink)
 	if vol, ok := r.getComponentEncryptionVolume(); ok {
 		stsBuilder = stsBuilder.withVolume(vol)
 	}
@@ -480,7 +480,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		maps.Copy(dedupLabels, labels)
 
 		replicas := constants.DefaultMinReplicas
-		cpuReq, cpuLim, memReq, memLim := r.DedupCPURequest, r.DedupCPULimit, r.DedupMemoryRequest, r.DedupMemoryLimit
+		cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Dedup.CPURequest, r.Config.ResourceDefaults.Dedup.CPULimit, r.Config.ResourceDefaults.Dedup.MemoryRequest, r.Config.ResourceDefaults.Dedup.MemoryLimit
 
 		dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, i))
 		if err != nil {
@@ -497,7 +497,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		}
 
 		// Determine storage size (use pipeline config, fallback to Helm default)
-		storageSize := r.DedupDefaultStorageSize
+		storageSize := r.Config.DedupStorage.Size
 		if stream.Deduplication.StorageSize != "" {
 			storageSize = stream.Deduplication.StorageSize
 		}
@@ -518,24 +518,24 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		}
 
 		// Determine storage class (use pipeline config, fallback to Helm default)
-		storageClass := r.DedupDefaultStorageClass
+		storageClass := r.Config.DedupStorage.StorageCls
 		if stream.Deduplication.StorageClass != "" {
 			storageClass = stream.Deduplication.StorageClass
 		}
 
 		dedupEnvBase := []v1.EnvVar{
-			{Name: "GLASSFLOW_NATS_SERVER", Value: r.ComponentNATSAddr},
+			{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "GLASSFLOW_DEDUP_TOPIC", Value: stream.TopicName},
 			{Name: "GLASSFLOW_SOURCE_INDEX", Value: fmt.Sprintf("%d", i)},
 			{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
-			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.DedupLogLevel},
+			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Dedup},
 
-			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.ObservabilityLogsEnabled},
-			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.ObservabilityMetricsEnabled},
-			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.ObservabilityOTelEndpoint},
+			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
+			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
-			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.DedupImageTag},
+			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Dedup},
 			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
 			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
 			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
@@ -550,8 +550,8 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		)
 		dedupContainerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
-			withImage(r.DedupImage).
-			withImagePullPolicy(r.DedupPullPolicy).
+			withImage(r.Config.Images.Dedup).
+			withImagePullPolicy(r.Config.PullPolicies.Dedup).
 			withVolumeMount(v1.VolumeMount{
 				Name:      "config",
 				ReadOnly:  true,
@@ -584,7 +584,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			}).
 			withReplicas(replicas).
 			withContainer(*container).
-			withAffinity(r.DedupAffinity)
+			withAffinity(r.Config.Affinity.Dedup)
 
 		if dedupStorageEnabled {
 			// Parse storage size

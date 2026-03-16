@@ -11,7 +11,7 @@ import (
 func TestGetStatefulSetResourceNameTruncatesPipelineID(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{PipelinesNamespaceAuto: false}
+	reconciler := &PipelineReconciler{Config: ReconcilerConfig{Namespaces: PipelineNamespaces{Auto: false}}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "abcdefghijklmnopqrstuvwxyz1234567890abcd", // 40 chars
@@ -43,7 +43,7 @@ func TestGetStatefulSetResourceNameTruncatesPipelineID(t *testing.T) {
 func TestGetResourceNameDoesNotTruncateCurrentSecretNames(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{PipelinesNamespaceAuto: false}
+	reconciler := &PipelineReconciler{Config: ReconcilerConfig{Namespaces: PipelineNamespaces{Auto: false}}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "abcdefghijklmnopqrstuvwxyz1234567890abcd", // 40 chars
@@ -67,7 +67,7 @@ func TestGetResourceNameDoesNotTruncateCurrentSecretNames(t *testing.T) {
 func TestPipelineScopedResourceNameAutoNamespaceUsesBaseName(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{PipelinesNamespaceAuto: true}
+	reconciler := &PipelineReconciler{Config: ReconcilerConfig{Namespaces: PipelineNamespaces{Auto: true}}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "very-long-pipeline-id-that-should-not-matter-here",

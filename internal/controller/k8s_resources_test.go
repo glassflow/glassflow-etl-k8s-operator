@@ -30,7 +30,9 @@ func TestCleanupDedupPVCsSkipsWhenDedupStorageDisabled(t *testing.T) {
 
 	namespace := "test-ns"
 	reconciler := &PipelineReconciler{
-		PipelinesNamespaceName: namespace,
+		Config: ReconcilerConfig{
+			Namespaces: PipelineNamespaces{Name: namespace},
+		},
 	}
 
 	err := reconciler.cleanupDedupPVCs(context.Background(), logr.Discard(), pipeline)

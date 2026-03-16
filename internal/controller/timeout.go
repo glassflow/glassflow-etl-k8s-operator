@@ -186,12 +186,12 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 	})
 
 	// Send usageStat event for reconcile timeout
-	r.UsageStatsClient.SendEvent(ctx, "reconcile_timeout", "operator", map[string]interface{}{
+	r.sendUsageStatsEvent(ctx, "reconcile_timeout", map[string]interface{}{
 		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
 		"operation":        operation,
 		"status":           "timeout",
 		"error":            errorMsg,
-		"cluster_provider": r.ClusterProvider,
+		"cluster_provider": r.Config.ClusterProvider,
 	})
 
 	return ctrl.Result{}, nil // Don't requeue - operation has timed out

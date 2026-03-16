@@ -100,10 +100,10 @@ func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 
 // getTargetNamespace determines the target namespace for a pipeline based on configuration
 func (r *PipelineReconciler) getTargetNamespace(p etlv1alpha1.Pipeline) string {
-	if r.PipelinesNamespaceAuto {
+	if r.Config.Namespaces.Auto {
 		return "pipeline-" + p.Spec.ID
 	}
-	return r.PipelinesNamespaceName
+	return r.Config.Namespaces.Name
 }
 
 // isOperatorManagedNamespace checks if a namespace was created by the operator
@@ -128,7 +128,7 @@ func (r *PipelineReconciler) getStatefulSetResourceName(p etlv1alpha1.Pipeline, 
 }
 
 func (r *PipelineReconciler) getPipelineScopedResourceName(p etlv1alpha1.Pipeline, baseName string, maxLen int) string {
-	if r.PipelinesNamespaceAuto {
+	if r.Config.Namespaces.Auto {
 		return baseName
 	}
 
@@ -164,7 +164,7 @@ func ptrBool(v bool) *bool {
 // getUsageStatsEnvVars returns environment variables for usage stats configuration
 // Values are passed directly (not from secrets)
 func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {
-	if !r.UsageStatsEnabled {
+	if !r.Config.UsageStats.Enabled {
 		return []v1.EnvVar{}
 	}
 
@@ -172,31 +172,31 @@ func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {
 		{Name: "GLASSFLOW_USAGE_STATS_ENABLED", Value: "true"},
 	}
 
-	if r.UsageStatsEndpoint != "" {
+	if r.Config.UsageStats.Endpoint != "" {
 		envVars = append(envVars, v1.EnvVar{
 			Name:  "GLASSFLOW_USAGE_STATS_ENDPOINT",
-			Value: r.UsageStatsEndpoint,
+			Value: r.Config.UsageStats.Endpoint,
 		})
 	}
 
-	if r.UsageStatsUsername != "" {
+	if r.Config.UsageStats.Username != "" {
 		envVars = append(envVars, v1.EnvVar{
 			Name:  "GLASSFLOW_USAGE_STATS_USERNAME",
-			Value: r.UsageStatsUsername,
+			Value: r.Config.UsageStats.Username,
 		})
 	}
 
-	if r.UsageStatsPassword != "" {
+	if r.Config.UsageStats.Password != "" {
 		envVars = append(envVars, v1.EnvVar{
 			Name:  "GLASSFLOW_USAGE_STATS_PASSWORD",
-			Value: r.UsageStatsPassword,
+			Value: r.Config.UsageStats.Password,
 		})
 	}
 
-	if r.UsageStatsInstallationID != "" {
+	if r.Config.UsageStats.InstallationID != "" {
 		envVars = append(envVars, v1.EnvVar{
 			Name:  "GLASSFLOW_USAGE_STATS_INSTALLATION_ID",
-			Value: r.UsageStatsInstallationID,
+			Value: r.Config.UsageStats.InstallationID,
 		})
 	}
 
@@ -221,7 +221,7 @@ func (r *PipelineReconciler) getStatefulSetPodIdentityEnvVars() []v1.EnvVar {
 
 // getComponentDatabaseEnvVars returns GLASSFLOW_DATABASE_URL from the component secret (same as API).
 func (r *PipelineReconciler) getComponentDatabaseEnvVars() []v1.EnvVar {
-	if r.DatabaseURL == "" {
+	if r.Config.DatabaseURL == "" {
 		return nil
 	}
 	return []v1.EnvVar{
@@ -239,7 +239,7 @@ func (r *PipelineReconciler) getComponentDatabaseEnvVars() []v1.EnvVar {
 
 // getComponentEncryptionVolume returns the encryption secret volume (same as API) when encryption is enabled.
 func (r *PipelineReconciler) getComponentEncryptionVolume() (v1.Volume, bool) {
-	if !r.EncryptionEnabled {
+	if !r.Config.Encryption.Enabled {
 		return v1.Volume{}, false
 	}
 	return v1.Volume{
@@ -256,7 +256,7 @@ func (r *PipelineReconciler) getComponentEncryptionVolume() (v1.Volume, bool) {
 
 // getComponentEncryptionVolumeMount returns the encryption volume mount at /etc/glassflow/secrets (same as API).
 func (r *PipelineReconciler) getComponentEncryptionVolumeMount() (v1.VolumeMount, bool) {
-	if !r.EncryptionEnabled {
+	if !r.Config.Encryption.Enabled {
 		return v1.VolumeMount{}, false
 	}
 	return v1.VolumeMount{
