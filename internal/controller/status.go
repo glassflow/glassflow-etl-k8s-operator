@@ -30,6 +30,14 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
+func (r *PipelineReconciler) sendUsageStatsEvent(ctx context.Context, eventName string, payload map[string]interface{}) {
+	if r.UsageStatsClient == nil {
+		return
+	}
+
+	r.UsageStatsClient.SendEvent(ctx, eventName, "operator", payload)
+}
+
 // recordReconcileError records error metrics and sends usage stats event for reconcile operations
 func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation, pipelineID string, err error) {
 	if r.Meter != nil {
@@ -38,22 +46,22 @@ func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation
 	}
 
 	// Send usage stats event for reconcile failure
-	r.UsageStatsClient.SendEvent(ctx, "reconcile_error", "operator", map[string]interface{}{
+	r.sendUsageStatsEvent(ctx, "reconcile_error", map[string]interface{}{
 		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
 		"operation":        operation,
 		"status":           "failure",
 		"error":            err.Error(),
-		"cluster_provider": r.ClusterProvider,
+		"cluster_provider": r.Config.ClusterProvider,
 	})
 }
 
 // sendReconcileSuccessEvent sends a usage stats event for successful reconcile operations
 func (r *PipelineReconciler) sendReconcileSuccessEvent(ctx context.Context, operation, pipelineID string) {
-	r.UsageStatsClient.SendEvent(ctx, "reconcile_success", "operator", map[string]interface{}{
+	r.sendUsageStatsEvent(ctx, "reconcile_success", map[string]interface{}{
 		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
 		"operation":        operation,
 		"status":           "success",
-		"cluster_provider": r.ClusterProvider,
+		"cluster_provider": r.Config.ClusterProvider,
 	})
 }
 
@@ -101,10 +109,10 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 	})
 
 	// Send usage stats event for status change
-	r.UsageStatsClient.SendEvent(ctx, "pipeline_status_change", "operator", map[string]interface{}{
+	r.sendUsageStatsEvent(ctx, "pipeline_status_change", map[string]interface{}{
 		"pipeline_id_hash": usagestats.HashPipelineID(p.Spec.ID),
 		"status":           string(newStatus),
-		"cluster_provider": r.ClusterProvider,
+		"cluster_provider": r.Config.ClusterProvider,
 	})
 
 	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "to", newStatus)

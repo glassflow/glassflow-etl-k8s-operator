@@ -81,90 +81,22 @@ var pipelineOperationPredicate = predicate.Funcs{
 // PipelineReconciler reconciles a Pipeline object
 type PipelineReconciler struct {
 	client.Client
-	Scheme            *runtime.Scheme
-	Meter             *observability.Meter
-	NATSClient        *nats.NATSClient
-	PostgresStorage   *postgresstorage.PostgresStorage
-	ComponentNATSAddr string
-	// NATS stream configurations
-	NATSMaxStreamAge   string
-	NATSMaxStreamBytes string
-	// Component image configurations
-	IngestorImage string
-	JoinImage     string
-	SinkImage     string
-	DedupImage    string
-	// Component image pull policy configurations
-	IngestorPullPolicy string
-	JoinPullPolicy     string
-	SinkPullPolicy     string
-	DedupPullPolicy    string
-	// Component resource configurations
-	IngestorCPURequest    string
-	IngestorCPULimit      string
-	IngestorMemoryRequest string
-	IngestorMemoryLimit   string
-	JoinCPURequest        string
-	JoinCPULimit          string
-	JoinMemoryRequest     string
-	JoinMemoryLimit       string
-	SinkCPURequest        string
-	SinkCPULimit          string
-	SinkMemoryRequest     string
-	SinkMemoryLimit       string
-	DedupCPURequest       string
-	DedupCPULimit         string
-	DedupMemoryRequest    string
-	DedupMemoryLimit      string
-	// Dedup storage configurations
-	DedupDefaultStorageSize  string
-	DedupDefaultStorageClass string
-	// Component affinity configurations
-	IngestorAffinity string
-	JoinAffinity     string
-	SinkAffinity     string
-	DedupAffinity    string
-	// Observability configurations
-	ObservabilityLogsEnabled    string
-	ObservabilityMetricsEnabled string
-	ObservabilityOTelEndpoint   string
-	IngestorLogLevel            string
-	JoinLogLevel                string
-	SinkLogLevel                string
-	DedupLogLevel               string
-	IngestorImageTag            string
-	JoinImageTag                string
-	SinkImageTag                string
-	DedupImageTag               string
-	// Pipelines namespace configuration
-	PipelinesNamespaceAuto bool
-	PipelinesNamespaceName string
-
-	GlassflowNamespace string // currently the same as operator namespace
-	// Usage stats client
+	Scheme           *runtime.Scheme
+	Meter            *observability.Meter
+	NATSClient       *nats.NATSClient
+	PostgresStorage  *postgresstorage.PostgresStorage
+	Config           ReconcilerConfig
 	UsageStatsClient *usagestats.Client
-	// Usage stats configuration (values passed directly to components)
-	UsageStatsEnabled        bool
-	UsageStatsEndpoint       string
-	UsageStatsUsername       string
-	UsageStatsPassword       string
-	UsageStatsInstallationID string
-	// Cluster provider (e.g., GKE, EKS, IBM, etc.)
-	ClusterProvider string
-
-	// Component database and encryption (same as API). DatabaseURL is passed from operator env (GLASSFLOW_DATABASE_URL).
-	DatabaseURL string
-	// Encryption: when enabled, operator copies this secret into pipeline namespace and mounts at /etc/glassflow/secrets (same as API).
-	EncryptionEnabled         bool
-	EncryptionSecretName      string
-	EncryptionSecretKey       string
-	EncryptionSecretNamespace string
 }
 
 // -------------------------------------------------------------------------------------------------------------------
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := r.Config.Validate(); err != nil {
+		return fmt.Errorf("validate reconciler config: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&etlv1alpha1.Pipeline{}).
 		Named("pipeline").
