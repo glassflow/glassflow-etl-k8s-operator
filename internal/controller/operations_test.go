@@ -35,7 +35,6 @@ func TestOperationHandlerForKnownOperations(t *testing.T) {
 	}
 
 	for _, operation := range operations {
-		operation := operation
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			handler := r.operationHandlerFor(operation)
