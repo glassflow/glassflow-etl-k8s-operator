@@ -255,7 +255,7 @@ func buildStreams(prefix string, sourceReplicas, streamCount int) []StreamBindin
 	}
 	for r := range sourceReplicas {
 		s := &streams[r%streamCount]
-		s.Subjects = append(s.Subjects, prefix+"."+strconv.Itoa(r))
+		s.Subjects = append(s.Subjects, s.Name+"."+strconv.Itoa(r))
 	}
 	return streams
 }

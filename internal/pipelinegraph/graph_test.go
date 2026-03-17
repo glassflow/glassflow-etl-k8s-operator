@@ -69,8 +69,8 @@ func TestGraphIngestorSinkTwoTwo(t *testing.T) {
 
 	wantOutput := outputBinding(
 		"gfm-1528386a-ingestor_0-out",
-		streamBinding("gfm-1528386a-ingestor_0-out_0", "gfm-1528386a-ingestor_0-out.0"),
-		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out.1"),
+		streamBinding("gfm-1528386a-ingestor_0-out_0", "gfm-1528386a-ingestor_0-out_0.0"),
+		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out_1.1"),
 	)
 	if !reflect.DeepEqual(output, wantOutput) {
 		t.Fatalf("output = %#v, want %#v", output, wantOutput)
@@ -82,8 +82,8 @@ func TestGraphIngestorSinkTwoTwo(t *testing.T) {
 	}
 	wantSinkInput := inputBinding(
 		"gfm-1528386a-ingestor_0-out",
-		streamBinding("gfm-1528386a-ingestor_0-out_0", "gfm-1528386a-ingestor_0-out.0"),
-		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out.1"),
+		streamBinding("gfm-1528386a-ingestor_0-out_0", "gfm-1528386a-ingestor_0-out_0.0"),
+		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out_1.1"),
 	)
 	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
 		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
@@ -133,9 +133,9 @@ func TestGraphTwoIngestorsJoinSink(t *testing.T) {
 		"gfm-2802cd7f-ingestor_0-out",
 		streamBinding(
 			"gfm-2802cd7f-ingestor_0-out_0",
-			"gfm-2802cd7f-ingestor_0-out.0",
-			"gfm-2802cd7f-ingestor_0-out.1",
-			"gfm-2802cd7f-ingestor_0-out.2",
+			"gfm-2802cd7f-ingestor_0-out_0.0",
+			"gfm-2802cd7f-ingestor_0-out_0.1",
+			"gfm-2802cd7f-ingestor_0-out_0.2",
 		),
 	)
 	if !reflect.DeepEqual(left, wantLeft) {
@@ -147,8 +147,8 @@ func TestGraphTwoIngestorsJoinSink(t *testing.T) {
 		"gfm-2802cd7f-ingestor_1-out",
 		streamBinding(
 			"gfm-2802cd7f-ingestor_1-out_0",
-			"gfm-2802cd7f-ingestor_1-out.0",
-			"gfm-2802cd7f-ingestor_1-out.1",
+			"gfm-2802cd7f-ingestor_1-out_0.0",
+			"gfm-2802cd7f-ingestor_1-out_0.1",
 		),
 	)
 	if !reflect.DeepEqual(right, wantRight) {
@@ -161,7 +161,7 @@ func TestGraphTwoIngestorsJoinSink(t *testing.T) {
 	}
 	wantJoinOutput := outputBinding(
 		"gfm-2802cd7f-join_0-out",
-		streamBinding("gfm-2802cd7f-join_0-out_0", "gfm-2802cd7f-join_0-out.0"),
+		streamBinding("gfm-2802cd7f-join_0-out_0", "gfm-2802cd7f-join_0-out_0.0"),
 	)
 	if !reflect.DeepEqual(joinOutput, wantJoinOutput) {
 		t.Fatalf("joinOutput = %#v, want %#v", joinOutput, wantJoinOutput)
@@ -173,7 +173,7 @@ func TestGraphTwoIngestorsJoinSink(t *testing.T) {
 	}
 	wantSinkInput := inputBinding(
 		"gfm-2802cd7f-join_0-out",
-		streamBinding("gfm-2802cd7f-join_0-out_0", "gfm-2802cd7f-join_0-out.0"),
+		streamBinding("gfm-2802cd7f-join_0-out_0", "gfm-2802cd7f-join_0-out_0.0"),
 	)
 	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
 		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
@@ -211,8 +211,8 @@ func TestGraphDedupOutputNamingTwoTwo(t *testing.T) {
 
 	wantOutput := outputBinding(
 		"gfm-1528386a-dedup_0-out",
-		streamBinding("gfm-1528386a-dedup_0-out_0", "gfm-1528386a-dedup_0-out.0"),
-		streamBinding("gfm-1528386a-dedup_0-out_1", "gfm-1528386a-dedup_0-out.1"),
+		streamBinding("gfm-1528386a-dedup_0-out_0", "gfm-1528386a-dedup_0-out_0.0"),
+		streamBinding("gfm-1528386a-dedup_0-out_1", "gfm-1528386a-dedup_0-out_1.1"),
 	)
 	if !reflect.DeepEqual(output, wantOutput) {
 		t.Fatalf("output = %#v, want %#v", output, wantOutput)
@@ -274,10 +274,10 @@ func TestGraphIngestorDedupSinkThreeTwoOne(t *testing.T) {
 		"gfm-1528386a-ingestor_0-out",
 		streamBinding(
 			"gfm-1528386a-ingestor_0-out_0",
-			"gfm-1528386a-ingestor_0-out.0",
-			"gfm-1528386a-ingestor_0-out.2",
+			"gfm-1528386a-ingestor_0-out_0.0",
+			"gfm-1528386a-ingestor_0-out_0.2",
 		),
-		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out.1"),
+		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out_1.1"),
 	)
 	if !reflect.DeepEqual(ingestorOutput, wantIngestorOutput) {
 		t.Fatalf("ingestorOutput = %#v, want %#v", ingestorOutput, wantIngestorOutput)
@@ -291,10 +291,10 @@ func TestGraphIngestorDedupSinkThreeTwoOne(t *testing.T) {
 		"gfm-1528386a-ingestor_0-out",
 		streamBinding(
 			"gfm-1528386a-ingestor_0-out_0",
-			"gfm-1528386a-ingestor_0-out.0",
-			"gfm-1528386a-ingestor_0-out.2",
+			"gfm-1528386a-ingestor_0-out_0.0",
+			"gfm-1528386a-ingestor_0-out_0.2",
 		),
-		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out.1"),
+		streamBinding("gfm-1528386a-ingestor_0-out_1", "gfm-1528386a-ingestor_0-out_1.1"),
 	)
 	if !reflect.DeepEqual(dedupInput, wantDedupInput) {
 		t.Fatalf("dedupInput = %#v, want %#v", dedupInput, wantDedupInput)
@@ -308,8 +308,8 @@ func TestGraphIngestorDedupSinkThreeTwoOne(t *testing.T) {
 		"gfm-1528386a-dedup_0-out",
 		streamBinding(
 			"gfm-1528386a-dedup_0-out_0",
-			"gfm-1528386a-dedup_0-out.0",
-			"gfm-1528386a-dedup_0-out.1",
+			"gfm-1528386a-dedup_0-out_0.0",
+			"gfm-1528386a-dedup_0-out_0.1",
 		),
 	)
 	if !reflect.DeepEqual(dedupOutput, wantDedupOutput) {
@@ -324,8 +324,8 @@ func TestGraphIngestorDedupSinkThreeTwoOne(t *testing.T) {
 		"gfm-1528386a-dedup_0-out",
 		streamBinding(
 			"gfm-1528386a-dedup_0-out_0",
-			"gfm-1528386a-dedup_0-out.0",
-			"gfm-1528386a-dedup_0-out.1",
+			"gfm-1528386a-dedup_0-out_0.0",
+			"gfm-1528386a-dedup_0-out_0.1",
 		),
 	)
 	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
@@ -375,8 +375,8 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	}
 	wantIngestor0Output := outputBinding(
 		"gfm-2802cd7f-ingestor_0-out",
-		streamBinding("gfm-2802cd7f-ingestor_0-out_0", "gfm-2802cd7f-ingestor_0-out.0"),
-		streamBinding("gfm-2802cd7f-ingestor_0-out_1", "gfm-2802cd7f-ingestor_0-out.1"),
+		streamBinding("gfm-2802cd7f-ingestor_0-out_0", "gfm-2802cd7f-ingestor_0-out_0.0"),
+		streamBinding("gfm-2802cd7f-ingestor_0-out_1", "gfm-2802cd7f-ingestor_0-out_1.1"),
 	)
 	if !reflect.DeepEqual(ingestor0Output, wantIngestor0Output) {
 		t.Fatalf("ingestor0Output = %#v, want %#v", ingestor0Output, wantIngestor0Output)
@@ -399,8 +399,8 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 		"gfm-2802cd7f-dedup_0-out",
 		streamBinding(
 			"gfm-2802cd7f-dedup_0-out_0",
-			"gfm-2802cd7f-dedup_0-out.0",
-			"gfm-2802cd7f-dedup_0-out.1",
+			"gfm-2802cd7f-dedup_0-out_0.0",
+			"gfm-2802cd7f-dedup_0-out_0.1",
 		),
 	)
 	if !reflect.DeepEqual(dedup0Output, wantDedup0Output) {
@@ -413,9 +413,9 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	}
 	wantIngestor1Output := outputBinding(
 		"gfm-2802cd7f-ingestor_1-out",
-		streamBinding("gfm-2802cd7f-ingestor_1-out_0", "gfm-2802cd7f-ingestor_1-out.0"),
-		streamBinding("gfm-2802cd7f-ingestor_1-out_1", "gfm-2802cd7f-ingestor_1-out.1"),
-		streamBinding("gfm-2802cd7f-ingestor_1-out_2", "gfm-2802cd7f-ingestor_1-out.2"),
+		streamBinding("gfm-2802cd7f-ingestor_1-out_0", "gfm-2802cd7f-ingestor_1-out_0.0"),
+		streamBinding("gfm-2802cd7f-ingestor_1-out_1", "gfm-2802cd7f-ingestor_1-out_1.1"),
+		streamBinding("gfm-2802cd7f-ingestor_1-out_2", "gfm-2802cd7f-ingestor_1-out_2.2"),
 	)
 	if !reflect.DeepEqual(ingestor1Output, wantIngestor1Output) {
 		t.Fatalf("ingestor1Output = %#v, want %#v", ingestor1Output, wantIngestor1Output)
@@ -438,9 +438,9 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 		"gfm-2802cd7f-dedup_1-out",
 		streamBinding(
 			"gfm-2802cd7f-dedup_1-out_0",
-			"gfm-2802cd7f-dedup_1-out.0",
-			"gfm-2802cd7f-dedup_1-out.1",
-			"gfm-2802cd7f-dedup_1-out.2",
+			"gfm-2802cd7f-dedup_1-out_0.0",
+			"gfm-2802cd7f-dedup_1-out_0.1",
+			"gfm-2802cd7f-dedup_1-out_0.2",
 		),
 	)
 	if !reflect.DeepEqual(dedup1Output, wantDedup1Output) {
@@ -465,7 +465,7 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	}
 	wantJoinOutput := outputBinding(
 		"gfm-2802cd7f-join_0-out",
-		streamBinding("gfm-2802cd7f-join_0-out_0", "gfm-2802cd7f-join_0-out.0"),
+		streamBinding("gfm-2802cd7f-join_0-out_0", "gfm-2802cd7f-join_0-out_0.0"),
 	)
 	if !reflect.DeepEqual(joinOutput, wantJoinOutput) {
 		t.Fatalf("joinOutput = %#v, want %#v", joinOutput, wantJoinOutput)
