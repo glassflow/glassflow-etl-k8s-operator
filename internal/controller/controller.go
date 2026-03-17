@@ -138,24 +138,7 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if operation == constants.OperationHelmUninstall {
 			log.Info("HELM UNINSTALL detected - interrupting any ongoing operations", "pipeline_id", p.Spec.ID)
 		}
-
-		// Execute the appropriate operation
-		switch operation {
-		case constants.OperationHelmUninstall:
-			return r.reconcileHelmUninstall(ctx, log, p)
-		case constants.OperationCreate:
-			return r.createPipeline(ctx, p)
-		case constants.OperationResume:
-			return r.reconcileResume(ctx, log, p)
-		case constants.OperationStop:
-			return r.reconcileStop(ctx, log, p)
-		case constants.OperationEdit:
-			return r.reconcileEdit(ctx, log, p)
-		case constants.OperationTerminate:
-			return r.reconcileTerminate(ctx, log, p)
-		case constants.OperationDelete:
-			return r.reconcileDelete(ctx, log, p)
-		}
+		return r.dispatchOperation(ctx, log, operation, p)
 	}
 
 	// No operation needed
@@ -187,13 +170,8 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
 	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusCreated) {
@@ -210,12 +188,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 			return ctrl.Result{}, fmt.Errorf("update pipeline CRD status: %w", err)
 		}
 
-		// Set operation start time when transitioning to Created status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 	}
 
 	ns, err := r.createNamespace(ctx, p)
@@ -262,26 +235,15 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
-	// Remove create annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineCreateAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusRunning)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove create annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "create", "success", pipelineID)
-	})
-
-	// Send usage stats event for reconcile success
-	r.sendReconcileSuccessEvent(ctx, "create", pipelineID)
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineCreateAnnotation,
+		models.PipelineStatusRunning,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "create", "create", pipelineID)
 
 	log.Info("pipeline creation completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -298,21 +260,11 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
-	// Set operation start time if not already set (for timeout usage stats)
-	err := r.setOperationStartTime(ctx, &p)
-	if err != nil {
-		log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-		// Continue anyway - this is not critical
-	}
+	r.setOperationStartTimeBestEffort(ctx, log, &p)
 
 	// Stop all pipeline components
 	result, err := r.terminatePipelineComponents(ctx, log, &p)
@@ -332,25 +284,15 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
 
-	// Remove terminate annotation
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineTerminateAnnotation)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusStopped)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "terminate", "success", pipelineID)
-	})
-
-	// Send usage stats event for reconcile success
-	r.sendReconcileSuccessEvent(ctx, "terminate", pipelineID)
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineTerminateAnnotation,
+		models.PipelineStatusStopped,
+		false,
+	)
+	r.recordOperationSuccess(ctx, "terminate", "terminate", pipelineID)
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -403,17 +345,14 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		}
 	}
 
-	// Remove terminate annotation
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineDeleteAnnotation)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusStopped)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineDeleteAnnotation,
+		models.PipelineStatusStopped,
+		false,
+	)
 
 	// Remove finalizer
 	err = r.removeFinalizer(ctx, &p)
@@ -427,13 +366,7 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "delete", "success", pipelineID)
-	})
-
-	// Send usage stats event for reconcile success
-	r.sendReconcileSuccessEvent(ctx, "delete", pipelineID)
+	r.recordOperationSuccess(ctx, "delete", "delete", pipelineID)
 
 	log.Info("pipeline deletion completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -530,13 +463,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "uninstall", "success", pipelineID)
-	})
-
-	// Send usage stats event for reconcile success
-	r.sendReconcileSuccessEvent(ctx, "helm-uninstall", pipelineID)
+	r.recordOperationSuccess(ctx, "uninstall", "helm-uninstall", pipelineID)
 
 	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", pipelineID)
 	return ctrl.Result{}, nil
@@ -555,13 +482,8 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
 	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusResuming) {
@@ -574,15 +496,10 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
 
-		// Set operation start time when transitioning to Resuming status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 
 		// Requeue to continue with the resume process
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		return defaultOperationRequeueResult(), nil
 	}
 
 	// Get namespace
@@ -641,26 +558,15 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
-	// Remove resume annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineResumeAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusRunning)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove resume annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "resume", "success", pipelineID)
-	})
-
-	// Send usage stats event for reconcile success
-	r.sendReconcileSuccessEvent(ctx, "resume", pipelineID)
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineResumeAnnotation,
+		models.PipelineStatusRunning,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "resume", "resume", pipelineID)
 
 	log.Info("pipeline resume completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -677,13 +583,8 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
 	// Check if pipeline is already stopping
@@ -697,15 +598,10 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
 		}
 
-		// Set operation start time when transitioning to Stopping status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 
 		// Requeue to continue with the stop process
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		return defaultOperationRequeueResult(), nil
 	}
 
 	// Stop all pipeline components
@@ -729,26 +625,15 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
 
-	// Remove stop annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineStopAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusStopped)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove stop annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "stop", "success", pipelineID)
-	})
-
-	// Send usage stats event for reconcile success
-	r.sendReconcileSuccessEvent(ctx, "stop", pipelineID)
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineStopAnnotation,
+		models.PipelineStatusStopped,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "stop", "stop", pipelineID)
 
 	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -761,13 +646,8 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	namespace := r.getTargetNamespace(p)
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
 	// Update the pipeline config secret with new config
@@ -792,12 +672,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
 
-		// Set operation start time when transitioning to Resuming status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 	}
 
 	// Get namespace for deployment creation
@@ -833,26 +708,15 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
-	// Remove edit annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineEditAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusRunning)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove edit annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "edit", "success", pipelineID)
-	})
-
-	// Send usage stats event for reconcile success
-	r.sendReconcileSuccessEvent(ctx, "edit", pipelineID)
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineEditAnnotation,
+		models.PipelineStatusRunning,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "edit", "edit", pipelineID)
 
 	log.Info("pipeline edit completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
