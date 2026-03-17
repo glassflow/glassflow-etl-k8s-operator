@@ -142,8 +142,8 @@ func (g *Graph) getInputByType(nodeID string, inputType InputType) (InputBinding
 	}
 
 	return InputBinding{
-		StreamPrefix: output.StreamPrefix,
-		Streams:      output.Streams,
+		Prefix:  output.Prefix,
+		Streams: output.Streams,
 	}, nil
 }
 
@@ -235,9 +235,8 @@ func (g *Graph) resolveOutput(edge EdgeConfig) (OutputBinding, error) {
 	}
 
 	return OutputBinding{
-		StreamPrefix:  basePrefix,
-		SubjectPrefix: basePrefix,
-		Streams:       buildStreams(basePrefix, source.Replicas, target.Replicas),
+		Prefix:  basePrefix,
+		Streams: buildStreams(basePrefix, source.Replicas, target.Replicas),
 	}, nil
 }
 

@@ -46,14 +46,13 @@ type StreamBinding struct {
 }
 
 type OutputBinding struct {
-	StreamPrefix  string          `json:"stream_prefix"`
-	SubjectPrefix string          `json:"subject_prefix"`
-	Streams       []StreamBinding `json:"streams"`
+	Prefix  string          `json:"prefix"`
+	Streams []StreamBinding `json:"streams"`
 }
 
 type InputBinding struct {
-	StreamPrefix string          `json:"stream_prefix"`
-	Streams      []StreamBinding `json:"streams"`
+	Prefix  string          `json:"prefix"`
+	Streams []StreamBinding `json:"streams"`
 }
 
 type JoinInputBinding struct {

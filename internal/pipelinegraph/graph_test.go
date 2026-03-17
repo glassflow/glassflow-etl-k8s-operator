@@ -14,15 +14,14 @@ func streamBinding(name string, subjects ...string) StreamBinding {
 
 func outputBinding(prefix string, streams ...StreamBinding) OutputBinding {
 	return OutputBinding{
-		StreamPrefix:  prefix,
-		SubjectPrefix: prefix,
-		Streams:       streams,
+		Prefix:  prefix,
+		Streams: streams,
 	}
 }
 
 func inputBinding(prefix string, streams ...StreamBinding) InputBinding {
 	return InputBinding{
-		StreamPrefix: prefix,
+		Prefix:  prefix,
 		Streams:      streams,
 	}
 }
@@ -386,7 +385,7 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInput(dedup_0) returned error: %v", err)
 	}
-	wantDedup0Input := inputBinding(wantIngestor0Output.StreamPrefix, wantIngestor0Output.Streams...)
+	wantDedup0Input := inputBinding(wantIngestor0Output.Prefix, wantIngestor0Output.Streams...)
 	if !reflect.DeepEqual(dedup0Input, wantDedup0Input) {
 		t.Fatalf("dedup0Input = %#v, want %#v", dedup0Input, wantDedup0Input)
 	}
@@ -425,7 +424,7 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInput(dedup_1) returned error: %v", err)
 	}
-	wantDedup1Input := inputBinding(wantIngestor1Output.StreamPrefix, wantIngestor1Output.Streams...)
+	wantDedup1Input := inputBinding(wantIngestor1Output.Prefix, wantIngestor1Output.Streams...)
 	if !reflect.DeepEqual(dedup1Input, wantDedup1Input) {
 		t.Fatalf("dedup1Input = %#v, want %#v", dedup1Input, wantDedup1Input)
 	}
@@ -452,8 +451,8 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 		t.Fatalf("GetJoinInput(join_0) returned error: %v", err)
 	}
 	wantJoinInput := JoinInputBinding{
-		Left:  inputBinding(wantDedup0Output.StreamPrefix, wantDedup0Output.Streams...),
-		Right: inputBinding(wantDedup1Output.StreamPrefix, wantDedup1Output.Streams...),
+		Left:  inputBinding(wantDedup0Output.Prefix, wantDedup0Output.Streams...),
+		Right: inputBinding(wantDedup1Output.Prefix, wantDedup1Output.Streams...),
 	}
 	if !reflect.DeepEqual(joinInput, wantJoinInput) {
 		t.Fatalf("joinInput = %#v, want %#v", joinInput, wantJoinInput)
@@ -475,7 +474,7 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetInput(sink_0) returned error: %v", err)
 	}
-	wantSinkInput := inputBinding(wantJoinOutput.StreamPrefix, wantJoinOutput.Streams...)
+	wantSinkInput := inputBinding(wantJoinOutput.Prefix, wantJoinOutput.Streams...)
 	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
 		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
 	}

@@ -184,7 +184,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
-				{Name: "NATS_SUBJECT_PREFIX", Value: outputBinding.SubjectPrefix},
+				{Name: "NATS_SUBJECT_PREFIX", Value: outputBinding.Prefix},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Ingestor},
 
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
@@ -304,7 +304,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.Streams[0].Name},
 			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.Streams[0].Name},
-			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
+			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.Prefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Join},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
@@ -406,7 +406,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "NATS_INPUT_STREAM_PREFIX", Value: sinkInput.StreamPrefix},
+			{Name: "NATS_INPUT_STREAM_PREFIX", Value: sinkInput.Prefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Sink},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
@@ -545,8 +545,8 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			}},
 		}
 		dedupEnvBase = append(dedupEnvBase,
-			v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: dedupInput.StreamPrefix},
-			v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: dedupOutput.SubjectPrefix},
+			v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: dedupInput.Prefix},
+			v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: dedupOutput.Prefix},
 		)
 		dedupContainerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
