@@ -19,6 +19,10 @@ const (
 	// Pipeline operation start time annotation - tracks when an operation started
 	PipelineOperationStartTimeAnnotation = "pipeline.etl.glassflow.io/operation-start-time"
 
+	// PipelineStopLastPendingCountAnnotation tracks the last observed total pending message count
+	// during a stop operation, used to detect whether messages are being consumed.
+	PipelineStopLastPendingCountAnnotation = "pipeline.etl.glassflow.io/stop-last-pending-count"
+
 	// DefaultReconcileTimeout is the default maximum duration a reconcile operation can run before timing out
 	DefaultReconcileTimeout = 15 * time.Minute
 

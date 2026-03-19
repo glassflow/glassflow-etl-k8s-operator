@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -195,4 +196,98 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 	})
 
 	return ctrl.Result{}, nil // Don't requeue - operation has timed out
+}
+
+// extendOperationTimeout resets the operation start time to now, effectively restarting the timeout window.
+func (r *PipelineReconciler) extendOperationTimeout(ctx context.Context, p *etlv1alpha1.Pipeline) error {
+	annotations := p.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[constants.PipelineOperationStartTimeAnnotation] = time.Now().UTC().Format(time.RFC3339)
+	p.SetAnnotations(annotations)
+	return r.Update(ctx, p)
+}
+
+// setStopLastPendingCount stores the current total pending message count in an annotation.
+func (r *PipelineReconciler) setStopLastPendingCount(ctx context.Context, p *etlv1alpha1.Pipeline, count int) error {
+	annotations := p.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[constants.PipelineStopLastPendingCountAnnotation] = strconv.Itoa(count)
+	p.SetAnnotations(annotations)
+	return r.Update(ctx, p)
+}
+
+// getStopLastPendingCount reads the last recorded pending count annotation.
+// Returns (count, true) if the annotation is set and valid, or (0, false) otherwise.
+func getStopLastPendingCount(p *etlv1alpha1.Pipeline) (int, bool) {
+	annotations := p.GetAnnotations()
+	if annotations == nil {
+		return 0, false
+	}
+	str, exists := annotations[constants.PipelineStopLastPendingCountAnnotation]
+	if !exists {
+		return 0, false
+	}
+	count, err := strconv.Atoi(str)
+	if err != nil {
+		return 0, false
+	}
+	return count, true
+}
+
+// clearStopLastPendingCount removes the last-pending-count annotation from the pipeline.
+func (r *PipelineReconciler) clearStopLastPendingCount(p *etlv1alpha1.Pipeline) {
+	annotations := p.GetAnnotations()
+	if annotations != nil {
+		delete(annotations, constants.PipelineStopLastPendingCountAnnotation)
+		p.SetAnnotations(annotations)
+	}
+}
+
+// tryExtendStopTimeout checks whether pending messages are still decreasing when a stop operation
+// times out. If the count has decreased since the last check, it extends the timeout window and
+// returns true so the caller can requeue. If no progress is detected, it returns false and the
+// caller should proceed with the normal timeout failure path.
+func (r *PipelineReconciler) tryExtendStopTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (bool, error) {
+	pipelineID := p.Spec.ID
+
+	currentCount, err := r.getTotalPendingCount(ctx, *p)
+	if err != nil {
+		return false, fmt.Errorf("get total pending count: %w", err)
+	}
+
+	lastCount, hasLastCount := getStopLastPendingCount(p)
+	log.Info("checking stop timeout extension",
+		"pipeline_id", pipelineID,
+		"current_pending", currentCount,
+		"last_pending", lastCount,
+		"has_last_count", hasLastCount,
+	)
+
+	// Extend the timeout if this is the first check or if messages are being consumed.
+	if !hasLastCount || currentCount < lastCount {
+		log.Info("pending messages are decreasing, extending stop timeout",
+			"pipeline_id", pipelineID,
+			"current_pending", currentCount,
+			"last_pending", lastCount,
+		)
+
+		if err := r.setStopLastPendingCount(ctx, p, currentCount); err != nil {
+			return false, fmt.Errorf("save last pending count: %w", err)
+		}
+		if err := r.extendOperationTimeout(ctx, p); err != nil {
+			return false, fmt.Errorf("extend operation timeout: %w", err)
+		}
+		return true, nil
+	}
+
+	log.Info("pending messages not decreasing, honoring stop timeout",
+		"pipeline_id", pipelineID,
+		"current_pending", currentCount,
+		"last_pending", lastCount,
+	)
+	return false, nil
 }

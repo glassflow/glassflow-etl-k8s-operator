@@ -57,6 +57,77 @@ func (r *PipelineReconciler) checkInputBindingPendingMessages(
 	return nil
 }
 
+// countInputBindingPending returns the total pending + unacknowledged count across all streams in a binding.
+func (r *PipelineReconciler) countInputBindingPending(ctx context.Context, binding pipelinegraph.InputBinding, consumerName string) (int, error) {
+	total := 0
+	for _, stream := range binding.Streams {
+		_, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, stream.Name, consumerName)
+		if err != nil {
+			return 0, fmt.Errorf("count pending for consumer %s on stream %s: %w", consumerName, stream.Name, err)
+		}
+		total += pending + unack
+	}
+	return total, nil
+}
+
+// getTotalPendingCount returns the total pending + unacknowledged message count across all
+// consumers for a pipeline (sink, join left/right, dedup per stream).
+func (r *PipelineReconciler) getTotalPendingCount(ctx context.Context, p etlv1alpha1.Pipeline) (int, error) {
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return 0, fmt.Errorf("build pipeline graph: %w", err)
+	}
+
+	total := 0
+
+	// Sink
+	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
+	if err != nil {
+		return 0, fmt.Errorf("resolve sink input: %w", err)
+	}
+	n, err := r.countInputBindingPending(ctx, sinkInput, getNATSSinkConsumerName(p.Spec.ID))
+	if err != nil {
+		return 0, err
+	}
+	total += n
+
+	// Join (if enabled)
+	if p.Spec.Join.Enabled {
+		inputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
+		if err != nil {
+			return 0, fmt.Errorf("resolve join input: %w", err)
+		}
+		leftN, err := r.countInputBindingPending(ctx, inputs.Left, getNATSJoinLeftConsumerName(p.Spec.ID))
+		if err != nil {
+			return 0, err
+		}
+		total += leftN
+		rightN, err := r.countInputBindingPending(ctx, inputs.Right, getNATSJoinRightConsumerName(p.Spec.ID))
+		if err != nil {
+			return 0, err
+		}
+		total += rightN
+	}
+
+	// Dedup per stream (if enabled)
+	for i, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+			continue
+		}
+		dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, i))
+		if err != nil {
+			return 0, fmt.Errorf("resolve dedup input for stream %d: %w", i, err)
+		}
+		n, err := r.countInputBindingPending(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+
+	return total, nil
+}
+
 // checkJoinPendingMessages checks if join consumers have pending messages
 func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	if !p.Spec.Join.Enabled {

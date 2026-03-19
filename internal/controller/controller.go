@@ -583,8 +583,24 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, nil
 	}
 
-	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+	// For stop operations, check whether pending messages are still decreasing before failing on timeout.
+	// If progress is being made, extend the timeout window instead of marking the pipeline failed.
+	timedOut, elapsed := r.checkOperationTimeout(log, &p)
+	if timedOut {
+		if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopping) {
+			extended, extErr := r.tryExtendStopTimeout(ctx, log, &p)
+			if extErr != nil {
+				log.Error(extErr, "failed to check pending progress during stop timeout", "pipeline_id", pipelineID)
+				// Fall through to normal timeout handling on error.
+			} else if extended {
+				return ctrl.Result{Requeue: true, RequeueAfter: pendingMessagesRequeueDelay}, nil
+			}
+		}
+		result, err := r.handleOperationTimeout(ctx, log, &p)
 		return result, err
+	}
+	if elapsed > 0 {
+		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
 	}
 
 	// Check if pipeline is already stopping
@@ -625,6 +641,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
 
+	r.clearStopLastPendingCount(&p)
 	r.clearOperationAnnotationAndStatus(
 		ctx,
 		log,
