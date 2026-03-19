@@ -40,8 +40,10 @@ spec:
             description: PipelineSpec defines the desired state of Pipeline.
             properties:
               config:
-                type: string
-              dlq:
+                description: |-
+                  Config will be deprecated. Initial Pipeline configuration is now read from a Kubernetes Secret
+                  in the glassflow namespace (pipeline-config-{pipeline_id}). This field is kept for
+                  backward compatibility and will be used as a fallback if the secret is not found.
                 type: string
               join:
                 properties:
@@ -54,13 +56,6 @@ spec:
                       largest representable duration to approximately 290 years.
                     format: int64
                     type: integer
-                  nats_left_consumer_name:
-                    type: string
-                  nats_right_consumer_name:
-                    type: string
-                  replicas:
-                    minimum: 1
-                    type: integer
                   right_buffer_ttl:
                     description: |-
                       A Duration represents the elapsed time between two instants
@@ -68,32 +63,375 @@ spec:
                       largest representable duration to approximately 290 years.
                     format: int64
                     type: integer
-                  stream:
-                    type: string
                   type:
                     type: string
                 required:
                 - enabled
-                - replicas
-                - stream
                 - type
                 type: object
               pipeline_id:
                 minLength: 5
                 type: string
+              pipeline_resources:
+                description: PipelineResources defines per-component resource configuration
+                  for a pipeline.
+                properties:
+                  dedup:
+                    description: ComponentResources wraps the resource spec for a
+                      single component.
+                    properties:
+                      limits:
+                        description: ResourceQuantities defines CPU and memory resource
+                          quantities (e.g. "100m", "128Mi").
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      replicas:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      requests:
+                        description: ResourceQuantities defines CPU and memory resource
+                          quantities (e.g. "100m", "128Mi").
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      storage:
+                        description: StorageSpec defines persistent storage size for
+                          StatefulSets.
+                        properties:
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
+                  ingestor:
+                    description: |-
+                      IngestorResources defines resources for ingestor components.
+                      When join is disabled: use Base. When join is enabled: use Left (stream[0]) and Right (stream[1]).
+                    properties:
+                      base:
+                        description: ComponentResources wraps the resource spec for
+                          a single component.
+                        properties:
+                          limits:
+                            description: ResourceQuantities defines CPU and memory
+                              resource quantities (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          replicas:
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          requests:
+                            description: ResourceQuantities defines CPU and memory
+                              resource quantities (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          storage:
+                            description: StorageSpec defines persistent storage size
+                              for StatefulSets.
+                            properties:
+                              size:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                        type: object
+                      left:
+                        description: ComponentResources wraps the resource spec for
+                          a single component.
+                        properties:
+                          limits:
+                            description: ResourceQuantities defines CPU and memory
+                              resource quantities (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          replicas:
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          requests:
+                            description: ResourceQuantities defines CPU and memory
+                              resource quantities (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          storage:
+                            description: StorageSpec defines persistent storage size
+                              for StatefulSets.
+                            properties:
+                              size:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                        type: object
+                      right:
+                        description: ComponentResources wraps the resource spec for
+                          a single component.
+                        properties:
+                          limits:
+                            description: ResourceQuantities defines CPU and memory
+                              resource quantities (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          replicas:
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          requests:
+                            description: ResourceQuantities defines CPU and memory
+                              resource quantities (e.g. "100m", "128Mi").
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          storage:
+                            description: StorageSpec defines persistent storage size
+                              for StatefulSets.
+                            properties:
+                              size:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                        type: object
+                    type: object
+                  join:
+                    description: ComponentResources wraps the resource spec for a
+                      single component.
+                    properties:
+                      limits:
+                        description: ResourceQuantities defines CPU and memory resource
+                          quantities (e.g. "100m", "128Mi").
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      replicas:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      requests:
+                        description: ResourceQuantities defines CPU and memory resource
+                          quantities (e.g. "100m", "128Mi").
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      storage:
+                        description: StorageSpec defines persistent storage size for
+                          StatefulSets.
+                        properties:
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
+                  nats:
+                    description: NatsResources defines resource configuration for
+                      the NATS component.
+                    properties:
+                      stream:
+                        description: NatsStreamResources defines per-pipeline NATS
+                          stream limits, overriding the operator-level defaults.
+                        properties:
+                          maxAge:
+                            type: string
+                          maxBytes:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
+                  sink:
+                    description: ComponentResources wraps the resource spec for a
+                      single component.
+                    properties:
+                      limits:
+                        description: ResourceQuantities defines CPU and memory resource
+                          quantities (e.g. "100m", "128Mi").
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      replicas:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      requests:
+                        description: ResourceQuantities defines CPU and memory resource
+                          quantities (e.g. "100m", "128Mi").
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      storage:
+                        description: StorageSpec defines persistent storage size for
+                          StatefulSets.
+                        properties:
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
+                type: object
               sink:
                 properties:
-                  nats_consumer_name:
-                    type: string
-                  replicas:
-                    minimum: 1
-                    type: integer
                   type:
                     enum:
                     - clickhouse
                     type: string
                 required:
-                - replicas
                 - type
                 type: object
               sources:
@@ -113,30 +451,18 @@ spec:
                           properties:
                             enabled:
                               type: boolean
-                            nats_consumer_name:
-                              type: string
                             storage_class:
                               type: string
                             storage_size:
                               type: string
-                            stream:
-                              type: string
                           required:
                           - enabled
-                          - stream
                           type: object
-                        replicas:
-                          minimum: 1
-                          type: integer
-                        stream:
-                          type: string
                         topic_name:
                           minLength: 1
                           type: string
                       required:
                       - dedup_window
-                      - replicas
-                      - stream
                       - topic_name
                       type: object
                     maxItems: 2
@@ -150,9 +476,20 @@ spec:
                 - topics
                 - type
                 type: object
+              transform:
+                properties:
+                  is_dedup_enabled:
+                    type: boolean
+                  is_filter_enabled:
+                    type: boolean
+                  is_stateless_transform_enabled:
+                    type: boolean
+                required:
+                - is_dedup_enabled
+                - is_filter_enabled
+                - is_stateless_transform_enabled
+                type: object
             required:
-            - config
-            - dlq
             - join
             - pipeline_id
             - sink

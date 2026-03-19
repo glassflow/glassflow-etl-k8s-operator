@@ -19,8 +19,19 @@ const (
 	// Pipeline operation start time annotation - tracks when an operation started
 	PipelineOperationStartTimeAnnotation = "pipeline.etl.glassflow.io/operation-start-time"
 
+	// PipelineStopLastPendingCountAnnotation tracks the last observed total pending message count
+	// during a stop operation, used to detect whether messages are being consumed.
+	PipelineStopLastPendingCountAnnotation = "pipeline.etl.glassflow.io/stop-last-pending-count"
+
+	// DefaultReconcileTimeout is the default maximum duration a reconcile operation can run before timing out
+	DefaultReconcileTimeout = 15 * time.Minute
+
+	DefaultMinReplicas = 1
+)
+
+var (
 	// ReconcileTimeout is the maximum duration a reconcile operation can run before timing out
-	ReconcileTimeout = 5 * time.Minute
+	ReconcileTimeout = DefaultReconcileTimeout
 )
 
 // Pipeline operation type constants
@@ -32,4 +43,27 @@ const (
 	OperationDelete        = "delete"
 	OperationTerminate     = "terminate"
 	OperationHelmUninstall = "helm-uninstall"
+)
+
+// resource name constants (used for prefix / suffix when naming resources)
+const (
+	SecretSuffix      = "secret"
+	DedupComponent    = "dedup"
+	SinkComponent     = "sink"
+	IngestorComponent = "ingestor"
+	JoinComponent     = "join"
+)
+
+// NATS stream and consumer names for critical messages
+const (
+	ComponentSignalsStream = "component-signals"
+	OperatorConsumer       = "operator-consumer"
+)
+
+// Component secrets created in pipeline namespace (same DB/encryption as API)
+const (
+	ComponentDatabaseSecretName   = "glassflow-component-database-url"
+	ComponentDatabaseSecretKey    = "connection-url"
+	ComponentEncryptionSecretName = "glassflow-component-encryption-key"
+	ComponentEncryptionSecretKey  = "encryption-key"
 )

@@ -13,6 +13,9 @@ global:
     stream:
       maxAge: 168h
       maxBytes: 100GB
+      retention: WorkQueue  # Options: WorkQueue, Limits, Interest
+      allowDirect: true
+      allowAtomicPublish: true
 
   # Pipelines namespace configuration
   pipelines:
@@ -24,14 +27,31 @@ global:
       # When auto is false, Helm can optionally create the namespace
       create: true
 
-  # PostgreSQL connection URL
+  # PostgreSQL connection URL (same as API; operator passes DSN to pipeline components)
   # Only used when external postgres is used by the user.
   # By default, operator uses postgres deployed by the glassflow-etl chart.
-  # Format: postgresql://username:password@host:port/database
-  # postgres_connection_url: ""
+  postgres:
+    # Format: postgresql://username:password@host:port/database
+    connection_url: ""
+    # Alternatively, source the connection URL from a Kubernetes secret
+    secret:
+      name: ""
+      key: ""
+
+  # Encryption for pipeline components (same as API; when enabled, operator copies secret into pipeline namespaces)
+  encryption:
+    enabled: false
+    existingSecret:
+      name: ""
+      key: "encryption-key"
+    createSecret: false
+    secretName: ""  # Defaults to "{{ .Release.Name }}-encryption-key" if empty
 
 controllerManager:
   manager:
+    # Maximum duration a reconcile operation can run before timing out.
+    # Must be a valid Go duration string (e.g. 15m, 1h).
+    reconcileTimeout: 15m
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -39,7 +59,7 @@ controllerManager:
           - ALL
     image:
       repository: glassflow-etl-k8s-operator
-      tag: v1.4.3
+      tag: v2.0.1
       pullPolicy: Always
     resources:
       limits:

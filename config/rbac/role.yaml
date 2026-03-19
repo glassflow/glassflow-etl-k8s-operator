@@ -8,12 +8,24 @@ rules:
   - ""
   resources:
   - namespaces
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
   - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - apps

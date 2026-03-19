@@ -44,7 +44,14 @@ var _ = Describe("Pipeline Controller", func() {
 		}
 		pipeline := &etlv1alpha1.Pipeline{}
 
-		nc, err := nats.New(ctx, "http://localhost:4222", nats.DefaultStreamMaxAge, nats.DefaultStreamMaxBytes)
+		nc, err := nats.New(ctx, nats.Config{
+			URL:                "http://localhost:4222",
+			MaxAge:             nats.DefaultStreamMaxAge,
+			MaxBytes:           nats.DefaultStreamMaxBytes,
+			Retention:          nats.ParseRetentionPolicy("WorkQueue"),
+			AllowDirect:        true,
+			AllowAtomicPublish: true,
+		})
 		Expect(err).NotTo(HaveOccurred())
 
 		BeforeEach(func() {
@@ -57,34 +64,34 @@ var _ = Describe("Pipeline Controller", func() {
 						Namespace: "default",
 					},
 					Spec: etlv1alpha1.PipelineSpec{
-						ID:  resourceName,
-						DLQ: resourceName + "-DLQ",
+						ID: resourceName,
 						Ingestor: etlv1alpha1.Sources{
 							Type: "kafka",
 							Streams: []etlv1alpha1.SourceStream{
 								{
-									TopicName:    "test_topic1",
-									OutputStream: "test_topic1",
-									DedupWindow:  2 * time.Hour,
-									Replicas:     1,
+									TopicName:   "test_topic1",
+									DedupWindow: 2 * time.Hour,
 								},
 								{
-									TopicName:    "test_topic2",
-									OutputStream: "test_topic2",
-									DedupWindow:  5 * time.Minute,
-									Replicas:     1,
+									TopicName:   "test_topic2",
+									DedupWindow: 5 * time.Minute,
 								},
 							},
 						},
 						Join: etlv1alpha1.Join{
-							Type:         "temporal",
-							OutputStream: "gf-stream-joined",
-							Replicas:     1,
-							Enabled:      true,
+							Type:    "temporal",
+							Enabled: true,
 						},
 						Sink: etlv1alpha1.Sink{
-							Type:     "clickhouse",
-							Replicas: 1,
+							Type: "clickhouse",
+						},
+						Resources: &etlv1alpha1.PipelineResources{
+							Ingestor: &etlv1alpha1.IngestorResources{
+								Left:  &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
+								Right: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
+							},
+							Join: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
+							Sink: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
 						},
 					},
 				}
@@ -104,26 +111,40 @@ var _ = Describe("Pipeline Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &PipelineReconciler{
-				Client:                      k8sClient,
-				Scheme:                      k8sClient.Scheme(),
-				NATSClient:                  nc,
-				ComponentNATSAddr:           "nats://nats.default.svc.cluster.local:4222",
-				IngestorImage:               "ghcr.io/glassflow/glassflow-etl-ingestor:latest",
-				JoinImage:                   "ghcr.io/glassflow/glassflow-etl-join:latest",
-				SinkImage:                   "ghcr.io/glassflow/glassflow-etl-sink:latest",
-				IngestorPullPolicy:          "IfNotPresent",
-				JoinPullPolicy:              "IfNotPresent",
-				SinkPullPolicy:              "IfNotPresent",
-				DedupPullPolicy:             "IfNotPresent",
-				ObservabilityLogsEnabled:    "true",
-				ObservabilityMetricsEnabled: "true",
-				ObservabilityOTelEndpoint:   "http://otel-collector.observability.svc.cluster.local:4318",
-				IngestorLogLevel:            "info",
-				JoinLogLevel:                "info",
-				SinkLogLevel:                "info",
-				IngestorImageTag:            "latest",
-				JoinImageTag:                "latest",
-				SinkImageTag:                "latest",
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				NATSClient: nc,
+				Config: ReconcilerConfig{
+					NATS: NATSSettings{
+						ComponentAddr: "nats://nats.default.svc.cluster.local:4222",
+					},
+					Images: ComponentImages{
+						Ingestor: "ghcr.io/glassflow/glassflow-etl-ingestor:latest",
+						Join:     "ghcr.io/glassflow/glassflow-etl-join:latest",
+						Sink:     "ghcr.io/glassflow/glassflow-etl-sink:latest",
+					},
+					PullPolicies: ComponentPullPolicies{
+						Ingestor: "IfNotPresent",
+						Join:     "IfNotPresent",
+						Sink:     "IfNotPresent",
+						Dedup:    "IfNotPresent",
+					},
+					Observability: ComponentObservability{
+						LogsEnabled:    "true",
+						MetricsEnabled: "true",
+						OTelEndpoint:   "http://otel-collector.observability.svc.cluster.local:4318",
+						LogLevels: ComponentLogLevels{
+							Ingestor: "info",
+							Join:     "info",
+							Sink:     "info",
+						},
+						ImageTags: ComponentImageTags{
+							Ingestor: "latest",
+							Join:     "latest",
+							Sink:     "latest",
+						},
+					},
+				},
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

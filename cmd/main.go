@@ -40,11 +40,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/consumers"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -56,9 +59,18 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+// defaultNamespace returns value if non-empty, otherwise fallback (e.g. operator namespace)
+func defaultNamespace(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+	version  = "dev"
 )
 
 func init() {
@@ -107,11 +119,30 @@ func main() {
 		"NATS_MAX_STREAM_BYTES", "107374182400"),
 		"Maximum bytes for NATS streams (default: 100GB)")
 
+	// NATS stream policy configuration
+	var natsStreamRetention, natsStreamAllowDirect, natsStreamAllowAtomicPublish string
+	flag.StringVar(&natsStreamRetention, "nats-stream-retention", getEnvOrDefault(
+		"NATS_STREAM_RETENTION", "WorkQueue"),
+		"Retention policy for NATS streams (WorkQueue, Limits, Interest) (default: WorkQueue)")
+	flag.StringVar(&natsStreamAllowDirect, "nats-stream-allow-direct", getEnvOrDefault(
+		"NATS_STREAM_ALLOW_DIRECT", "true"),
+		"Allow direct access to individual messages (default: true)")
+	flag.StringVar(&natsStreamAllowAtomicPublish, "nats-stream-allow-atomic-publish", getEnvOrDefault(
+		"NATS_STREAM_ALLOW_ATOMIC_PUBLISH", "true"),
+		"Allow atomic batch publishing into the stream (default: true)")
+
 	// PostgreSQL configuration
-	var postgresDSN string
+	var postgresDSN, postgresOperatorDSN string
 	flag.StringVar(&postgresDSN, "glassflow-database-url", getEnvOrDefault(
 		"GLASSFLOW_DATABASE_URL", ""),
 		"PostgreSQL connection string (DSN) for pipeline storage")
+	flag.StringVar(&postgresOperatorDSN, "postgres-op-dsn", getEnvOrDefault(
+		"POSTGRES_OP_DSN", ""),
+		"PostgreSQL connection string (DSN) for operator (defaults to glassflow-database-url)")
+
+	if postgresOperatorDSN == "" {
+		postgresOperatorDSN = postgresDSN
+	}
 
 	// Component image configuration
 	var ingestorImage, joinImage, sinkImage, dedupImage string
@@ -286,11 +317,44 @@ func main() {
 		return true
 	}(), "Enable automatic creation of per-pipeline namespaces (default: true)")
 
+	// Component encryption (same as API; chart sets from global.encryption)
+	var componentEncryptionEnabled bool
+	var componentEncryptionSecretName, componentEncryptionSecretKey, componentEncryptionSecretNamespace string
+	flag.BoolVar(&componentEncryptionEnabled, "component-encryption-enabled", func() bool {
+		if b, err := strconv.ParseBool(getEnvOrDefault("COMPONENT_ENCRYPTION_ENABLED", "false")); err == nil {
+			return b
+		}
+		return false
+	}(), "Enable mounting encryption secret for pipeline components (mirrors API)")
+	flag.StringVar(&componentEncryptionSecretName, "component-encryption-secret-name", getEnvOrDefault(
+		"COMPONENT_ENCRYPTION_SECRET_NAME", ""),
+		"Secret name for encryption key (same as API)")
+	flag.StringVar(&componentEncryptionSecretKey, "component-encryption-secret-key", getEnvOrDefault(
+		"COMPONENT_ENCRYPTION_SECRET_KEY", "encryption-key"),
+		"Key in the encryption secret")
+	flag.StringVar(&componentEncryptionSecretNamespace, "component-encryption-secret-namespace", getEnvOrDefault(
+		"COMPONENT_ENCRYPTION_SECRET_NAMESPACE", ""),
+		"Namespace of the encryption secret (default: operator namespace)")
+
+	// Reconcile timeout configuration
+	var reconcileTimeout string
+	flag.StringVar(&reconcileTimeout, "reconcile-timeout", getEnvOrDefault(
+		"RECONCILE_TIMEOUT", constants.DefaultReconcileTimeout.String()),
+		"Maximum duration a reconcile operation can run before timing out (e.g. 15m, 1h)")
+
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	parsedReconcileTimeout, err := time.ParseDuration(reconcileTimeout)
+	if err != nil {
+		setupLog.Error(err, "unable to parse reconcile timeout, using default",
+			"value", reconcileTimeout, "default", constants.DefaultReconcileTimeout.String())
+		parsedReconcileTimeout = constants.DefaultReconcileTimeout
+	}
+	constants.ReconcileTimeout = parsedReconcileTimeout
 
 	// Get pod identity - use POD_NAME env var if set, otherwise fallback to hostname
 	podName := os.Getenv("POD_NAME")
@@ -324,6 +388,7 @@ func main() {
 	}
 
 	// Configure observability
+	//nolint:goconst
 	obsConfig := &observability.Config{
 		LogsEnabled:       observabilityLogsEnabled == "true",
 		MetricsEnabled:    observabilityMetricsEnabled == "true",
@@ -335,6 +400,24 @@ func main() {
 
 	logger := observability.ConfigureLogger(obsConfig)
 	meter := observability.ConfigureMeter(obsConfig, logger)
+	logger.Info("starting app", "version", version)
+
+	//nolint:goconst
+	usageStatsEnabled := getEnvOrDefault("GLASSFLOW_USAGE_STATS_ENABLED", "false") == "true"
+	usageStatsEndpoint := getEnvOrDefault("GLASSFLOW_USAGE_STATS_ENDPOINT", "")
+	usageStatsUsername := getEnvOrDefault("GLASSFLOW_USAGE_STATS_USERNAME", "")
+	usageStatsPassword := getEnvOrDefault("GLASSFLOW_USAGE_STATS_PASSWORD", "")
+	usageStatsInstallationID := getEnvOrDefault("GLASSFLOW_USAGE_STATS_INSTALLATION_ID", "")
+	clusterProvider := getEnvOrDefault("CLUSTER_PROVIDER", "unknown")
+
+	usageStatsClient := usagestats.NewClient(
+		usageStatsEndpoint,
+		usageStatsUsername,
+		usageStatsPassword,
+		usageStatsInstallationID,
+		usageStatsEnabled,
+		logger,
+	)
 
 	// Set global logger for controller-runtime
 	ctrl.SetLogger(logger)
@@ -422,10 +505,44 @@ func main() {
 		maxBytes = 107374182400 // 100GB default
 	}
 
+	// Parse NATS stream policy configuration
+	retention := nats.ParseRetentionPolicy(natsStreamRetention)
+
+	allowDirect, err := strconv.ParseBool(natsStreamAllowDirect)
+	if err != nil {
+		setupLog.Error(err, "unable to parse nats stream allow direct, using default",
+			"value", natsStreamAllowDirect, "default", "true")
+		allowDirect = true
+	}
+
+	allowAtomicPublish, err := strconv.ParseBool(natsStreamAllowAtomicPublish)
+	if err != nil {
+		setupLog.Error(err, "unable to parse nats stream allow atomic publish, using default",
+			"value", natsStreamAllowAtomicPublish, "default", "true")
+		allowAtomicPublish = true
+	}
+
 	ctx := context.Background()
-	natsClient, err := nats.New(ctx, natsOperatorAddr, maxAge, maxBytes)
+	natsClient, err := nats.New(ctx, nats.Config{
+		URL:                natsOperatorAddr,
+		MaxAge:             maxAge,
+		MaxBytes:           maxBytes,
+		Retention:          retention,
+		AllowDirect:        allowDirect,
+		AllowAtomicPublish: allowAtomicPublish,
+	})
 	if err != nil {
 		setupLog.Error(err, "unable to connect to nats")
+		os.Exit(1)
+	}
+
+	defaultMaxAge, defaultMaxBytes := natsClient.DefaultStreamLimits()
+	if err := natsClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
+		Name:     constants.ComponentSignalsStream,
+		MaxAge:   defaultMaxAge,
+		MaxBytes: defaultMaxBytes,
+	}); err != nil {
+		setupLog.Error(err, "unable to create component signals messages stream")
 		os.Exit(1)
 	}
 
@@ -435,65 +552,117 @@ func main() {
 		os.Exit(1)
 	}
 
-	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresDSN, logger)
+	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
 	if err != nil {
 		setupLog.Error(err, "unable to connect to postgres")
 		os.Exit(1)
 	}
 	setupLog.Info("postgres storage initialized")
 
+	reconcilerConfig := controller.ReconcilerConfig{
+		NATS: controller.NATSSettings{
+			ComponentAddr: natsAddr,
+		},
+		Images: controller.ComponentImages{
+			Ingestor: ingestorImage,
+			Join:     joinImage,
+			Sink:     sinkImage,
+			Dedup:    dedupImage,
+		},
+		PullPolicies: controller.ComponentPullPolicies{
+			Ingestor: ingestorPullPolicy,
+			Join:     joinPullPolicy,
+			Sink:     sinkPullPolicy,
+			Dedup:    dedupPullPolicy,
+		},
+		ResourceDefaults: controller.ComponentResourceDefaults{
+			Ingestor: controller.ResourceDefaults{
+				CPURequest:    ingestorCPURequest,
+				CPULimit:      ingestorCPULimit,
+				MemoryRequest: ingestorMemoryRequest,
+				MemoryLimit:   ingestorMemoryLimit,
+			},
+			Join: controller.ResourceDefaults{
+				CPURequest:    joinCPURequest,
+				CPULimit:      joinCPULimit,
+				MemoryRequest: joinMemoryRequest,
+				MemoryLimit:   joinMemoryLimit,
+			},
+			Sink: controller.ResourceDefaults{
+				CPURequest:    sinkCPURequest,
+				CPULimit:      sinkCPULimit,
+				MemoryRequest: sinkMemoryRequest,
+				MemoryLimit:   sinkMemoryLimit,
+			},
+			Dedup: controller.ResourceDefaults{
+				CPURequest:    dedupCPURequest,
+				CPULimit:      dedupCPULimit,
+				MemoryRequest: dedupMemoryRequest,
+				MemoryLimit:   dedupMemoryLimit,
+			},
+		},
+		DedupStorage: controller.DedupStorageDefaults{
+			Size:       dedupDefaultStorageSize,
+			StorageCls: dedupDefaultStorageClass,
+		},
+		Affinity: controller.ComponentAffinity{
+			Ingestor: ingestorAffinity,
+			Join:     joinAffinity,
+			Sink:     sinkAffinity,
+			Dedup:    dedupAffinity,
+		},
+		Observability: controller.ComponentObservability{
+			LogsEnabled:    observabilityLogsEnabled,
+			MetricsEnabled: observabilityMetricsEnabled,
+			OTelEndpoint:   observabilityOTelEndpoint,
+			LogLevels: controller.ComponentLogLevels{
+				Ingestor: ingestorLogLevel,
+				Join:     joinLogLevel,
+				Sink:     sinkLogLevel,
+				Dedup:    dedupLogLevel,
+			},
+			ImageTags: controller.ComponentImageTags{
+				Ingestor: ingestorImageTag,
+				Join:     joinImageTag,
+				Sink:     sinkImageTag,
+				Dedup:    dedupImageTag,
+			},
+		},
+		Namespaces: controller.PipelineNamespaces{
+			Auto: pipelinesNamespaceAuto,
+			Name: pipelinesNamespaceName,
+		},
+		UsageStats: controller.UsageStatsSettings{
+			Enabled:        usageStatsEnabled,
+			Endpoint:       usageStatsEndpoint,
+			Username:       usageStatsUsername,
+			Password:       usageStatsPassword,
+			InstallationID: usageStatsInstallationID,
+		},
+		ClusterProvider:    clusterProvider,
+		GlassflowNamespace: podNamespace,
+		DatabaseURL:        postgresDSN,
+		Encryption: controller.EncryptionSettings{
+			Enabled:   componentEncryptionEnabled,
+			Name:      componentEncryptionSecretName,
+			Key:       componentEncryptionSecretKey,
+			Namespace: defaultNamespace(componentEncryptionSecretNamespace, podNamespace),
+		},
+	}
+
+	if err = reconcilerConfig.Validate(); err != nil {
+		setupLog.Error(err, "invalid reconciler config")
+		os.Exit(1)
+	}
+
 	if err = (&controller.PipelineReconciler{
-		Client:                      mgr.GetClient(),
-		Scheme:                      mgr.GetScheme(),
-		Meter:                       meter,
-		NATSClient:                  natsClient,
-		PostgresStorage:             postgresStorage,
-		ComponentNATSAddr:           natsAddr,
-		NATSMaxStreamAge:            natsMaxStreamAge,
-		NATSMaxStreamBytes:          natsMaxStreamBytes,
-		IngestorImage:               ingestorImage,
-		JoinImage:                   joinImage,
-		SinkImage:                   sinkImage,
-		DedupImage:                  dedupImage,
-		IngestorPullPolicy:          ingestorPullPolicy,
-		JoinPullPolicy:              joinPullPolicy,
-		SinkPullPolicy:              sinkPullPolicy,
-		DedupPullPolicy:             dedupPullPolicy,
-		IngestorCPURequest:          ingestorCPURequest,
-		IngestorCPULimit:            ingestorCPULimit,
-		IngestorMemoryRequest:       ingestorMemoryRequest,
-		IngestorMemoryLimit:         ingestorMemoryLimit,
-		JoinCPURequest:              joinCPURequest,
-		JoinCPULimit:                joinCPULimit,
-		JoinMemoryRequest:           joinMemoryRequest,
-		JoinMemoryLimit:             joinMemoryLimit,
-		SinkCPURequest:              sinkCPURequest,
-		SinkCPULimit:                sinkCPULimit,
-		SinkMemoryRequest:           sinkMemoryRequest,
-		SinkMemoryLimit:             sinkMemoryLimit,
-		DedupCPURequest:             dedupCPURequest,
-		DedupCPULimit:               dedupCPULimit,
-		DedupMemoryRequest:          dedupMemoryRequest,
-		DedupMemoryLimit:            dedupMemoryLimit,
-		DedupDefaultStorageSize:     dedupDefaultStorageSize,
-		DedupDefaultStorageClass:    dedupDefaultStorageClass,
-		IngestorAffinity:            ingestorAffinity,
-		JoinAffinity:                joinAffinity,
-		SinkAffinity:                sinkAffinity,
-		DedupAffinity:               dedupAffinity,
-		ObservabilityLogsEnabled:    observabilityLogsEnabled,
-		ObservabilityMetricsEnabled: observabilityMetricsEnabled,
-		ObservabilityOTelEndpoint:   observabilityOTelEndpoint,
-		IngestorLogLevel:            ingestorLogLevel,
-		JoinLogLevel:                joinLogLevel,
-		SinkLogLevel:                sinkLogLevel,
-		DedupLogLevel:               dedupLogLevel,
-		IngestorImageTag:            ingestorImageTag,
-		JoinImageTag:                joinImageTag,
-		SinkImageTag:                sinkImageTag,
-		DedupImageTag:               dedupImageTag,
-		PipelinesNamespaceAuto:      pipelinesNamespaceAuto,
-		PipelinesNamespaceName:      pipelinesNamespaceName,
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Meter:            meter,
+		NATSClient:       natsClient,
+		PostgresStorage:  postgresStorage,
+		Config:           reconcilerConfig,
+		UsageStatsClient: usageStatsClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pipeline")
 		os.Exit(1)
@@ -518,6 +687,25 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
+
+	// Send readiness ping after manager starts
+	go func() {
+		time.Sleep(2 * time.Second) // small delay to wait for manager to start
+		usageStatsClient.SendEvent(context.Background(), "ready", "operator", nil)
+	}()
+
+	componentSignalsConsumer := consumers.NewComponentSignalsConsumer(
+		natsClient,
+		logger,
+		mgr.GetClient(),
+		postgresStorage,
+		podNamespace,
+	)
+	if err := mgr.Add(componentSignalsConsumer); err != nil {
+		setupLog.Error(err, "unable to add component signals messages consumer to manager")
+		os.Exit(1)
+	}
+
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

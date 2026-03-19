@@ -25,16 +25,44 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
-	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
-// recordReconcileError records error metrics for reconcile operations
+func (r *PipelineReconciler) sendUsageStatsEvent(ctx context.Context, eventName string, payload map[string]interface{}) {
+	if r.UsageStatsClient == nil {
+		return
+	}
+
+	r.UsageStatsClient.SendEvent(ctx, eventName, "operator", payload)
+}
+
+// recordReconcileError records error metrics and sends usage stats event for reconcile operations
 func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation, pipelineID string, err error) {
 	if r.Meter != nil {
 		r.Meter.RecordReconcileOperation(ctx, operation, "failure", pipelineID)
 		r.Meter.RecordReconcileError(ctx, operation, err.Error(), pipelineID)
 	}
+
+	// Send usage stats event for reconcile failure
+	r.sendUsageStatsEvent(ctx, "reconcile_error", map[string]interface{}{
+		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
+		"operation":        operation,
+		"status":           "failure",
+		"error":            err.Error(),
+		"cluster_provider": r.Config.ClusterProvider,
+	})
+}
+
+// sendReconcileSuccessEvent sends a usage stats event for successful reconcile operations
+func (r *PipelineReconciler) sendReconcileSuccessEvent(ctx context.Context, operation, pipelineID string) {
+	r.sendUsageStatsEvent(ctx, "reconcile_success", map[string]interface{}{
+		"pipeline_id_hash": usagestats.HashPipelineID(pipelineID),
+		"operation":        operation,
+		"status":           "success",
+		"cluster_provider": r.Config.ClusterProvider,
+	})
 }
 
 // recordMetricsIfEnabled is a helper function to safely record metrics only if the meter is available
@@ -45,9 +73,9 @@ func (r *PipelineReconciler) recordMetricsIfEnabled(fn func(*observability.Meter
 }
 
 // updatePipelineStatus updates PostgreSQL and CRD status (validation handled by backend API)
-func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus postgresstorage.PipelineStatus, errors []string) error {
+func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus models.PipelineStatus, errors []string) error {
 	// Check if status is already the same - avoid duplicate updates and history entries
-	currentStatus := postgresstorage.PipelineStatus(p.Status)
+	currentStatus := models.PipelineStatus(p.Status)
 	if currentStatus == newStatus {
 		log.V(1).Info("pipeline status unchanged, skipping update", "pipeline_id", p.Spec.ID, "status", newStatus)
 		return nil
@@ -78,6 +106,13 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 	// Record status transition metrics
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordStatusTransition(ctx, oldStatus, string(newStatus), p.Spec.ID)
+	})
+
+	// Send usage stats event for status change
+	r.sendUsageStatsEvent(ctx, "pipeline_status_change", map[string]interface{}{
+		"pipeline_id_hash": usagestats.HashPipelineID(p.Spec.ID),
+		"status":           string(newStatus),
+		"cluster_provider": r.Config.ClusterProvider,
 	})
 
 	log.Info("pipeline status updated successfully", "pipeline_id", p.Spec.ID, "to", newStatus)

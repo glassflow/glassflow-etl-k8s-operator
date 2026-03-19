@@ -18,13 +18,16 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/nats-io/nats.go/jetstream"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/pipelinegraph"
 )
 
 // checkConsumerPendingMessages checks if a specific consumer has pending messages
@@ -34,10 +37,95 @@ func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, s
 		return fmt.Errorf("check consumer %s: %w", consumerName, err)
 	}
 	if hasPending {
-		return fmt.Errorf("consumer %s has %d pending and %d unacknowledged messages", consumerName, pending, unack)
+		return errs.NewConsumerPendingMessagesError(consumerName, pending, unack)
 	}
 
 	return nil
+}
+
+func (r *PipelineReconciler) checkInputBindingPendingMessages(
+	ctx context.Context,
+	binding pipelinegraph.InputBinding,
+	consumerName string,
+) error {
+	for _, stream := range binding.Streams {
+		if err := r.checkConsumerPendingMessages(ctx, stream.Name, consumerName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// countInputBindingPending returns the total pending + unacknowledged count across all streams in a binding.
+func (r *PipelineReconciler) countInputBindingPending(ctx context.Context, binding pipelinegraph.InputBinding, consumerName string) (int, error) {
+	total := 0
+	for _, stream := range binding.Streams {
+		_, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, stream.Name, consumerName)
+		if err != nil {
+			return 0, fmt.Errorf("count pending for consumer %s on stream %s: %w", consumerName, stream.Name, err)
+		}
+		total += pending + unack
+	}
+	return total, nil
+}
+
+// getTotalPendingCount returns the total pending + unacknowledged message count across all
+// consumers for a pipeline (sink, join left/right, dedup per stream).
+func (r *PipelineReconciler) getTotalPendingCount(ctx context.Context, p etlv1alpha1.Pipeline) (int, error) {
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	if err != nil {
+		return 0, fmt.Errorf("build pipeline graph: %w", err)
+	}
+
+	total := 0
+
+	// Sink
+	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
+	if err != nil {
+		return 0, fmt.Errorf("resolve sink input: %w", err)
+	}
+	n, err := r.countInputBindingPending(ctx, sinkInput, getNATSSinkConsumerName(p.Spec.ID))
+	if err != nil {
+		return 0, err
+	}
+	total += n
+
+	// Join (if enabled)
+	if p.Spec.Join.Enabled {
+		inputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
+		if err != nil {
+			return 0, fmt.Errorf("resolve join input: %w", err)
+		}
+		leftN, err := r.countInputBindingPending(ctx, inputs.Left, getNATSJoinLeftConsumerName(p.Spec.ID))
+		if err != nil {
+			return 0, err
+		}
+		total += leftN
+		rightN, err := r.countInputBindingPending(ctx, inputs.Right, getNATSJoinRightConsumerName(p.Spec.ID))
+		if err != nil {
+			return 0, err
+		}
+		total += rightN
+	}
+
+	// Dedup per stream (if enabled)
+	for i, stream := range p.Spec.Ingestor.Streams {
+		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
+			continue
+		}
+		dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, i))
+		if err != nil {
+			return 0, fmt.Errorf("resolve dedup input for stream %d: %w", i, err)
+		}
+		n, err := r.countInputBindingPending(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+
+	return total, nil
 }
 
 // checkJoinPendingMessages checks if join consumers have pending messages
@@ -46,141 +134,117 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 		return nil // No join, nothing to check
 	}
 
-	// Get consumer names and stream names directly from spec
-	leftConsumerName := p.Spec.Join.NATSLeftConsumerName
-	rightConsumerName := p.Spec.Join.NATSRightConsumerName
-
-	// Use dedup output stream if dedup enabled, otherwise ingestor output
-	leftStreamName := getEffectiveOutputStream(p.Spec.Ingestor.Streams[0])
-	rightStreamName := getEffectiveOutputStream(p.Spec.Ingestor.Streams[1])
-
-	// Check left stream
-	err := r.checkConsumerPendingMessages(ctx, leftStreamName, leftConsumerName)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
-		return fmt.Errorf("left join consumer: %w", err)
+		return fmt.Errorf("build pipeline graph for join checks: %w", err)
+	}
+	inputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve join input: %w", err)
 	}
 
-	// Check right stream
-	err = r.checkConsumerPendingMessages(ctx, rightStreamName, rightConsumerName)
-	if err != nil {
-		return fmt.Errorf("right join consumer: %w", err)
+	// Consumer names are generated from pipeline ID (aligned with glassflow-api).
+	leftConsumerName := getNATSJoinLeftConsumerName(p.Spec.ID)
+	rightConsumerName := getNATSJoinRightConsumerName(p.Spec.ID)
+
+	if err := r.checkInputBindingPendingMessages(ctx, inputs.Left, leftConsumerName); err != nil {
+		return err
+	}
+
+	if err := r.checkInputBindingPendingMessages(ctx, inputs.Right, rightConsumerName); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-// checkSinkPendingMessages checks if sink consumer has pending messages
+// checkSinkPendingMessages checks if sink consumer(s) have pending messages.
 func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
-	// Get consumer name and stream name directly from spec
-	sinkConsumerName := p.Spec.Sink.NATSConsumerName
-
-	// Get stream name based on whether join is enabled
-	var sinkStreamName string
-	if p.Spec.Join.Enabled {
-		sinkStreamName = p.Spec.Join.OutputStream
-	} else {
-		sinkStreamName = getEffectiveOutputStream(p.Spec.Ingestor.Streams[0])
-	}
-
-	// Check sink stream
-	err := r.checkConsumerPendingMessages(ctx, sinkStreamName, sinkConsumerName)
+	baseConsumerName := getNATSSinkConsumerName(p.Spec.ID)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
-		return fmt.Errorf("sink consumer: %w", err)
+		return fmt.Errorf("build pipeline graph for sink checks: %w", err)
+	}
+	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve sink input: %w", err)
 	}
 
-	return nil
+	return r.checkInputBindingPendingMessages(ctx, sinkInput, baseConsumerName)
 }
 
-// checkDedupPendingMessages checks if a specific dedup consumer has pending messages
+// checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
 func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
 	stream := p.Spec.Ingestor.Streams[streamIndex]
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 		return nil
 	}
 
-	consumerName := stream.Deduplication.NATSConsumerName
-	inputStreamName := stream.OutputStream // Dedup reads from ingestor output
-
-	err := r.checkConsumerPendingMessages(ctx, inputStreamName, consumerName)
+	baseConsumerName := getNATSDedupConsumerName(p.Spec.ID)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
-		return fmt.Errorf("dedup-%d consumer: %w", streamIndex, err)
+		return fmt.Errorf("build pipeline graph for dedup checks: %w", err)
+	}
+	dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, streamIndex))
+	if err != nil {
+		return fmt.Errorf("resolve dedup input for stream %d: %w", streamIndex, err)
 	}
 
-	return nil
+	return r.checkInputBindingPendingMessages(ctx, dedupInput, baseConsumerName)
 }
 
-// createNATSStreams creates all NATS streams and KV stores for a pipeline
+// createNATSStreams creates all NATS streams and KV stores for a pipeline.
 func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return fmt.Errorf("build NATS resource plan: %w", err)
+	}
+
 	// create DLQ
-	err := r.NATSClient.CreateOrUpdateStream(ctx, p.Spec.DLQ, 0)
+	err = r.NATSClient.CreateOrUpdateStream(ctx, plan.DLQStream)
 	if err != nil {
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "create_stream", "failure", p.Spec.ID)
 		})
-		return fmt.Errorf("create stream %s: %w", p.Spec.DLQ, err)
+		return fmt.Errorf("create stream %s: %w", plan.DLQStream.Name, err)
 	}
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordNATSOperation(ctx, "create_dlq_stream", "success", p.Spec.ID)
 	})
 
-	// create source streams
-	for _, s := range p.Spec.Ingestor.Streams {
-		// Don't use NATS dedup if we have a separate dedup service
-		dedupWindow := time.Duration(0)
-		if s.Deduplication == nil || !s.Deduplication.Enabled {
-			dedupWindow = s.DedupWindow // Fall back to NATS dedup
-		}
-
-		err := r.NATSClient.CreateOrUpdateStream(ctx, s.OutputStream, dedupWindow)
+	for _, stream := range plan.Streams {
+		err = r.NATSClient.CreateOrUpdateStream(ctx, stream)
 		if err != nil {
-			return fmt.Errorf("create stream %s: %w", s.OutputStream, err)
-		}
-
-		// Create dedup output stream if dedup service is enabled
-		if s.Deduplication != nil && s.Deduplication.Enabled && s.Deduplication.OutputStream != "" {
-			err := r.NATSClient.CreateOrUpdateStream(ctx, s.Deduplication.OutputStream, 0)
-			if err != nil {
-				return fmt.Errorf("create dedup output stream %s: %w", s.Deduplication.OutputStream, err)
-			}
+			return fmt.Errorf("create stream %s: %w", stream.Name, err)
 		}
 	}
 
-	// create join stream
-	if p.Spec.Join.Enabled {
-		err := r.NATSClient.CreateOrUpdateStream(ctx, p.Spec.Join.OutputStream, 0)
+	for _, kvStore := range plan.JoinKVStores {
+		err = r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStore.Name, kvStore.TTL)
 		if err != nil {
-			return fmt.Errorf("create stream %s: %w", p.Spec.Join.OutputStream, err)
-		}
-
-		// create join KV stores for each source stream
-		// The join KV store names are the same as the stream names
-		for _, stream := range p.Spec.Ingestor.Streams {
-			// Use LeftBufferTTL for the first stream, RightBufferTTL for the second
-			var ttl time.Duration
-			if stream.OutputStream == p.Spec.Ingestor.Streams[0].OutputStream {
-				ttl = p.Spec.Join.LeftBufferTTL
-			} else {
-				ttl = p.Spec.Join.RightBufferTTL
-			}
-
-			// Use dedup output stream as input to join if dedup enabled
-			kvStreamName := stream.OutputStream
-			if stream.Deduplication != nil && stream.Deduplication.Enabled && stream.Deduplication.OutputStream != "" {
-				kvStreamName = stream.Deduplication.OutputStream
-			}
-
-			err := r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStreamName, ttl)
-			if err != nil {
-				return fmt.Errorf("create join KV store %s: %w", kvStreamName, err)
-			}
+			return fmt.Errorf("create join KV store %s: %w", kvStore.Name, err)
 		}
 	}
 
 	return nil
 }
 
-// cleanupNATSPipelineResources cleans up all NATS resources for a pipeline
+// cleanupNATSPipelineResources cleans up all NATS resources for a pipeline, including DLQ.
 func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, true)
+}
+
+// cleanupNATSPipelineResourcesKeepDLQ cleans up pipeline NATS resources while preserving DLQ.
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepDLQ(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, false)
+}
+
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
+	ctx context.Context,
+	log logr.Logger,
+	p etlv1alpha1.Pipeline,
+	deleteDLQ bool,
+) error {
 	log.Info("cleaning up NATS streams", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
 	if r.NATSClient == nil {
@@ -188,109 +252,45 @@ func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, l
 		return fmt.Errorf("NATS client not available, skipping stream cleanup")
 	}
 
-	// delete the DLQ stream
-	if p.Spec.DLQ != "" {
-		log.Info("deleting NATS DLQ stream", "stream", p.Spec.DLQ)
-		err := r.deleteNATSStream(ctx, log, p.Spec.DLQ)
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return fmt.Errorf("build NATS resource plan: %w", err)
+	}
+
+	if deleteDLQ {
+		// delete the DLQ stream
+		log.Info("deleting NATS DLQ stream", "stream", plan.DLQStream.Name)
+		err = r.deleteNATSStream(ctx, log, plan.DLQStream.Name)
 		if err != nil {
-			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", p.Spec.DLQ)
+			log.Error(err, "failed to cleanup NATS DLQ stream", "pipeline", plan.DLQStream.Name)
 			r.recordMetricsIfEnabled(func(m *observability.Meter) {
 				m.RecordNATSOperation(ctx, "delete_dlq_stream", "failure", p.Spec.ID)
 			})
 			return fmt.Errorf("failed to cleanup NATS DLQ stream: %w", err)
 		}
-
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "delete_dlq_stream", "success", p.Spec.ID)
 		})
-		log.Info("NATS DLQ stream deleted successfully", "stream", p.Spec.DLQ)
+		log.Info("NATS DLQ stream deleted successfully", "stream", plan.DLQStream.Name)
+	} else {
+		log.Info("skipping NATS DLQ stream cleanup", "pipeline_id", p.Spec.ID)
 	}
 
-	// delete Ingestor Streams
-	for _, stream := range p.Spec.Ingestor.Streams {
-		if stream.OutputStream != "" {
-			log.Info("deleting NATS ingestor output stream", "stream", stream.OutputStream)
-			err := r.deleteNATSStream(ctx, log, stream.OutputStream)
-			if err != nil {
-				r.recordMetricsIfEnabled(func(m *observability.Meter) {
-					m.RecordNATSOperation(ctx, "delete_ingestor_stream", "failure", p.Spec.ID)
-				})
-				log.Error(err, "failed to cleanup NATS Ingestor Output Stream", "stream", stream)
-				return fmt.Errorf("cleanup NATS Ingestor Output Stream: %w", err)
-			}
-			r.recordMetricsIfEnabled(func(m *observability.Meter) {
-				m.RecordNATSOperation(ctx, "delete_ingestor_stream", "success", p.Spec.ID)
-			})
-			log.Info("NATS ingestor output stream deleted successfully", "stream", stream.OutputStream)
-		}
-
-		// Delete dedup output stream if it exists
-		if stream.Deduplication != nil &&
-			stream.Deduplication.Enabled &&
-			stream.Deduplication.OutputStream != "" {
-			log.Info("deleting NATS dedup output stream", "stream", stream.Deduplication.OutputStream)
-			err := r.deleteNATSStream(ctx, log, stream.Deduplication.OutputStream)
-			if err != nil {
-				log.Error(err, "failed to cleanup dedup output stream", "stream", stream.Deduplication.OutputStream)
-				return fmt.Errorf("cleanup dedup output stream: %w", err)
-			}
-			log.Info("NATS dedup output stream deleted successfully", "stream", stream.Deduplication.OutputStream)
-		}
-	}
-
-	// delete Join Streams and key value stores
-	if p.Spec.Join.Enabled {
-		if p.Spec.Join.OutputStream != "" {
-			log.Info("deleting NATS join output stream", "stream", p.Spec.Join.OutputStream)
-			err := r.deleteNATSStream(ctx, log, p.Spec.Join.OutputStream)
-			if err != nil {
-				r.recordMetricsIfEnabled(func(m *observability.Meter) {
-					m.RecordNATSOperation(ctx, "delete_join_stream", "failure", p.Spec.ID)
-				})
-				log.Error(err, "failed to cleanup join output stream", "stream", p.Spec.Join.OutputStream)
-				return fmt.Errorf("cleanup join output stream: %w", err)
-			}
-			r.recordMetricsIfEnabled(func(m *observability.Meter) {
-				m.RecordNATSOperation(ctx, "delete_join_stream", "success", p.Spec.ID)
-			})
-			log.Info("NATS join output stream deleted successfully", "stream", p.Spec.Join.OutputStream)
-		}
-
-		err := r.cleanupNATSPipelineJoinKeyValueStore(ctx, log, p)
+	for _, kvStore := range plan.JoinKVStores {
+		err = r.deleteNATSKeyValueStore(ctx, log, kvStore.Name)
 		if err != nil {
-			r.recordMetricsIfEnabled(func(m *observability.Meter) {
-				m.RecordNATSOperation(ctx, "delete_join_kv", "failure", p.Spec.ID)
-			})
-			log.Error(err, "failed to cleanup NATS join KV store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-			return fmt.Errorf("failed cleanup NATS join KV store: %w", err)
-		}
-		r.recordMetricsIfEnabled(func(m *observability.Meter) {
-			m.RecordNATSOperation(ctx, "delete_join_kv", "success", p.Spec.ID)
-		})
-	}
-
-	return nil
-}
-
-// cleanupNATSPipelineJoinKeyValueStore cleans up NATS join key value stores
-func (r *PipelineReconciler) cleanupNATSPipelineJoinKeyValueStore(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	log.Info("cleaning up NATS join key value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
-
-	if r.NATSClient == nil {
-		log.Info("NATS client not available, skipping key value store cleanup")
-		return fmt.Errorf("NATS client not available, skipping NATS cleanup")
-	}
-
-	// since join key value names are same as stream names in CH-ETL
-	for _, stream := range p.Spec.Ingestor.Streams {
-		err := r.NATSClient.JetStream().DeleteKeyValue(ctx, stream.OutputStream)
-		if err != nil {
-			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "bucket", kvStore.Name)
 			return fmt.Errorf("failed to delete NATS KV Store: %w", err)
 		}
 	}
 
-	log.Info("NATS join key value store deleted successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+	for _, stream := range plan.Streams {
+		err = r.deleteNATSStream(ctx, log, stream.Name)
+		if err != nil {
+			return fmt.Errorf("delete stream %s: %w", stream.Name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -303,8 +303,31 @@ func (r *PipelineReconciler) deleteNATSStream(ctx context.Context, log logr.Logg
 
 	err := r.NATSClient.JetStream().DeleteStream(ctx, streamName)
 	if err != nil {
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
+			log.V(1).Info("NATS stream already deleted", "stream", streamName)
+			return nil
+		}
 		log.Error(err, "failed to delete NATS output stream", "stream", streamName)
 		return fmt.Errorf("failed to delete NATS output stream: %w", err)
+	}
+
+	return nil
+}
+
+func (r *PipelineReconciler) deleteNATSKeyValueStore(ctx context.Context, log logr.Logger, bucketName string) error {
+	if r.NATSClient == nil {
+		log.Info("NATS client not available, skipping key value store cleanup")
+		return fmt.Errorf("NATS client not available, skipping NATS cleanup")
+	}
+
+	err := r.NATSClient.JetStream().DeleteKeyValue(ctx, bucketName)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrBucketNotFound) {
+			log.V(1).Info("NATS key value store already deleted", "bucket", bucketName)
+			return nil
+		}
+		log.Error(err, "failed to delete NATS key value store", "bucket", bucketName)
+		return fmt.Errorf("failed to delete NATS key value store: %w", err)
 	}
 
 	return nil

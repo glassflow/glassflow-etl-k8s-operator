@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -36,9 +37,11 @@ import (
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
+	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
 // -------------------------------------------------------------------------------------------------------------------
@@ -78,70 +81,22 @@ var pipelineOperationPredicate = predicate.Funcs{
 // PipelineReconciler reconciles a Pipeline object
 type PipelineReconciler struct {
 	client.Client
-	Scheme            *runtime.Scheme
-	Meter             *observability.Meter
-	NATSClient        *nats.NATSClient
-	PostgresStorage   *postgresstorage.PostgresStorage
-	ComponentNATSAddr string
-	// NATS stream configurations
-	NATSMaxStreamAge   string
-	NATSMaxStreamBytes string
-	// Component image configurations
-	IngestorImage string
-	JoinImage     string
-	SinkImage     string
-	DedupImage    string
-	// Component image pull policy configurations
-	IngestorPullPolicy string
-	JoinPullPolicy     string
-	SinkPullPolicy     string
-	DedupPullPolicy    string
-	// Component resource configurations
-	IngestorCPURequest    string
-	IngestorCPULimit      string
-	IngestorMemoryRequest string
-	IngestorMemoryLimit   string
-	JoinCPURequest        string
-	JoinCPULimit          string
-	JoinMemoryRequest     string
-	JoinMemoryLimit       string
-	SinkCPURequest        string
-	SinkCPULimit          string
-	SinkMemoryRequest     string
-	SinkMemoryLimit       string
-	DedupCPURequest       string
-	DedupCPULimit         string
-	DedupMemoryRequest    string
-	DedupMemoryLimit      string
-	// Dedup storage configurations
-	DedupDefaultStorageSize  string
-	DedupDefaultStorageClass string
-	// Component affinity configurations
-	IngestorAffinity string
-	JoinAffinity     string
-	SinkAffinity     string
-	DedupAffinity    string
-	// Observability configurations
-	ObservabilityLogsEnabled    string
-	ObservabilityMetricsEnabled string
-	ObservabilityOTelEndpoint   string
-	IngestorLogLevel            string
-	JoinLogLevel                string
-	SinkLogLevel                string
-	DedupLogLevel               string
-	IngestorImageTag            string
-	JoinImageTag                string
-	SinkImageTag                string
-	DedupImageTag               string
-	// Pipelines namespace configuration
-	PipelinesNamespaceAuto bool
-	PipelinesNamespaceName string
+	Scheme           *runtime.Scheme
+	Meter            *observability.Meter
+	NATSClient       *nats.NATSClient
+	PostgresStorage  *postgresstorage.PostgresStorage
+	Config           ReconcilerConfig
+	UsageStatsClient *usagestats.Client
 }
 
 // -------------------------------------------------------------------------------------------------------------------
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := r.Config.Validate(); err != nil {
+		return fmt.Errorf("validate reconciler config: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&etlv1alpha1.Pipeline{}).
 		Named("pipeline").
@@ -154,7 +109,8 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=etl.glassflow.io,resources=pipelines/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
 
 // For more details, check Reconcile and its Result here:
@@ -177,46 +133,12 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Check for operation annotations
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		// Determine which operation to perform based on annotations
-		// Helm uninstall has highest priority - it interrupts any ongoing operation
-		var operation string
-		if _, hasHelmUninstall := annotations[constants.PipelineHelmUninstallAnnotation]; hasHelmUninstall {
-			operation = constants.OperationHelmUninstall
+	operation := getPipelineOperationFromAnnotations(p.GetAnnotations())
+	if operation != "" {
+		if operation == constants.OperationHelmUninstall {
 			log.Info("HELM UNINSTALL detected - interrupting any ongoing operations", "pipeline_id", p.Spec.ID)
-		} else if _, hasTerminate := annotations[constants.PipelineDeleteAnnotation]; hasTerminate {
-			operation = constants.OperationDelete
-		} else if _, hasTerminate := annotations[constants.PipelineTerminateAnnotation]; hasTerminate {
-			operation = constants.OperationTerminate
-		} else if _, hasCreate := annotations[constants.PipelineCreateAnnotation]; hasCreate {
-			operation = constants.OperationCreate
-		} else if _, hasStop := annotations[constants.PipelineStopAnnotation]; hasStop {
-			operation = constants.OperationStop
-		} else if _, hasResume := annotations[constants.PipelineResumeAnnotation]; hasResume {
-			operation = constants.OperationResume
-		} else if _, hasEdit := annotations[constants.PipelineEditAnnotation]; hasEdit {
-			operation = constants.OperationEdit
 		}
-
-		// Execute the appropriate operation
-		switch operation {
-		case constants.OperationHelmUninstall:
-			return r.reconcileHelmUninstall(ctx, log, p)
-		case constants.OperationCreate:
-			return r.createPipeline(ctx, p)
-		case constants.OperationResume:
-			return r.reconcileResume(ctx, log, p)
-		case constants.OperationStop:
-			return r.reconcileStop(ctx, log, p)
-		case constants.OperationEdit:
-			return r.reconcileEdit(ctx, log, p)
-		case constants.OperationTerminate:
-			return r.reconcileTerminate(ctx, log, p)
-		case constants.OperationDelete:
-			return r.reconcileDelete(ctx, log, p)
-		}
+		return r.dispatchOperation(ctx, log, operation, p)
 	}
 
 	// No operation needed
@@ -243,26 +165,21 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	log.Info("reconciling pipeline creation", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already running
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusRunning) {
 		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationCreate)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusCreated) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusCreated) {
 		log.Info("pipeline is already being created", "pipeline_id", p.Spec.ID)
 		// Continue with the creation process
 	} else {
 		// Transition to Creation status first
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusCreated)
+		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusCreated)
 
 		// Update CRD status
 		err := r.Status().Update(ctx, &p, &client.SubResourceUpdateOptions{})
@@ -271,12 +188,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 			return ctrl.Result{}, fmt.Errorf("update pipeline CRD status: %w", err)
 		}
 
-		// Set operation start time when transitioning to Created status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 	}
 
 	ns, err := r.createNamespace(ctx, p)
@@ -293,117 +205,45 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 
 	labels := preparePipelineLabels(p)
 
-	secretName := r.getResourceName(p, p.Spec.ID)
+	secretName := r.getResourceName(p)
 	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: secretName}, labels, p)
 	if err != nil {
+		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
+			log.Info("pipeline config secret not found, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
 	}
 
-	namespace := r.getTargetNamespace(p)
-
-	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
-	}
-	if !ready {
-		// Check for timeout before requeuing
-		timedOut, _ := r.checkOperationTimeout(log, &p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, "create")
-		}
-
-		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret, p)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
-		}
-		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	} else {
-		log.Info("sink deployment is ready", "namespace", namespace)
+	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {
+		r.recordReconcileError(ctx, "create", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("ensure component secrets: %w", err)
 	}
 
-	// Step 2: Create Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "create")
-			}
-
-			log.Info("creating join deployment", "namespace", namespace)
-			err := r.createJoin(ctx, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("join deployment is already created", "namespace", namespace)
-		}
-	}
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret, "create")
+	// Ensure all deployments are ready
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
-
-	// Step 4: Create Ingestor deployments
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, "create")
-			}
-
-			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("ingestor deployment is already created", "namespace", namespace)
-		}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
-	// Remove create annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineCreateAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove create annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "create", "success", pipelineID)
-	})
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineCreateAnnotation,
+		models.PipelineStatusRunning,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "create", "create", pipelineID)
 
 	log.Info("pipeline creation completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -415,55 +255,44 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	log.Info("reconciling pipeline termination", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already stopped
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline already stopped", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationTerminate)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
-	// Set operation start time if not already set (for timeout tracking)
-	err := r.setOperationStartTime(ctx, &p)
-	if err != nil {
-		log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-		// Continue anyway - this is not critical
-	}
+	r.setOperationStartTimeBestEffort(ctx, log, &p)
 
 	// Stop all pipeline components
-	result, err := r.terminatePipelineComponents(ctx, log, p)
+	result, err := r.terminatePipelineComponents(ctx, log, &p)
 	if err != nil || result.Requeue {
 		return result, err
 	}
 
+	// Remove all NATS streams/KV stores for this pipeline before marking it Stopped.
+	err = r.cleanupNATSPipelineResources(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for terminate: %w", err)
+	}
+
 	// Update pipeline status to "Stopped"
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusStopped, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
 
-	// Remove terminate annotation
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineTerminateAnnotation)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "terminate", "success", pipelineID)
-	})
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineTerminateAnnotation,
+		models.PipelineStatusStopped,
+		false,
+	)
+	r.recordOperationSuccess(ctx, "terminate", "terminate", pipelineID)
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -475,14 +304,19 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	log.Info("reconciling pipeline deletion", "pipeline_id", pipelineID)
 
 	// Check if pipeline is stopped
-	if p.Status != etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status != etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline is not stopped but attempting to delete", "pipeline_id", p.Spec.ID)
 	}
 
-	// Delete namespace for this pipeline
+	// only if pipelines have individual NS
 	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete pipeline namespace: %w", err)
+	}
+
+	err = r.deleteSecret(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("delete pipeline secret: %w", err)
 	}
 
 	// Clean up NATS streams
@@ -511,17 +345,14 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		}
 	}
 
-	// Remove terminate annotation
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineDeleteAnnotation)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove terminate annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineDeleteAnnotation,
+		models.PipelineStatusStopped,
+		false,
+	)
 
 	// Remove finalizer
 	err = r.removeFinalizer(ctx, &p)
@@ -535,10 +366,7 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "delete", "success", pipelineID)
-	})
+	r.recordOperationSuccess(ctx, "delete", "delete", pipelineID)
 
 	log.Info("pipeline deletion completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -552,7 +380,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	log.Info("HELM UNINSTALL: Forcing immediate cleanup of pipeline", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already stopped
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline already stopped during helm uninstall", "pipeline_id", pipelineID)
 		// Remove helm uninstall annotation and finalizer to allow cleanup
 		annotations := p.GetAnnotations()
@@ -578,7 +406,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	// FORCE cleanup - skip normal termination process for helm uninstall
 	log.Info("HELM UNINSTALL: Force deleting pipeline namespace and resources", "pipeline_id", pipelineID)
 
-	// Force delete namespace for this pipeline (this will delete all deployments)
+	// Force delete namespace for this pipeline (this will delete all resources in the namespace: StatefulSets, Services, Deployments, etc.)
 	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		log.Error(err, "failed to delete pipeline namespace during helm uninstall", "pipeline_id", pipelineID)
@@ -635,10 +463,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "uninstall", "success", pipelineID)
-	})
+	r.recordOperationSuccess(ctx, "uninstall", "helm-uninstall", pipelineID)
 
 	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", pipelineID)
 	return ctrl.Result{}, nil
@@ -652,39 +477,29 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	namespace := r.getTargetNamespace(p)
 
 	// Check if pipeline is already running or resuming
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusRunning) {
 		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusResuming) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusResuming) {
 		log.Info("pipeline is already being resumed", "pipeline_id", p.Spec.ID)
 		// Continue with the resume process
 	} else {
 		// Transition to Resuming status first
-		err := r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusResuming, nil)
+		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
 
-		// Set operation start time when transitioning to Resuming status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 
 		// Requeue to continue with the resume process
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		return defaultOperationRequeueResult(), nil
 	}
 
 	// Get namespace
@@ -695,11 +510,24 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// Get secret
-	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, p.Spec.ID)}
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p)}
 	var secret v1.Secret
 	err = r.Get(ctx, secretName, &secret)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
+		if apierrors.IsNotFound(err) {
+
+			labels := preparePipelineLabels(p)
+			secret, err = r.createSecret(ctx, secretName, labels, p)
+			if err != nil {
+				if errors.Is(err, ErrPipelineConfigSecretNotFound) {
+					log.Info("pipeline config secret not found during resume, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+					return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
+				}
+				return ctrl.Result{}, fmt.Errorf("create secret for resume: %w", err)
+			}
+		} else {
+			return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
+		}
 	}
 
 	labels := preparePipelineLabels(p)
@@ -710,109 +538,35 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
-	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
-	}
-	if !ready {
-		// Check for timeout before requeuing
-		timedOut, _ := r.checkOperationTimeout(log, &p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
-		}
-
-		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret, p)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
-		}
-		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-	} else {
-		log.Info("sink deployment is already created", "namespace", namespace)
+	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {
+		r.recordReconcileError(ctx, "resume", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("ensure component secrets: %w", err)
 	}
 
-	// Step 2: Create Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
-			}
-
-			log.Info("creating join deployment", "namespace", namespace)
-			err = r.createJoin(ctx, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("join deployment is already created", "namespace", namespace)
-		}
-	}
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret, constants.OperationResume)
+	// Ensure all deployments are ready
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
-
-	// Step 4: Create Ingestor deployments
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationResume)
-			}
-
-			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("ingestor deployment is already created", "namespace", namespace)
-		}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
-	// Remove resume annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineResumeAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove resume annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "resume", "success", pipelineID)
-	})
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineResumeAnnotation,
+		models.PipelineStatusRunning,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "resume", "resume", pipelineID)
 
 	log.Info("pipeline resume completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -824,40 +578,46 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	log.Info("reconciling pipeline stop", "pipeline_id", pipelineID)
 
 	// Check if pipeline is already stopped
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline already stopped", "pipeline_id", p.Spec.ID)
 		return ctrl.Result{}, nil
 	}
 
-	// Check for timeout before proceeding
+	// For stop operations, check whether pending messages are still decreasing before failing on timeout.
+	// If progress is being made, extend the timeout window instead of marking the pipeline failed.
 	timedOut, elapsed := r.checkOperationTimeout(log, &p)
 	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationStop)
+		if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopping) {
+			extended, extErr := r.tryExtendStopTimeout(ctx, log, &p)
+			if extErr != nil {
+				log.Error(extErr, "failed to check pending progress during stop timeout", "pipeline_id", pipelineID)
+				// Fall through to normal timeout handling on error.
+			} else if extended {
+				return ctrl.Result{Requeue: true, RequeueAfter: pendingMessagesRequeueDelay}, nil
+			}
+		}
+		result, err := r.handleOperationTimeout(ctx, log, &p)
+		return result, err
 	}
 	if elapsed > 0 {
 		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
 	}
 
 	// Check if pipeline is already stopping
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopping) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopping) {
 		log.Info("pipeline is already being stopped", "pipeline_id", p.Spec.ID)
 		// Continue with the stop process
 	} else {
 		// Transition to Stopping status first
-		err := r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusStopping, nil)
+		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopping, nil)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
 		}
 
-		// Set operation start time when transitioning to Stopping status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 
 		// Requeue to continue with the stop process
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+		return defaultOperationRequeueResult(), nil
 	}
 
 	// Stop all pipeline components
@@ -865,30 +625,32 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	if err != nil || result.Requeue {
 		return result, err
 	}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
+	}
+
+	// Remove NATS streams/KV stores for this pipeline before marking it Stopped, while preserving DLQ.
+	err = r.cleanupNATSPipelineResourcesKeepDLQ(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for stop: %w", err)
+	}
 
 	// Update status to Stopped
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusStopped, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
 
-	// Remove stop annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineStopAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusStopped)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove stop annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "stop", "success", pipelineID)
-	})
+	r.clearStopLastPendingCount(&p)
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineStopAnnotation,
+		models.PipelineStatusStopped,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "stop", "stop", pipelineID)
 
 	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -901,52 +663,40 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	namespace := r.getTargetNamespace(p)
 
-	// Check for timeout before proceeding
-	timedOut, elapsed := r.checkOperationTimeout(log, &p)
-	if timedOut {
-		return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
-	}
-	if elapsed > 0 {
-		log.Info("operation in progress", "pipeline_id", pipelineID, "elapsed", elapsed)
+	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
+		return result, err
 	}
 
 	// Update the pipeline config secret with new config
 	labels := preparePipelineLabels(p)
-	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p, p.Spec.ID)}
-	_, err := r.updateSecret(ctx, secretName, labels, p)
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p)}
+	secret, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
+		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
+			log.Info("pipeline config secret not found during edit, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)
 	}
 
-	if p.Status == etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning) {
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusRunning) {
 		log.Info("pipeline is already being resumed", "pipeline_id", p.Spec.ID)
 		// Continue with the resume process
 	} else {
 		// Transition status to Resuming
-		err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusResuming, nil)
+		err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
 
-		// Set operation start time when transitioning to Resuming status
-		err = r.setOperationStartTime(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to set operation start time", "pipeline_id", pipelineID)
-			// Continue anyway - this is not critical
-		}
+		r.setOperationStartTimeBestEffort(ctx, log, &p)
 	}
 
-	// Get namespace and secret for deployment creation
+	// Get namespace for deployment creation
 	var ns v1.Namespace
 	err = r.Get(ctx, types.NamespacedName{Name: namespace}, &ns)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
-	}
-
-	var secret v1.Secret
-	err = r.Get(ctx, secretName, &secret)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
 	}
 
 	err = r.createNATSStreams(ctx, p)
@@ -955,174 +705,38 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
 	}
 
-	// Step 1: Create Sink deployment
-	ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "sink"))
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("check sink deployment: %w", err)
-	}
-	if !ready {
-		// Check for timeout before requeuing
-		timedOut, _ := r.checkOperationTimeout(log, &p)
-		if timedOut {
-			return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
-		}
-
-		log.Info("creating sink deployment", "namespace", namespace)
-		err = r.createSink(ctx, ns, labels, secret, p)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("create sink deployment: %w", err)
-		}
-		// Requeue to wait for deployment to be ready
-		return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
+	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("ensure component secrets: %w", err)
 	}
 
-	// Step 2: Create Join deployment (if enabled)
-	if p.Spec.Join.Enabled {
-		ready, err := r.isDeploymentReady(ctx, namespace, r.getResourceName(p, "join"))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check join deployment: %w", err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
-			}
-
-			log.Info("creating join deployment", "namespace", namespace)
-			err = r.createJoin(ctx, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create join deployment: %w", err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
-	}
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	result, err := r.ensureDedupStatefulSetsReady(ctx, log, p, ns, labels, secret, constants.OperationEdit)
+	// Ensure all deployments are ready
+	result, err := r.createPipelineComponents(ctx, log, &p, ns, labels, secret)
 	if err != nil || result.Requeue {
 		return result, err
 	}
-
-	// Step 4: Create Ingestor deployments
-	for i := range p.Spec.Ingestor.Streams {
-		deploymentName := r.getResourceName(p, fmt.Sprintf("ingestor-%d", i))
-		ready, err := r.isDeploymentReady(ctx, namespace, deploymentName)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("check ingestor deployment %s: %w", deploymentName, err)
-		}
-		if !ready {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, constants.OperationEdit)
-			}
-
-			log.Info("creating ingestor deployment", "deployment", deploymentName, "namespace", namespace)
-			err = r.createIngestors(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create ingestor deployment %s: %w", deploymentName, err)
-			}
-			// Requeue to wait for deployment to be ready
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		}
+	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed) {
+		return ctrl.Result{}, nil
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, postgresstorage.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
-	// Remove edit annotation and clear operation start time
-	annotations := p.GetAnnotations()
-	if annotations != nil {
-		delete(annotations, constants.PipelineEditAnnotation)
-		r.clearOperationStartTime(&p)
-		p.SetAnnotations(annotations)
-		p.Status = etlv1alpha1.PipelineStatus(postgresstorage.PipelineStatusRunning)
-		err = r.Update(ctx, &p)
-		if err != nil {
-			log.Error(err, "failed to remove edit annotation", "pipeline_id", p.Spec.ID)
-		}
-	}
-
-	// Record success metrics
-	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, "edit", "success", pipelineID)
-	})
+	r.clearOperationAnnotationAndStatus(
+		ctx,
+		log,
+		&p,
+		constants.PipelineEditAnnotation,
+		models.PipelineStatusRunning,
+		true,
+	)
+	r.recordOperationSuccess(ctx, "edit", "edit", pipelineID)
 
 	log.Info("pipeline edit completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
 }
 
 // -------------------------------------------------------------------------------------------------------------------
-
-// ensureDedupStatefulSetsReady ensures all dedup StatefulSets are ready for a pipeline.
-// It checks if any streams have deduplication enabled, verifies their readiness,
-// creates them if needed, and handles timeout checking.
-//
-// Returns:
-//   - ctrl.Result: Requeue result if dedups need more time to become ready
-//   - error: Error if readiness check or creation fails
-func (r *PipelineReconciler) ensureDedupStatefulSetsReady(
-	ctx context.Context,
-	log logr.Logger,
-	p etlv1alpha1.Pipeline,
-	ns v1.Namespace,
-	labels map[string]string,
-	secret v1.Secret,
-	operationName string,
-) (ctrl.Result, error) {
-	namespace := r.getTargetNamespace(p)
-
-	// Step 3: Create Dedup StatefulSets (if any stream has dedup enabled)
-	anyDedupEnabled := false
-	for _, stream := range p.Spec.Ingestor.Streams {
-		if stream.Deduplication != nil && stream.Deduplication.Enabled {
-			anyDedupEnabled = true
-			break
-		}
-	}
-
-	if anyDedupEnabled {
-		// Check if all dedup StatefulSets are ready
-		allDedupReady := true
-		for i, stream := range p.Spec.Ingestor.Streams {
-			if stream.Deduplication == nil || !stream.Deduplication.Enabled {
-				continue
-			}
-
-			dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
-			ready, err := r.isStatefulSetReady(ctx, namespace, dedupName)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("check dedup-%d statefulset: %w", i, err)
-			}
-			if !ready {
-				allDedupReady = false
-				break
-			}
-		}
-
-		if !allDedupReady {
-			// Check for timeout before requeuing
-			timedOut, _ := r.checkOperationTimeout(log, &p)
-			if timedOut {
-				return r.handleOperationTimeout(ctx, log, &p, operationName)
-			}
-
-			log.Info("creating dedup statefulsets", "namespace", namespace)
-			err := r.createDedups(ctx, log, ns, labels, secret, p)
-			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("create dedup statefulsets: %w", err)
-			}
-			log.Info("waiting for dedup statefulsets to be ready", "namespace", namespace)
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second}, nil
-		} else {
-			log.Info("dedup statefulsets are ready", "namespace", namespace)
-		}
-	}
-
-	return ctrl.Result{}, nil
-}

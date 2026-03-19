@@ -2,8 +2,6 @@ package postgres
 
 import (
 	"fmt"
-
-	"github.com/google/uuid"
 )
 
 // ErrPipelineNotExists is returned when a pipeline is not found
@@ -15,12 +13,4 @@ func checkRowsAffected(rowsAffected int64) error {
 		return ErrPipelineNotExists
 	}
 	return nil
-}
-
-// handleTransformationIDs handles NULL transformation_ids from database
-func handleTransformationIDs(transformationIDsPtr *[]uuid.UUID) []uuid.UUID {
-	if transformationIDsPtr != nil {
-		return *transformationIDsPtr
-	}
-	return []uuid.UUID{}
 }

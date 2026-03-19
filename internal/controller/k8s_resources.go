@@ -17,9 +17,12 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -31,12 +34,14 @@ import (
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 )
 
+var ErrPipelineConfigSecretNotFound = errors.New("pipeline config secret not found")
+
 // createNamespace creates or gets a namespace for the pipeline
 func (r *PipelineReconciler) createNamespace(ctx context.Context, p etlv1alpha1.Pipeline) (zero v1.Namespace, _ error) {
 	targetNamespace := r.getTargetNamespace(p)
 
 	// If auto=false, we don't create namespaces, just return the target namespace
-	if !r.PipelinesNamespaceAuto {
+	if !r.Config.Namespaces.Auto {
 		var ns v1.Namespace
 		err := r.Get(ctx, types.NamespacedName{Name: targetNamespace}, &ns)
 		if err != nil {
@@ -83,7 +88,7 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 	log.Info("deleting pipeline namespace", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "namespace", targetNamespace)
 
 	// If auto=false, we don't delete namespaces, just clean up resources
-	if !r.PipelinesNamespaceAuto {
+	if !r.Config.Namespaces.Auto {
 		log.Info("auto=false, skipping namespace deletion", "namespace", targetNamespace)
 		return nil
 	}
@@ -115,22 +120,59 @@ func (r *PipelineReconciler) deleteNamespace(ctx context.Context, log logr.Logge
 	return nil
 }
 
-// createDeployment creates a deployment
-func (r *PipelineReconciler) createDeployment(ctx context.Context, deployment *appsv1.Deployment) error {
-	err := r.Create(ctx, deployment, &client.CreateOptions{})
-	if err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return nil
-		}
-
-		return fmt.Errorf("create deployment: %w", err)
+// getPipelineConfigFromSecret reads the pipeline configuration from the secret in glassflow namespace
+func (r *PipelineReconciler) getPipelineConfigFromSecret(ctx context.Context, pipelineID string) (string, error) {
+	secretName := fmt.Sprintf("pipeline-config-%s", pipelineID)
+	secretNamespacedName := types.NamespacedName{
+		Name:      secretName,
+		Namespace: r.Config.GlassflowNamespace,
 	}
 
-	return nil
+	var secret v1.Secret
+	err := r.Get(ctx, secretNamespacedName, &secret)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("%w: %s in namespace %s (may need to wait for API to create it)", ErrPipelineConfigSecretNotFound, secretName, r.Config.GlassflowNamespace)
+		}
+		return "", fmt.Errorf("get pipeline config secret %s: %w", secretNamespacedName, err)
+	}
+
+	// Extract pipeline.json from the secret
+	pipelineJSON, exists := secret.Data["pipeline.json"]
+	if !exists {
+		return "", fmt.Errorf("pipeline.json not found in secret %s", secretName)
+	}
+
+	return string(pipelineJSON), nil
 }
 
 // createSecret creates a secret for pipeline configuration
 func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
+	// Check if a secret already exists
+	var existingSecret v1.Secret
+	err := r.Get(ctx, namespacedName, &existingSecret)
+	if err == nil {
+		return existingSecret, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return zero, fmt.Errorf("get existing secret %s: %w", namespacedName, err)
+	}
+
+	var pipelineConfig string
+	// Read from secret created by Glassflow API
+	pipelineConfig, err = r.getPipelineConfigFromSecret(ctx, p.Spec.ID)
+	if err != nil {
+		if p.Spec.Config != "" {
+			pipelineConfig = p.Spec.Config
+		} else {
+			return zero, err
+		}
+	}
+
+	if pipelineConfig == "" {
+		return zero, fmt.Errorf("pipeline config is empty for pipeline %s, cannot create secret", p.Spec.ID)
+	}
+
 	s := v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      namespacedName.Name,
@@ -139,14 +181,18 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 		},
 		Immutable: ptrBool(true),
 		StringData: map[string]string{
-			"pipeline.json": p.Spec.Config,
+			"pipeline.json": pipelineConfig,
 		},
 		Type: v1.SecretTypeOpaque,
 	}
-	err := r.Create(ctx, &s, &client.CreateOptions{})
+	err = r.Create(ctx, &s, &client.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			return s, nil
+			err = r.Get(ctx, namespacedName, &existingSecret)
+			if err != nil {
+				return zero, fmt.Errorf("secret was created concurrently, but failed to get it: %w", err)
+			}
+			return existingSecret, nil
 		}
 		return zero, fmt.Errorf("create secret %s: %w", namespacedName, err)
 	}
@@ -156,67 +202,185 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 
 // updateSecret updates a secret by deleting and recreating it (since secrets are immutable)
 func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
-	// First, try to get the existing secret
+	// Check if a secret already exists
 	var existingSecret v1.Secret
 	err := r.Get(ctx, namespacedName, &existingSecret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// Secret doesn't exist, create it
 			return r.createSecret(ctx, namespacedName, labels, p)
 		}
 		return zero, fmt.Errorf("get existing secret %s: %w", namespacedName, err)
 	}
 
-	// Delete the existing secret since it's immutable and cannot be updated
-	// We need to recreate it with the new configuration
+	// Read from secret updated by Glassflow API
+	var pipelineConfig string
+	pipelineConfig, err = r.getPipelineConfigFromSecret(ctx, p.Spec.ID)
+	if err != nil {
+		if p.Spec.Config != "" {
+			pipelineConfig = p.Spec.Config
+		} else {
+			return zero, err
+		}
+	}
+
+	if pipelineConfig == "" {
+		return zero, fmt.Errorf("pipeline config is empty for pipeline %s, cannot update secret", p.Spec.ID)
+	}
+
+	// avoids redundant churn on requeue if content is unchanged
+	existingData := existingSecret.Data["pipeline.json"]
+	if bytes.Equal(existingData, []byte(pipelineConfig)) {
+		return existingSecret, nil
+	}
+
+	// recreate new secret
 	err = r.Delete(ctx, &existingSecret)
 	if err != nil {
 		return zero, fmt.Errorf("delete existing secret %s: %w", namespacedName, err)
 	}
 
-	// Create a new secret with the updated config
-	return r.createSecret(ctx, namespacedName, labels, p)
-}
-
-// isDeploymentAbsent checks if a deployment is fully deleted
-func (r *PipelineReconciler) isDeploymentAbsent(ctx context.Context, namespace, name string) (bool, error) {
-	var deployment appsv1.Deployment
-	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &deployment)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
-		return false, fmt.Errorf("get deployment %s: %w", name, err)
+	s := v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      namespacedName.Name,
+			Namespace: namespacedName.Namespace,
+			Labels:    labels,
+		},
+		Immutable: ptrBool(true),
+		StringData: map[string]string{
+			"pipeline.json": pipelineConfig,
+		},
+		Type: v1.SecretTypeOpaque,
 	}
-	return false, nil
-}
-
-// isDeploymentReady checks if a deployment is ready
-func (r *PipelineReconciler) isDeploymentReady(ctx context.Context, namespace, name string) (bool, error) {
-	var deployment appsv1.Deployment
-	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &deployment)
+	err = r.Create(ctx, &s, &client.CreateOptions{})
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("get deployment %s: %w", name, err)
+		return zero, fmt.Errorf("create updated secret %s: %w", namespacedName, err)
 	}
 
-	// Check if deployment is ready
-	if deployment.Status.ReadyReplicas == deployment.Status.Replicas && deployment.Status.Replicas > 0 {
-		return true, nil
-	}
-	return false, nil
+	return s, nil
 }
 
-// deleteDeployment safely deletes a deployment, handling NotFound errors gracefully
-func (r *PipelineReconciler) deleteDeployment(ctx context.Context, deployment *appsv1.Deployment) error {
-	err := r.Delete(ctx, deployment, &client.DeleteOptions{})
+// deleteSecret deletes a secret for a pipeline
+func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	// ns deletion takes care of deleting the secret
+	if r.Config.Namespaces.Auto {
+		log.Info("namespaceauto=true, skipping secret deletion", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
+		return nil
+	}
+
+	secretName := types.NamespacedName{Namespace: r.Config.Namespaces.Name, Name: r.getResourceName(p)}
+	var secret v1.Secret
+	err := r.Get(ctx, secretName, &secret)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil // Already deleted, that's fine
+		log.Info("secret already deleted", "secret", secretName.Name)
+		return nil
+	}
+
+	err = r.Delete(ctx, &secret)
+	if err != nil {
+		return fmt.Errorf("failed to delete secret %s: %w", secretName.Name, err)
+	}
+
+	return nil
+}
+
+// ensureComponentSecretsInPipelineNamespace ensures DSN and optionally encryption secrets exist in the target namespace (same as API).
+// targetNamespace is r.getTargetNamespace(p). Works for both per-pipeline and single shared namespace.
+func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx context.Context, targetNamespace string) error {
+	// Database: create secret from operator's DatabaseURL (same as GLASSFLOW_DATABASE_URL used by API)
+	if r.Config.DatabaseURL != "" {
+		name := constants.ComponentDatabaseSecretName
+		key := constants.ComponentDatabaseSecretKey
+		nn := types.NamespacedName{Namespace: targetNamespace, Name: name}
+		var existing v1.Secret
+		err := r.Get(ctx, nn, &existing)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("get secret %s: %w", nn, err)
+			}
+			s := v1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace},
+				Data:       map[string][]byte{key: []byte(r.Config.DatabaseURL)},
+				Type:       v1.SecretTypeOpaque,
+			}
+			if err = r.Create(ctx, &s, &client.CreateOptions{}); err != nil {
+				return fmt.Errorf("create secret %s: %w", nn, err)
+			}
+		} else if string(existing.Data[key]) != r.Config.DatabaseURL {
+			existing.Data[key] = []byte(r.Config.DatabaseURL)
+			if err = r.Update(ctx, &existing); err != nil {
+				return fmt.Errorf("update secret %s: %w", nn, err)
+			}
 		}
-		return fmt.Errorf("delete deployment: %w", err)
+	}
+
+	// Encryption: copy secret from operator namespace (same as API volume)
+	if r.Config.Encryption.Enabled && r.Config.Encryption.Name != "" {
+		srcNN := types.NamespacedName{Namespace: r.Config.Encryption.Namespace, Name: r.Config.Encryption.Name}
+		var src v1.Secret
+		if err := r.Get(ctx, srcNN, &src); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil // secret not found, skip (encryption may be disabled in chart)
+			}
+			return fmt.Errorf("get encryption secret %s: %w", srcNN, err)
+		}
+		key := r.Config.Encryption.Key
+		if key == "" {
+			key = constants.ComponentEncryptionSecretKey
+		}
+		data, ok := src.Data[key]
+		if !ok {
+			return fmt.Errorf("encryption secret %s has no key %q", srcNN, key)
+		}
+		destName := constants.ComponentEncryptionSecretName
+		destNN := types.NamespacedName{Namespace: targetNamespace, Name: destName}
+		var dest v1.Secret
+		err := r.Get(ctx, destNN, &dest)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("get secret %s: %w", destNN, err)
+			}
+			s := v1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: destName, Namespace: targetNamespace},
+				Data:       map[string][]byte{constants.ComponentEncryptionSecretKey: data},
+				Type:       v1.SecretTypeOpaque,
+			}
+			if err = r.Create(ctx, &s, &client.CreateOptions{}); err != nil {
+				return fmt.Errorf("create secret %s: %w", destNN, err)
+			}
+		} else if string(dest.Data[constants.ComponentEncryptionSecretKey]) != string(data) {
+			dest.Data[constants.ComponentEncryptionSecretKey] = data
+			if err = r.Update(ctx, &dest); err != nil {
+				return fmt.Errorf("update secret %s: %w", destNN, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// -------------------------------------------------------------------------------------------------------------------
+// Headless Service Operations (for StatefulSet)
+// -------------------------------------------------------------------------------------------------------------------
+
+// createHeadlessService creates a headless Service for a StatefulSet (ClusterIP: None, selector = labels).
+func (r *PipelineReconciler) createHeadlessService(ctx context.Context, namespace, name string, labels map[string]string) error {
+	svc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: v1.ServiceSpec{
+			ClusterIP: "None",
+			Selector:  labels,
+		},
+	}
+	err := r.Create(ctx, svc, &client.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("create headless service %s: %w", name, err)
 	}
 	return nil
 }
@@ -268,17 +432,35 @@ func (r *PipelineReconciler) isStatefulSetAbsent(ctx context.Context, namespace,
 	return false, nil
 }
 
-// deleteStatefulSet deletes a StatefulSet
+// deleteStatefulSet safely deletes a StatefulSet, handling NotFound errors gracefully.
 func (r *PipelineReconciler) deleteStatefulSet(ctx context.Context, sts *appsv1.StatefulSet) error {
-	err := r.Delete(ctx, sts)
+	err := r.Delete(ctx, sts, &client.DeleteOptions{})
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("delete statefulset: %w", err)
 	}
 	return nil
 }
 
+// deleteStatefulSetByName safely deletes a StatefulSet by name.
+func (r *PipelineReconciler) deleteStatefulSetByName(ctx context.Context, namespace, name string) error {
+	return r.deleteStatefulSet(ctx, &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+		},
+	})
+}
+
 // cleanupDedupPVCs deletes PVCs associated with dedup StatefulSets
 func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	if !p.Spec.Transform.IsDedupEnabled {
+		log.Info("dedup PVC cleanup skipped: dedup persistent storage disabled", "pipeline_id", p.Spec.ID)
+		return nil
+	}
+
 	namespace := r.getTargetNamespace(p)
 
 	for i, stream := range p.Spec.Ingestor.Streams {
@@ -286,9 +468,9 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 			continue
 		}
 
-		dedupName := r.getResourceName(p, fmt.Sprintf("dedup-%d", i))
+		dedupName := r.getStatefulSetResourceName(p, fmt.Sprintf("dedup-%d", i))
 
-		replicas := 1
+		replicas := getDedupReplicas(p)
 
 		// StatefulSet PVCs have format: data-{statefulset-name}-{ordinal}
 		for replica := 0; replica < replicas; replica++ {
@@ -312,4 +494,39 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 	}
 
 	return nil
+}
+
+// ensureStatefulSetReady checks if a StatefulSet is ready, creates it if not, and handles timeouts.
+func (r *PipelineReconciler) ensureStatefulSetReady(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	namespace,
+	statefulSetName string,
+	createFn func(context.Context, v1.Namespace, map[string]string, v1.Secret, etlv1alpha1.Pipeline) error,
+	ns v1.Namespace,
+	labels map[string]string,
+	secret v1.Secret,
+) (bool, error) {
+	ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
+	if err != nil {
+		return false, fmt.Errorf("check %s statefulset: %w", statefulSetName, err)
+	}
+	if ready {
+		log.Info(fmt.Sprintf("%s statefulset is already ready", statefulSetName), "namespace", namespace)
+		return false, nil
+	}
+
+	timedOut, _ := r.checkOperationTimeout(log, p)
+	if timedOut {
+		_, err := r.handleOperationTimeout(ctx, log, p)
+		return false, err
+	}
+
+	log.Info(fmt.Sprintf("creating %s statefulset", statefulSetName), "namespace", namespace)
+	err = createFn(ctx, ns, labels, secret, *p)
+	if err != nil {
+		return false, fmt.Errorf("create %s statefulset: %w", statefulSetName, err)
+	}
+	return true, nil
 }

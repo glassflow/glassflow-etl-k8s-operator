@@ -28,19 +28,13 @@ jobs:
       contents: write
     steps:
       - name: Create Release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           release_name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  chart-app-version-bump:
-    needs: [build-operator-image]
-    uses: ./.github/workflows/chart-app-version-bump.yml
 
   notify:
     needs: [build-operator-image]

@@ -9,8 +9,12 @@ data:
   NATS_ADDR: {{ .Values.global.nats.address | default (printf "nats://%s-nats.%s.svc.cluster.local:4222" .Release.Name .Release.Namespace) | quote }}
   PIPELINES_NAMESPACE_AUTO: {{ .Values.global.pipelines.namespace.auto | quote }}
   PIPELINES_NAMESPACE_NAME: {{ .Values.global.pipelines.namespace.name | quote }}
+  RECONCILE_TIMEOUT: {{ .Values.controllerManager.manager.reconcileTimeout | default "15m" | quote }}
   NATS_MAX_STREAM_AGE: {{ .Values.global.nats.stream.maxAge | quote }}
   NATS_MAX_STREAM_BYTES: {{ .Values.global.nats.stream.maxBytes | quote }}
+  NATS_STREAM_RETENTION: {{ .Values.global.nats.stream.retention | default "WorkQueue" | quote }}
+  NATS_STREAM_ALLOW_DIRECT: {{ .Values.global.nats.stream.allowDirect | default true | quote }}
+  NATS_STREAM_ALLOW_ATOMIC_PUBLISH: {{ .Values.global.nats.stream.allowAtomicPublish | default true | quote }}
   KUBERNETES_CLUSTER_DOMAIN: {{ quote .Values.kubernetesClusterDomain }}
   INGESTOR_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.ingestor.image.repository .Values.glassflowComponents.ingestor.image.tag | quote }}
   JOIN_IMAGE: {{ printf "%s%s:%s" (.Values.global.imageRegistry | default "") .Values.glassflowComponents.join.image.repository .Values.glassflowComponents.join.image.tag | quote }}
@@ -55,4 +59,3 @@ data:
   DEDUP_LOG_LEVEL: {{ .Values.glassflowComponents.dedup.logLevel | quote }}
   DEDUP_STORAGE_SIZE: {{ .Values.glassflowComponents.dedup.storage.size | quote }}
   DEDUP_STORAGE_CLASS: {{ .Values.glassflowComponents.dedup.storage.className | quote }}
-

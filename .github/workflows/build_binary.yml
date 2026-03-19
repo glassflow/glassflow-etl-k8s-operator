@@ -2,6 +2,11 @@ name: Build Operator Binary
 
 on:
   workflow_call:
+    inputs:
+      version:
+        description: 'Version string to embed in the binary (commit SHA)'
+        required: false
+        type: string
 
 jobs:
   build-operator-binary:
@@ -27,8 +32,11 @@ jobs:
       - name: Build binary
         run: |
           mkdir -p bin
-          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -o bin/manager cmd/main.go
+          VERSION="${BUILD_VERSION:-$(git rev-parse HEAD)}"
+          echo "VERSION=${VERSION}"
+          CGO_ENABLED=0 GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -mod=readonly -ldflags "-X main.version=${VERSION}" -o bin/manager cmd/main.go
         env:
+          BUILD_VERSION: ${{ inputs.version }}
           GOOS: ${{ matrix.platform.os }}
           GOARCH: ${{ matrix.platform.arch }}
       - name: Upload artifact

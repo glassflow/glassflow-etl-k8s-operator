@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -29,17 +30,19 @@ type PipelineSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// TODO: This CRD accepts "stream" names from API. It must be changed in
-	// future as there is no reason for the app to decide "naming" for infra resources.
-	// Leaks from non-optimal implementation of schema mapper on API side.
-
 	// +kubebuilder:validation:MinLength=5
-	ID       string  `json:"pipeline_id"`
-	DLQ      string  `json:"dlq"`
-	Ingestor Sources `json:"sources"`
-	Join     Join    `json:"join"`
-	Sink     Sink    `json:"sink"`
-	Config   string  `json:"config"`
+	ID        string    `json:"pipeline_id"`
+	Ingestor  Sources   `json:"sources"`
+	Join      Join      `json:"join"`
+	Sink      Sink      `json:"sink"`
+	Transform Transform `json:"transform,omitempty"`
+	// Config will be deprecated. Initial Pipeline configuration is now read from a Kubernetes Secret
+	// in the glassflow namespace (pipeline-config-{pipeline_id}). This field is kept for
+	// backward compatibility and will be used as a fallback if the secret is not found.
+	// +optional
+	Config string `json:"config,omitempty"`
+	// +optional
+	Resources *PipelineResources `json:"pipeline_resources,omitempty"`
 }
 
 type Sources struct {
@@ -52,11 +55,8 @@ type Sources struct {
 
 type SourceStream struct {
 	// +kubebuilder:validation:MinLength=1
-	TopicName    string        `json:"topic_name"`
-	OutputStream string        `json:"stream"`
-	DedupWindow  time.Duration `json:"dedup_window"`
-	// +kubebuilder:validation:Minimum=1
-	Replicas int `json:"replicas"`
+	TopicName   string        `json:"topic_name"`
+	DedupWindow time.Duration `json:"dedup_window"`
 
 	// Operator-specific dedup configuration
 	Deduplication *Deduplication `json:"deduplication,omitempty"`
@@ -64,33 +64,75 @@ type SourceStream struct {
 
 // Deduplication configuration for operator
 type Deduplication struct {
-	Enabled          bool   `json:"enabled"`
-	OutputStream     string `json:"stream"`                  // NATS stream after dedup
-	StorageSize      string `json:"storage_size,omitempty"`  // Default: "10Gi"
-	StorageClass     string `json:"storage_class,omitempty"` // Optional
-	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	StorageSize  string `json:"storage_size,omitempty"`  // Default: "10Gi"
+	StorageClass string `json:"storage_class,omitempty"` // Optional
 }
 
 type Join struct {
-	Type         string `json:"type"`
-	OutputStream string `json:"stream"`
-	// +kubebuilder:validation:Minimum=1
-	Replicas       int           `json:"replicas"`
+	Type           string        `json:"type"`
 	Enabled        bool          `json:"enabled"`
 	LeftBufferTTL  time.Duration `json:"left_buffer_ttl,omitempty"`
 	RightBufferTTL time.Duration `json:"right_buffer_ttl,omitempty"`
-
-	NATSLeftConsumerName  string `json:"nats_left_consumer_name,omitempty"`
-	NATSRightConsumerName string `json:"nats_right_consumer_name,omitempty"`
 }
 
 type Sink struct {
 	// +kubebuilder:validation:Enum=clickhouse
 	Type string `json:"type"`
-	// +kubebuilder:validation:Minimum=1
-	Replicas int `json:"replicas"`
+}
 
-	NATSConsumerName string `json:"nats_consumer_name,omitempty"`
+type Transform struct {
+	IsDedupEnabled              bool `json:"is_dedup_enabled"`
+	IsFilterEnabled             bool `json:"is_filter_enabled"`
+	IsStatelessTransformEnabled bool `json:"is_stateless_transform_enabled"`
+}
+
+// PipelineResources defines per-component resource configuration for a pipeline.
+type PipelineResources struct {
+	Nats     *NatsResources      `json:"nats,omitempty"`
+	Ingestor *IngestorResources  `json:"ingestor,omitempty"`
+	Join     *ComponentResources `json:"join,omitempty"`
+	Sink     *ComponentResources `json:"sink,omitempty"`
+	Dedup    *ComponentResources `json:"dedup,omitempty"`
+}
+
+// NatsResources defines resource configuration for the NATS component.
+type NatsResources struct {
+	Stream *NatsStreamResources `json:"stream,omitempty"`
+}
+
+// NatsStreamResources defines per-pipeline NATS stream limits, overriding the operator-level defaults.
+type NatsStreamResources struct {
+	MaxAge   metav1.Duration   `json:"maxAge,omitempty"`
+	MaxBytes resource.Quantity `json:"maxBytes,omitempty"`
+}
+
+// IngestorResources defines resources for ingestor components.
+// When join is disabled: use Base. When join is enabled: use Left (stream[0]) and Right (stream[1]).
+type IngestorResources struct {
+	Base  *ComponentResources `json:"base,omitempty"`
+	Left  *ComponentResources `json:"left,omitempty"`
+	Right *ComponentResources `json:"right,omitempty"`
+}
+
+// ComponentResources wraps the resource spec for a single component.
+type ComponentResources struct {
+	Requests *ResourceQuantities `json:"requests,omitempty"`
+	Limits   *ResourceQuantities `json:"limits,omitempty"`
+	Storage  *StorageSpec        `json:"storage,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	Replicas *int32 `json:"replicas,omitempty"`
+}
+
+// ResourceQuantities defines CPU and memory resource quantities (e.g. "100m", "128Mi").
+type ResourceQuantities struct {
+	CPU    resource.Quantity `json:"cpu,omitempty"`
+	Memory resource.Quantity `json:"memory,omitempty"`
+}
+
+// StorageSpec defines persistent storage size for StatefulSets.
+type StorageSpec struct {
+	Size resource.Quantity `json:"size,omitempty"`
 }
 
 // PipelineStatus defines the observed state of Pipeline.
@@ -105,7 +147,8 @@ type Pipeline struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PipelineSpec   `json:"spec,omitempty"`
+	Spec PipelineSpec `json:"spec,omitempty"`
+	// +optional
 	Status PipelineStatus `json:"status,omitempty"`
 }
 
