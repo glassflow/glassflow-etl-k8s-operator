@@ -16,48 +16,56 @@ func TestBuildOperationSuccessNotification(t *testing.T) {
 		name      string
 		operation string
 		eventType notifications.EventType
+		severity  notifications.Severity
 		title     string
 	}{
 		{
 			name:      "create",
 			operation: constants.OperationCreate,
 			eventType: notifications.EventTypePipelineDeployed,
+			severity:  notifications.SeverityInfo,
 			title:     "Pipeline Deployed Successfully",
 		},
 		{
 			name:      "resume",
 			operation: constants.OperationResume,
 			eventType: notifications.EventTypePipelineResumed,
+			severity:  notifications.SeverityInfo,
 			title:     "Pipeline Resumed",
 		},
 		{
 			name:      "stop",
 			operation: constants.OperationStop,
 			eventType: notifications.EventTypePipelineStopped,
+			severity:  notifications.SeverityWarning,
 			title:     "Pipeline Stopped",
 		},
 		{
 			name:      "terminate",
 			operation: constants.OperationTerminate,
 			eventType: notifications.EventTypePipelineStopped,
+			severity:  notifications.SeverityWarning,
 			title:     "Pipeline Terminated",
 		},
 		{
 			name:      "edit",
 			operation: constants.OperationEdit,
 			eventType: notifications.EventTypePipelineDeployed,
+			severity:  notifications.SeverityInfo,
 			title:     "Pipeline Updated Successfully",
 		},
 		{
 			name:      "delete",
 			operation: constants.OperationDelete,
 			eventType: notifications.EventTypePipelineDeleted,
+			severity:  notifications.SeverityWarning,
 			title:     "Pipeline Deleted",
 		},
 		{
 			name:      "helm uninstall",
 			operation: constants.OperationHelmUninstall,
 			eventType: notifications.EventTypePipelineDeleted,
+			severity:  notifications.SeverityWarning,
 			title:     "Pipeline Uninstalled",
 		},
 	}
@@ -73,6 +81,9 @@ func TestBuildOperationSuccessNotification(t *testing.T) {
 			}
 			if got.EventType != tt.eventType {
 				t.Fatalf("event_type = %q, want %q", got.EventType, tt.eventType)
+			}
+			if got.Severity != tt.severity {
+				t.Fatalf("severity = %q, want %q", got.Severity, tt.severity)
 			}
 			if got.Title != tt.title {
 				t.Fatalf("title = %q, want %q", got.Title, tt.title)
