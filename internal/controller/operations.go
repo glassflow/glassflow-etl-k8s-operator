@@ -103,6 +103,7 @@ func (r *PipelineReconciler) recordOperationSuccess(
 		m.RecordReconcileOperation(ctx, metricsOperation, "success", pipelineID)
 	})
 	r.sendReconcileSuccessEvent(ctx, usageStatsOperation, pipelineID)
+	r.sendOperationSuccessNotification(ctx, usageStatsOperation, pipelineID)
 }
 
 func defaultOperationRequeueResult() ctrl.Result {

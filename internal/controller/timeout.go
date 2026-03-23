@@ -194,6 +194,7 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 		"error":            errorMsg,
 		"cluster_provider": r.Config.ClusterProvider,
 	})
+	r.sendOperationFailureNotification(ctx, operation, pipelineID, fmt.Errorf("%s", errorMsg))
 
 	return ctrl.Result{}, nil // Don't requeue - operation has timed out
 }

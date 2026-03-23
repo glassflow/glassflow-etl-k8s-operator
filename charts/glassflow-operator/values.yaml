@@ -16,6 +16,8 @@ global:
       retention: WorkQueue  # Options: WorkQueue, Limits, Interest
       allowDirect: true
       allowAtomicPublish: true
+  notifications:
+    enabled: false
 
   # Pipelines namespace configuration
   pipelines:
