@@ -275,11 +275,15 @@ func (r *PipelineReconciler) tryExtendStopTimeout(ctx context.Context, log logr.
 			"last_pending", lastCount,
 		)
 
-		if err := r.setStopLastPendingCount(ctx, p, currentCount); err != nil {
-			return false, fmt.Errorf("save last pending count: %w", err)
+		annotations := p.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
 		}
-		if err := r.extendOperationTimeout(ctx, p); err != nil {
-			return false, fmt.Errorf("extend operation timeout: %w", err)
+		annotations[constants.PipelineStopLastPendingCountAnnotation] = strconv.Itoa(currentCount)
+		annotations[constants.PipelineOperationStartTimeAnnotation] = time.Now().UTC().Format(time.RFC3339)
+		p.SetAnnotations(annotations)
+		if err := r.Update(ctx, p); err != nil {
+			return false, fmt.Errorf("extend stop timeout and save pending count: %w", err)
 		}
 		return true, nil
 	}
