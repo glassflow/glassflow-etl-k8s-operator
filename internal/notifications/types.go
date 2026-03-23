@@ -6,14 +6,16 @@ import "time"
 type Severity string
 
 const (
+	// SeverityDebug represents debug-level notification
+	SeverityDebug Severity = "debug"
 	// SeverityInfo represents an informational notification
 	SeverityInfo Severity = "info"
 	// SeverityWarning represents a warning notification
-	SeverityWarning Severity = "warning"
+	SeverityWarning Severity = "warn"
 	// SeverityError represents an error notification
 	SeverityError Severity = "error"
-	// SeverityCritical represents a critical notification
-	SeverityCritical Severity = "critical"
+	// SeverityFatal represents a fatal notification
+	SeverityFatal Severity = "fatal"
 )
 
 // EventType represents the type of event that triggered the notification
