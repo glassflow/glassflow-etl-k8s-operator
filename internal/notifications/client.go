@@ -3,10 +3,11 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
+	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -22,15 +23,14 @@ type Client interface {
 
 // notificationClient is the implementation of the Client interface
 type notificationClient struct {
-	cfg             *Config
-	natsClient      *nats.NATSClient
-	js              jetstream.JetStream
-	streamName      string
-	postgresStorage Storage
+	cfg        *Config
+	js         jetstream.JetStream
+	streamName string
+	logger     logr.Logger
 }
 
 // NewClient creates a new notification client
-func NewClient(ctx context.Context, cfg *Config, natsClient *nats.NATSClient, postgresStorage Storage) (Client, error) {
+func NewClient(ctx context.Context, cfg *Config, natsClient *nats.NATSClient, logger logr.Logger) (Client, error) {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
@@ -44,30 +44,34 @@ func NewClient(ctx context.Context, cfg *Config, natsClient *nats.NATSClient, po
 		return &noOpClient{enabled: false}, nil
 	}
 
-	js := natsClient.JetStream()
-
-	// Create or update the notifications stream with the configured settings
-	streamConfig := jetstream.StreamConfig{
-		Name:      cfg.StreamName,
-		Subjects:  []string{cfg.StreamName + ".*"},
-		Storage:   jetstream.FileStorage,
-		Retention: jetstream.LimitsPolicy,
-		MaxAge:    cfg.StreamMaxAge,
-		MaxBytes:  cfg.StreamMaxBytes,
-		Discard:   jetstream.DiscardOld,
+	if natsClient == nil {
+		return nil, fmt.Errorf("nats client is required when notifications are enabled")
 	}
 
-	_, err := js.CreateOrUpdateStream(ctx, streamConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create or update notifications stream: %w", err)
+	js := natsClient.JetStream()
+	streamName := DefaultStreamName
+
+	// Avoid overriding stream settings owned by the notifier service.
+	if _, err := js.Stream(ctx, streamName); err != nil {
+		if !errors.Is(err, jetstream.ErrStreamNotFound) {
+			return nil, fmt.Errorf("failed to check notifications stream: %w", err)
+		}
+
+		_, createErr := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+			Name:     streamName,
+			Subjects: []string{streamName + ".*"},
+			Storage:  jetstream.FileStorage,
+		})
+		if createErr != nil {
+			return nil, fmt.Errorf("failed to create notifications stream: %w", createErr)
+		}
 	}
 
 	return &notificationClient{
-		cfg:             cfg,
-		natsClient:      natsClient,
-		js:              js,
-		streamName:      cfg.StreamName,
-		postgresStorage: postgresStorage,
+		cfg:        cfg,
+		js:         js,
+		streamName: streamName,
+		logger:     logger.WithName("client"),
 	}, nil
 }
 
@@ -81,16 +85,6 @@ func (c *notificationClient) Publish(ctx context.Context, notification *Notifica
 		return fmt.Errorf("invalid notification: %w", err)
 	}
 
-	// Store in PostgreSQL first (if storage is available)
-	if c.postgresStorage != nil {
-		err := c.postgresStorage.StoreNotification(ctx, notification)
-		if err != nil {
-			// Log the error but don't fail the operation
-			log.Printf("Failed to store notification in PostgreSQL: %v", err)
-			// Continue to publish to NATS even if PostgreSQL storage fails
-		}
-	}
-
 	// Serialize notification to JSON
 	payload, err := json.Marshal(notification)
 	if err != nil {
@@ -102,8 +96,11 @@ func (c *notificationClient) Publish(ctx context.Context, notification *Notifica
 	subject := c.streamName + ".notifications"
 	_, err = c.js.Publish(ctx, subject, payload)
 	if err != nil {
-		// Log the error but don't fail the operation
-		log.Printf("Failed to publish notification to NATS stream %s: %v", c.streamName, err)
+		c.logger.Error(err, "failed to publish notification",
+			"stream", c.streamName,
+			"subject", subject,
+			"pipeline_id", notification.PipelineID,
+			"event_type", notification.EventType)
 		return fmt.Errorf("failed to publish notification: %w", err)
 	}
 
@@ -153,7 +150,7 @@ type noOpClient struct {
 	enabled bool
 }
 
-func (c *noOpClient) Publish(ctx context.Context, notification *Notification) error {
+func (c *noOpClient) Publish(_ context.Context, _ *Notification) error {
 	return ErrNotificationDisabled
 }
 

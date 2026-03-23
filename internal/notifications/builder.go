@@ -11,23 +11,43 @@ const (
 	DefaultSource = "glassflow-operator"
 )
 
-// SendPipelineDeployedNotification creates a notification for a pipeline deployment event
-func SendPipelineDeployedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
+func newPipelineNotification(
+	pipelineID string,
+	severity Severity,
+	eventType EventType,
+	title string,
+	message string,
+	tags []string,
+	metadata map[string]interface{},
+) *Notification {
 	now := time.Now().UTC()
-	notification := &Notification{
+	return &Notification{
 		NotificationID: uuid.New().String(),
 		PipelineID:     pipelineID,
 		Timestamp:      now.Format(time.RFC3339Nano),
-		Severity:       SeverityInfo,
-		EventType:      EventTypePipelineDeployed,
+		Severity:       severity,
+		EventType:      eventType,
 		Title:          title,
 		Message:        message,
 		Metadata: Metadata{
 			Source:       DefaultSource,
-			Tags:         []string{"deployment"},
+			Tags:         tags,
 			CustomFields: metadata,
 		},
 	}
+}
+
+// NewPipelineDeployedNotification creates a notification for a pipeline deployment event.
+func NewPipelineDeployedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
+	notification := newPipelineNotification(
+		pipelineID,
+		SeverityInfo,
+		EventTypePipelineDeployed,
+		title,
+		message,
+		[]string{"deployment"},
+		metadata,
+	)
 
 	// Set default title if not provided
 	if title == "" {
@@ -42,23 +62,17 @@ func SendPipelineDeployedNotification(pipelineID, title, message string, metadat
 	return notification
 }
 
-// SendPipelineStoppedNotification creates a notification for a pipeline stopped event
-func SendPipelineStoppedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
-	now := time.Now().UTC()
-	notification := &Notification{
-		NotificationID: uuid.New().String(),
-		PipelineID:     pipelineID,
-		Timestamp:      now.Format(time.RFC3339Nano),
-		Severity:       SeverityWarning,
-		EventType:      EventTypePipelineStopped,
-		Title:          title,
-		Message:        message,
-		Metadata: Metadata{
-			Source:       DefaultSource,
-			Tags:         []string{"deployment"},
-			CustomFields: metadata,
-		},
-	}
+// NewPipelineStoppedNotification creates a notification for a pipeline stopped event.
+func NewPipelineStoppedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
+	notification := newPipelineNotification(
+		pipelineID,
+		SeverityWarning,
+		EventTypePipelineStopped,
+		title,
+		message,
+		[]string{"deployment"},
+		metadata,
+	)
 
 	// Set default title if not provided
 	if title == "" {
@@ -73,23 +87,17 @@ func SendPipelineStoppedNotification(pipelineID, title, message string, metadata
 	return notification
 }
 
-// SendPipelineResumedNotification creates a notification for a pipeline resumed event
-func SendPipelineResumedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
-	now := time.Now().UTC()
-	notification := &Notification{
-		NotificationID: uuid.New().String(),
-		PipelineID:     pipelineID,
-		Timestamp:      now.Format(time.RFC3339Nano),
-		Severity:       SeverityInfo,
-		EventType:      EventTypePipelineResumed,
-		Title:          title,
-		Message:        message,
-		Metadata: Metadata{
-			Source:       DefaultSource,
-			Tags:         []string{"deployment"},
-			CustomFields: metadata,
-		},
-	}
+// NewPipelineResumedNotification creates a notification for a pipeline resumed event.
+func NewPipelineResumedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
+	notification := newPipelineNotification(
+		pipelineID,
+		SeverityInfo,
+		EventTypePipelineResumed,
+		title,
+		message,
+		[]string{"deployment"},
+		metadata,
+	)
 
 	// Set default title if not provided
 	if title == "" {
@@ -104,23 +112,17 @@ func SendPipelineResumedNotification(pipelineID, title, message string, metadata
 	return notification
 }
 
-// SendPipelineDeletedNotification creates a notification for a pipeline deleted event
-func SendPipelineDeletedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
-	now := time.Now().UTC()
-	notification := &Notification{
-		NotificationID: uuid.New().String(),
-		PipelineID:     pipelineID,
-		Timestamp:      now.Format(time.RFC3339Nano),
-		Severity:       SeverityWarning,
-		EventType:      EventTypePipelineDeleted,
-		Title:          title,
-		Message:        message,
-		Metadata: Metadata{
-			Source:       DefaultSource,
-			Tags:         []string{"deployment"},
-			CustomFields: metadata,
-		},
-	}
+// NewPipelineDeletedNotification creates a notification for a pipeline deleted event.
+func NewPipelineDeletedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
+	notification := newPipelineNotification(
+		pipelineID,
+		SeverityWarning,
+		EventTypePipelineDeleted,
+		title,
+		message,
+		[]string{"deployment"},
+		metadata,
+	)
 
 	// Set default title if not provided
 	if title == "" {
@@ -135,23 +137,17 @@ func SendPipelineDeletedNotification(pipelineID, title, message string, metadata
 	return notification
 }
 
-// SendPipelineFailedNotification creates a notification for a pipeline failed event
-func SendPipelineFailedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
-	now := time.Now().UTC()
-	notification := &Notification{
-		NotificationID: uuid.New().String(),
-		PipelineID:     pipelineID,
-		Timestamp:      now.Format(time.RFC3339Nano),
-		Severity:       SeverityError,
-		EventType:      EventTypePipelineFailed,
-		Title:          title,
-		Message:        message,
-		Metadata: Metadata{
-			Source:       DefaultSource,
-			Tags:         []string{"deployment", "error"},
-			CustomFields: metadata,
-		},
-	}
+// NewPipelineFailedNotification creates a notification for a pipeline failed event.
+func NewPipelineFailedNotification(pipelineID, title, message string, metadata map[string]interface{}) *Notification {
+	notification := newPipelineNotification(
+		pipelineID,
+		SeverityError,
+		EventTypePipelineFailed,
+		title,
+		message,
+		[]string{"deployment", "error"},
+		metadata,
+	)
 
 	// Set default title if not provided
 	if title == "" {
