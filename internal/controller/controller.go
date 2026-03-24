@@ -243,7 +243,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 		models.PipelineStatusRunning,
 		true,
 	)
-	r.recordOperationSuccess(ctx, "create", "create", pipelineID, "")
+	r.recordOperationSuccess(ctx, "create", pipelineID, "")
 
 	log.Info("pipeline creation completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -292,7 +292,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 		models.PipelineStatusStopped,
 		false,
 	)
-	r.recordOperationSuccess(ctx, "terminate", "terminate", pipelineID, "")
+	r.recordOperationSuccess(ctx, "terminate", pipelineID, "")
 
 	log.Info("pipeline termination completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -366,7 +366,7 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
-	r.recordOperationSuccess(ctx, "delete", "delete", pipelineID, "")
+	r.recordOperationSuccess(ctx, "delete", pipelineID, "")
 
 	log.Info("pipeline deletion completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -463,7 +463,7 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		return ctrl.Result{}, fmt.Errorf("delete pipeline CRD: %w", err)
 	}
 
-	r.recordOperationSuccess(ctx, "uninstall", "helm-uninstall", pipelineID, "")
+	r.recordOperationSuccess(ctx, "helm-uninstall", pipelineID, "")
 
 	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", pipelineID)
 	return ctrl.Result{}, nil
@@ -566,7 +566,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		models.PipelineStatusRunning,
 		true,
 	)
-	r.recordOperationSuccess(ctx, "resume", "resume", pipelineID, "")
+	r.recordOperationSuccess(ctx, "resume", pipelineID, "")
 
 	log.Info("pipeline resume completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -659,7 +659,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		models.PipelineStatusStopped,
 		true,
 	)
-	r.recordOperationSuccess(ctx, "stop", "stop", pipelineID, stopMessage)
+	r.recordOperationSuccess(ctx, "stop", pipelineID, stopMessage)
 
 	log.Info("pipeline stop completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
@@ -742,7 +742,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		models.PipelineStatusRunning,
 		true,
 	)
-	r.recordOperationSuccess(ctx, "edit", "edit", pipelineID, "")
+	r.recordOperationSuccess(ctx, "edit", pipelineID, "")
 
 	log.Info("pipeline edit completed successfully", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 	return ctrl.Result{}, nil
