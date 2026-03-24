@@ -23,6 +23,10 @@ const (
 	// during a stop operation, used to detect whether messages are being consumed.
 	PipelineStopLastPendingCountAnnotation = "pipeline.etl.glassflow.io/stop-last-pending-count"
 
+	// PipelineStopReasonAnnotation stores the reason a pipeline was stopped (e.g. from a component signal).
+	// If absent, the stop was triggered via API.
+	PipelineStopReasonAnnotation = "pipeline.etl.glassflow.io/stop-reason"
+
 	// DefaultReconcileTimeout is the default maximum duration a reconcile operation can run before timing out
 	DefaultReconcileTimeout = 15 * time.Minute
 

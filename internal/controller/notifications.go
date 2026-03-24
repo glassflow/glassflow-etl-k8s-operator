@@ -25,13 +25,13 @@ func (r *PipelineReconciler) failureNotificationMetadata(operation string, err e
 	}
 }
 
-func (r *PipelineReconciler) sendOperationSuccessNotification(ctx context.Context, operation, pipelineID string) {
+func (r *PipelineReconciler) sendOperationSuccessNotification(ctx context.Context, operation, pipelineID, message string) {
 	if !notifications.IsEnabled() {
 		return
 	}
 
 	metadata := r.successNotificationMetadata(operation)
-	notification := buildOperationSuccessNotification(operation, pipelineID, metadata)
+	notification := buildOperationSuccessNotification(operation, pipelineID, message, metadata)
 	if notification == nil {
 		return
 	}
@@ -42,6 +42,7 @@ func (r *PipelineReconciler) sendOperationSuccessNotification(ctx context.Contex
 func buildOperationSuccessNotification(
 	operation string,
 	pipelineID string,
+	message string,
 	metadata map[string]interface{},
 ) *notifications.Notification {
 
@@ -51,7 +52,7 @@ func buildOperationSuccessNotification(
 	case constants.OperationResume:
 		return notifications.NewPipelineResumedNotification(pipelineID, "", "", metadata)
 	case constants.OperationStop:
-		return notifications.NewPipelineStoppedNotification(pipelineID, "", "", metadata)
+		return notifications.NewPipelineStoppedNotification(pipelineID, "", message, metadata)
 	case constants.OperationTerminate:
 		return notifications.NewPipelineStoppedNotification(
 			pipelineID,

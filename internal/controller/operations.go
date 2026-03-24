@@ -98,12 +98,13 @@ func (r *PipelineReconciler) recordOperationSuccess(
 	metricsOperation string,
 	usageStatsOperation string,
 	pipelineID string,
+	message string,
 ) {
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
 		m.RecordReconcileOperation(ctx, metricsOperation, "success", pipelineID)
 	})
 	r.sendReconcileSuccessEvent(ctx, usageStatsOperation, pipelineID)
-	r.sendOperationSuccessNotification(ctx, usageStatsOperation, pipelineID)
+	r.sendOperationSuccessNotification(ctx, usageStatsOperation, pipelineID, message)
 }
 
 func defaultOperationRequeueResult() ctrl.Result {
