@@ -53,6 +53,8 @@ func (r *PipelineReconciler) recordReconcileError(ctx context.Context, operation
 		"error":            err.Error(),
 		"cluster_provider": r.Config.ClusterProvider,
 	})
+
+	r.sendOperationFailureNotification(ctx, operation, pipelineID, err)
 }
 
 // sendReconcileSuccessEvent sends a usage stats event for successful reconcile operations

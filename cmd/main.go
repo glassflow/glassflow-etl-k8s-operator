@@ -44,6 +44,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/consumers"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/controller"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
+	opnotifications "github.com/glassflow/glassflow-etl-k8s-operator/internal/notifications"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
 	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/utils"
@@ -130,6 +131,12 @@ func main() {
 	flag.StringVar(&natsStreamAllowAtomicPublish, "nats-stream-allow-atomic-publish", getEnvOrDefault(
 		"NATS_STREAM_ALLOW_ATOMIC_PUBLISH", "true"),
 		"Allow atomic batch publishing into the stream (default: true)")
+
+	// Notifications stream configuration
+	var notificationsEnabled string
+	flag.StringVar(&notificationsEnabled, "notifications-enabled", getEnvOrDefault(
+		"NOTIFICATIONS_ENABLED", "false"),
+		"Enable pipeline operation notifications")
 
 	// PostgreSQL configuration
 	var postgresDSN, postgresOperatorDSN string
@@ -522,6 +529,13 @@ func main() {
 		allowAtomicPublish = true
 	}
 
+	notificationsEnabledBool, err := strconv.ParseBool(notificationsEnabled)
+	if err != nil {
+		setupLog.Error(err, "unable to parse notifications enabled, using default",
+			"value", notificationsEnabled, "default", "false")
+		notificationsEnabledBool = false
+	}
+
 	ctx := context.Background()
 	natsClient, err := nats.New(ctx, nats.Config{
 		URL:                natsOperatorAddr,
@@ -558,6 +572,22 @@ func main() {
 		os.Exit(1)
 	}
 	setupLog.Info("postgres storage initialized")
+
+	notificationsConfig := opnotifications.DefaultConfig().
+		WithEnabled(notificationsEnabledBool)
+
+	if err := opnotifications.Initialize(ctx, notificationsConfig, natsClient, logger); err != nil {
+		setupLog.Error(err, "unable to initialize notifications")
+		os.Exit(1)
+	}
+	defer func() {
+		if err := opnotifications.Shutdown(); err != nil {
+			setupLog.Error(err, "failed to shutdown notifications")
+		}
+	}()
+	setupLog.Info("notifications initialized",
+		"enabled", notificationsEnabledBool,
+		"stream", opnotifications.DefaultStreamName)
 
 	reconcilerConfig := controller.ReconcilerConfig{
 		NATS: controller.NATSSettings{

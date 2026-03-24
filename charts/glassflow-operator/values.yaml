@@ -16,6 +16,8 @@ global:
       retention: WorkQueue  # Options: WorkQueue, Limits, Interest
       allowDirect: true
       allowAtomicPublish: true
+  notifications:
+    enabled: false
 
   # Pipelines namespace configuration
   pipelines:
@@ -59,7 +61,7 @@ controllerManager:
           - ALL
     image:
       repository: glassflow-etl-k8s-operator
-      tag: v2.0.1
+      tag: v2.1.0
       pullPolicy: Always
     resources:
       limits:
