@@ -16,7 +16,6 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
-	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/pipelinegraph"
 )
 
@@ -25,29 +24,14 @@ const (
 	pendingMessagesRequeueDelay = 10 * time.Second
 )
 
-type pipelineTeardownMode struct {
-	checkPendingMessages bool
-	checkStepTimeout     bool
-}
-
-func isPipelineFailed(p *etlv1alpha1.Pipeline) bool {
-	return p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusFailed)
-}
-
 // stopPipelineComponents stops all pipeline components in the correct order with pending message checks.
 func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	return r.reconcilePipelineTeardown(ctx, log, p, pipelineTeardownMode{
-		checkPendingMessages: true,
-		checkStepTimeout:     true,
-	})
+	return r.reconcilePipelineTeardown(ctx, log, p, true)
 }
 
 // terminatePipelineComponents terminates all pipeline components immediately.
 func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
-	return r.reconcilePipelineTeardown(ctx, log, p, pipelineTeardownMode{
-		checkPendingMessages: false,
-		checkStepTimeout:     false,
-	})
+	return r.reconcilePipelineTeardown(ctx, log, p, false)
 }
 
 func (r *PipelineReconciler) createPipelineComponents(
@@ -729,11 +713,11 @@ func (r *PipelineReconciler) reconcilePipelineTeardown(
 	ctx context.Context,
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
-	mode pipelineTeardownMode,
+	checkPendingMessages bool,
 ) (ctrl.Result, error) {
 	namespace := r.getTargetNamespace(*p)
 
-	stages := []func(context.Context, logr.Logger, *etlv1alpha1.Pipeline, string, pipelineTeardownMode) (ctrl.Result, error){
+	stages := []func(context.Context, logr.Logger, *etlv1alpha1.Pipeline, string, bool) (ctrl.Result, error){
 		r.reconcileIngestorTeardown,
 		r.reconcileDedupTeardown,
 		r.reconcileJoinTeardown,
@@ -741,12 +725,9 @@ func (r *PipelineReconciler) reconcilePipelineTeardown(
 	}
 
 	for _, stage := range stages {
-		result, err := stage(ctx, log, p, namespace, mode)
+		result, err := stage(ctx, log, p, namespace, checkPendingMessages)
 		if err != nil || result.Requeue {
 			return result, err
-		}
-		if mode.checkStepTimeout && isPipelineFailed(p) {
-			return ctrl.Result{}, nil
 		}
 	}
 
@@ -758,16 +739,11 @@ func (r *PipelineReconciler) reconcileIngestorTeardown(
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
 	namespace string,
-	mode pipelineTeardownMode,
+	_ bool,
 ) (ctrl.Result, error) {
 	for i := range p.Spec.Ingestor.Streams {
-		result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
-		if timedOut || err != nil {
-			return result, err
-		}
-
 		deploymentName := r.getStatefulSetResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
-		result, err = r.ensureStatefulSetDeleted(ctx, log, namespace, "ingestor", deploymentName)
+		result, err := r.ensureStatefulSetDeleted(ctx, log, namespace, "ingestor", deploymentName)
 		if err != nil || result.Requeue {
 			return result, err
 		}
@@ -781,20 +757,15 @@ func (r *PipelineReconciler) reconcileDedupTeardown(
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
 	namespace string,
-	mode pipelineTeardownMode,
+	checkPendingMessages bool,
 ) (ctrl.Result, error) {
 	for i, stream := range p.Spec.Ingestor.Streams {
 		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 			continue
 		}
 
-		result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
-		if timedOut || err != nil {
-			return result, err
-		}
-
-		if mode.checkPendingMessages {
-			err = r.checkDedupPendingMessages(ctx, *p, i)
+		if checkPendingMessages {
+			err := r.checkDedupPendingMessages(ctx, *p, i)
 			if err != nil {
 				if errs.IsConsumerPendingMessagesError(err) {
 					log.Info("dedup has pending messages, requeuing", "pipeline_id", p.Spec.ID, "stream_index", i, "error", err.Error())
@@ -805,7 +776,7 @@ func (r *PipelineReconciler) reconcileDedupTeardown(
 		}
 
 		statefulSetName := r.getStatefulSetResourceName(*p, fmt.Sprintf("%s-%d", constants.DedupComponent, i))
-		result, err = r.ensureStatefulSetDeleted(ctx, log, namespace, "dedup", statefulSetName)
+		result, err := r.ensureStatefulSetDeleted(ctx, log, namespace, "dedup", statefulSetName)
 		if err != nil || result.Requeue {
 			return result, err
 		}
@@ -819,19 +790,14 @@ func (r *PipelineReconciler) reconcileJoinTeardown(
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
 	namespace string,
-	mode pipelineTeardownMode,
+	checkPendingMessages bool,
 ) (ctrl.Result, error) {
 	if !p.Spec.Join.Enabled {
 		return ctrl.Result{}, nil
 	}
 
-	result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
-	if timedOut || err != nil {
-		return result, err
-	}
-
-	if mode.checkPendingMessages {
-		err = r.checkJoinPendingMessages(ctx, *p)
+	if checkPendingMessages {
+		err := r.checkJoinPendingMessages(ctx, *p)
 		if err != nil {
 			if errs.IsConsumerPendingMessagesError(err) {
 				log.Info("join has pending messages, requeuing operation", "pipeline_id", p.Spec.ID, "error", err.Error())
@@ -839,11 +805,6 @@ func (r *PipelineReconciler) reconcileJoinTeardown(
 			}
 			return ctrl.Result{}, fmt.Errorf("check join pending messages: %w", err)
 		}
-	}
-
-	result, timedOut, err = r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
-	if timedOut || err != nil {
-		return result, err
 	}
 
 	statefulSetName := r.getStatefulSetResourceName(*p, constants.JoinComponent)
@@ -855,15 +816,10 @@ func (r *PipelineReconciler) reconcileSinkTeardown(
 	log logr.Logger,
 	p *etlv1alpha1.Pipeline,
 	namespace string,
-	mode pipelineTeardownMode,
+	checkPendingMessages bool,
 ) (ctrl.Result, error) {
-	result, timedOut, err := r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
-	if timedOut || err != nil {
-		return result, err
-	}
-
-	if mode.checkPendingMessages {
-		err = r.checkSinkPendingMessages(ctx, *p)
+	if checkPendingMessages {
+		err := r.checkSinkPendingMessages(ctx, *p)
 		if err != nil {
 			if errs.IsConsumerPendingMessagesError(err) {
 				log.Info("sink has pending messages, requeuing operation", "pipeline_id", p.Spec.ID, "error", err.Error())
@@ -873,30 +829,6 @@ func (r *PipelineReconciler) reconcileSinkTeardown(
 		}
 	}
 
-	result, timedOut, err = r.checkTeardownTimeout(ctx, log, p, mode.checkStepTimeout)
-	if timedOut || err != nil {
-		return result, err
-	}
-
 	deploymentName := r.getStatefulSetResourceName(*p, constants.SinkComponent)
 	return r.ensureStatefulSetDeleted(ctx, log, namespace, constants.SinkComponent, deploymentName)
-}
-
-func (r *PipelineReconciler) checkTeardownTimeout(
-	ctx context.Context,
-	log logr.Logger,
-	p *etlv1alpha1.Pipeline,
-	checkTimeout bool,
-) (ctrl.Result, bool, error) {
-	if !checkTimeout {
-		return ctrl.Result{}, false, nil
-	}
-
-	timedOut, _ := r.checkOperationTimeout(log, p)
-	if !timedOut {
-		return ctrl.Result{}, false, nil
-	}
-
-	result, err := r.handleOperationTimeout(ctx, log, p)
-	return result, true, err
 }
