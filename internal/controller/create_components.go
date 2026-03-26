@@ -71,7 +71,7 @@ func (r *PipelineReconciler) createPipelineComponents(
 	}
 
 	// Step 4: Ensure Ingestor StatefulSets are ready
-	for i := range p.Spec.Ingestor.Streams {
+	for i := range p.Spec.Source.Streams {
 		statefulSetName := r.getStatefulSetResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		ready, err := r.isStatefulSetReady(ctx, namespace, statefulSetName)
 		if err != nil {
@@ -97,7 +97,7 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 // createIngestors creates ingestor deployments for the pipeline
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	ing := p.Spec.Ingestor
+	ing := p.Spec.Source
 	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
 		return fmt.Errorf("build pipeline graph for ingestors: %w", err)
@@ -223,7 +223,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 
 // createJoin creates a join StatefulSet (and headless Service) for the pipeline.
 func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	if len(p.Spec.Ingestor.Streams) < 2 {
+	if len(p.Spec.Source.Streams) < 2 {
 		return fmt.Errorf("join requires at least 2 source streams")
 	}
 
@@ -444,7 +444,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 
 // createDedups creates dedup StatefulSets for the pipeline (one per ingestor stream with dedup enabled)
 func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	ing := p.Spec.Ingestor
+	ing := p.Spec.Source
 	dedupStorageEnabled := p.Spec.Transform.IsDedupEnabled
 	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
@@ -617,7 +617,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 
 func isDedupEnabled(p etlv1alpha1.Pipeline) bool {
 	// TODO - replace this with transform flag once we rename dedup to transform
-	for _, stream := range p.Spec.Ingestor.Streams {
+	for _, stream := range p.Spec.Source.Streams {
 		if stream.Deduplication != nil && stream.Deduplication.Enabled {
 			return true
 		}
@@ -631,7 +631,7 @@ func (r *PipelineReconciler) areDedupStatefulSetsReady(
 	p etlv1alpha1.Pipeline,
 	namespace string,
 ) (bool, error) {
-	for i, stream := range p.Spec.Ingestor.Streams {
+	for i, stream := range p.Spec.Source.Streams {
 		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 			continue
 		}
@@ -741,7 +741,7 @@ func (r *PipelineReconciler) reconcileIngestorTeardown(
 	namespace string,
 	_ bool,
 ) (ctrl.Result, error) {
-	for i := range p.Spec.Ingestor.Streams {
+	for i := range p.Spec.Source.Streams {
 		deploymentName := r.getStatefulSetResourceName(*p, fmt.Sprintf("%s-%d", constants.IngestorComponent, i))
 		result, err := r.ensureStatefulSetDeleted(ctx, log, namespace, "ingestor", deploymentName)
 		if err != nil || result.Requeue {
@@ -759,7 +759,7 @@ func (r *PipelineReconciler) reconcileDedupTeardown(
 	namespace string,
 	checkPendingMessages bool,
 ) (ctrl.Result, error) {
-	for i, stream := range p.Spec.Ingestor.Streams {
+	for i, stream := range p.Spec.Source.Streams {
 		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 			continue
 		}

@@ -32,7 +32,7 @@ type PipelineSpec struct {
 
 	// +kubebuilder:validation:MinLength=5
 	ID        string    `json:"pipeline_id"`
-	Ingestor  Sources   `json:"sources"`
+	Source    Sources   `json:"sources"`
 	Join      Join      `json:"join"`
 	Sink      Sink      `json:"sink"`
 	Transform Transform `json:"transform,omitempty"`
@@ -45,12 +45,25 @@ type PipelineSpec struct {
 	Resources *PipelineResources `json:"pipeline_resources,omitempty"`
 }
 
+const (
+	SourceTypeKafka       = "kafka"
+	SourceTypeOTLPLogs    = "otlp.logs"
+	SourceTypeOTLPTraces  = "otlp.traces"
+	SourceTypeOTLPMetrics = "otlp.metrics"
+)
+
+// IsOTLPSource returns true if the pipeline's source type is any OTLP variant.
+func (s PipelineSpec) IsOTLPSource() bool {
+	return s.Source.Type == SourceTypeOTLPLogs || s.Source.Type == SourceTypeOTLPTraces || s.Source.Type == SourceTypeOTLPMetrics
+}
+
 type Sources struct {
-	// +kubebuilder:validation:Enum=kafka
+	// +kubebuilder:validation:Enum=kafka;otlp.logs;otlp.traces;otlp.metrics
 	Type string `json:"type"`
-	// +kubebuilder:validation:MinItems=1
+	// Streams is required for kafka source type and must be omitted for OTLP source types.
+	// +optional
 	// +kubebuilder:validation:MaxItems=2
-	Streams []SourceStream `json:"topics"`
+	Streams []SourceStream `json:"topics,omitempty"`
 }
 
 type SourceStream struct {

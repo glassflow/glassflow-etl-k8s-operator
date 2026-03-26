@@ -65,7 +65,7 @@ var _ = Describe("Pipeline Controller", func() {
 					},
 					Spec: etlv1alpha1.PipelineSpec{
 						ID: resourceName,
-						Ingestor: etlv1alpha1.Sources{
+						Source: etlv1alpha1.Sources{
 							Type: "kafka",
 							Streams: []etlv1alpha1.SourceStream{
 								{

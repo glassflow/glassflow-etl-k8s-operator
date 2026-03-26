@@ -3,10 +3,11 @@ package pipelinegraph
 type NodeType string
 
 const (
-	NodeTypeIngestor NodeType = "ingestor"
-	NodeTypeDedup    NodeType = "dedup"
-	NodeTypeJoin     NodeType = "join"
-	NodeTypeSink     NodeType = "sink"
+	NodeTypeIngestor   NodeType = "ingestor"
+	NodeTypeOTLPSource NodeType = "otlp"
+	NodeTypeDedup      NodeType = "dedup"
+	NodeTypeJoin       NodeType = "join"
+	NodeTypeSink       NodeType = "sink"
 )
 
 type InputType string

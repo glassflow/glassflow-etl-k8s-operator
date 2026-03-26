@@ -437,6 +437,8 @@ spec:
               sources:
                 properties:
                   topics:
+                    description: Streams is required for kafka source type and must
+                      be omitted for OTLP source types.
                     items:
                       properties:
                         dedup_window:
@@ -466,14 +468,15 @@ spec:
                       - topic_name
                       type: object
                     maxItems: 2
-                    minItems: 1
                     type: array
                   type:
                     enum:
                     - kafka
+                    - otlp.logs
+                    - otlp.traces
+                    - otlp.metrics
                     type: string
                 required:
-                - topics
                 - type
                 type: object
               transform:

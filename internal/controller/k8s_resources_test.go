@@ -14,7 +14,7 @@ func TestCleanupDedupPVCsSkipsWhenDedupStorageDisabled(t *testing.T) {
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipeline-1",
-			Ingestor: etlv1alpha1.Sources{
+			Source: etlv1alpha1.Sources{
 				Streams: []etlv1alpha1.SourceStream{
 					{
 						TopicName:     "topic-a",

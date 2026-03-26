@@ -481,6 +481,121 @@ func TestGraphTwoIngestorsTwoDedupsJoinSink(t *testing.T) {
 	}
 }
 
+// Topology:
+//
+//	┌──────────────┐         ┌───────────┐
+//	│ otlp_src x1  ├── in ──►│ sink_0 x1 │
+//	└──────────────┘         └───────────┘
+func TestGraphOTLPSourceSink(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-1",
+		Nodes: []NodeConfig{
+			{ID: "otlp", Type: NodeTypeOTLPSource, Replicas: 1},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "otlp", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	otlpOutput, err := graph.GetOutput("otlp")
+	if err != nil {
+		t.Fatalf("GetOutput(otlp) returned error: %v", err)
+	}
+	wantOTLPOutput := outputBinding(
+		"gfm-1528386a-otlp-out",
+		streamBinding("gfm-1528386a-otlp-out_0", "gfm-1528386a-otlp-out.0"),
+	)
+	if !reflect.DeepEqual(otlpOutput, wantOTLPOutput) {
+		t.Fatalf("otlpOutput = %#v, want %#v", otlpOutput, wantOTLPOutput)
+	}
+
+	sinkInput, err := graph.GetInput("sink_0")
+	if err != nil {
+		t.Fatalf("GetInput(sink_0) returned error: %v", err)
+	}
+	wantSinkInput := inputBinding(wantOTLPOutput.StreamPrefix, wantOTLPOutput.Streams...)
+	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
+		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
+	}
+}
+
+// Topology:
+//
+//	┌──────────────┐         ┌────────────┐         ┌───────────┐
+//	│ otlp_src x1  ├── in ──►│ dedup_0 x2 ├── in ──►│ sink_0 x1 │
+//	└──────────────┘         └────────────┘         └───────────┘
+func TestGraphOTLPSourceDedupSink(t *testing.T) {
+	t.Parallel()
+
+	graph, err := New(Config{
+		PipelineID: "pipe-1",
+		Nodes: []NodeConfig{
+			{ID: "otlp", Type: NodeTypeOTLPSource, Replicas: 1},
+			{ID: "dedup_0", Type: NodeTypeDedup, Replicas: 2},
+			{ID: "sink_0", Type: NodeTypeSink, Replicas: 1},
+		},
+		Edges: []EdgeConfig{
+			{ID: "e1", SourceID: "otlp", TargetID: "dedup_0", TargetInputType: InputTypeIn},
+			{ID: "e2", SourceID: "dedup_0", TargetID: "sink_0", TargetInputType: InputTypeIn},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	otlpOutput, err := graph.GetOutput("otlp")
+	if err != nil {
+		t.Fatalf("GetOutput(otlp) returned error: %v", err)
+	}
+	wantOTLPOutput := outputBinding(
+		"gfm-1528386a-otlp-out",
+		streamBinding("gfm-1528386a-otlp-out_0", "gfm-1528386a-otlp-out.0"),
+	)
+	if !reflect.DeepEqual(otlpOutput, wantOTLPOutput) {
+		t.Fatalf("otlpOutput = %#v, want %#v", otlpOutput, wantOTLPOutput)
+	}
+
+	dedupInput, err := graph.GetInput("dedup_0")
+	if err != nil {
+		t.Fatalf("GetInput(dedup_0) returned error: %v", err)
+	}
+	wantDedupInput := inputBinding(wantOTLPOutput.StreamPrefix, wantOTLPOutput.Streams...)
+	if !reflect.DeepEqual(dedupInput, wantDedupInput) {
+		t.Fatalf("dedupInput = %#v, want %#v", dedupInput, wantDedupInput)
+	}
+
+	dedupOutput, err := graph.GetOutput("dedup_0")
+	if err != nil {
+		t.Fatalf("GetOutput(dedup_0) returned error: %v", err)
+	}
+	wantDedupOutput := outputBinding(
+		"gfm-1528386a-dedup_0-out",
+		streamBinding(
+			"gfm-1528386a-dedup_0-out_0",
+			"gfm-1528386a-dedup_0-out.0",
+			"gfm-1528386a-dedup_0-out.1",
+		),
+	)
+	if !reflect.DeepEqual(dedupOutput, wantDedupOutput) {
+		t.Fatalf("dedupOutput = %#v, want %#v", dedupOutput, wantDedupOutput)
+	}
+
+	sinkInput, err := graph.GetInput("sink_0")
+	if err != nil {
+		t.Fatalf("GetInput(sink_0) returned error: %v", err)
+	}
+	wantSinkInput := inputBinding(wantDedupOutput.StreamPrefix, wantDedupOutput.Streams...)
+	if !reflect.DeepEqual(sinkInput, wantSinkInput) {
+		t.Fatalf("sinkInput = %#v, want %#v", sinkInput, wantSinkInput)
+	}
+}
+
 func TestGraphGetOutputIsDeterministic(t *testing.T) {
 	t.Parallel()
 
