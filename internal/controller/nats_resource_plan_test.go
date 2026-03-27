@@ -172,6 +172,82 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 	}
 }
 
+func TestBuildNATSResourcePlanOTLPSinkOnly(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	pipeline := etlv1alpha1.Pipeline{
+		Spec: etlv1alpha1.PipelineSpec{
+			ID: "pipe-otlp-sink",
+			Source: etlv1alpha1.Sources{
+				Type: etlv1alpha1.SourceTypeOTLPLogs,
+			},
+			Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+		},
+	}
+
+	plan, err := reconciler.buildNATSResourcePlan(pipeline)
+	if err != nil {
+		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
+	}
+
+	hash := generatePipelineHash(pipeline.Spec.ID)
+	wantStreams := []nats.StreamConfig{
+		{
+			Name:     fmt.Sprintf("gfm-%s-otlp-out_0", hash),
+			Subjects: []string{fmt.Sprintf("gfm-%s-otlp-out.0", hash)},
+		},
+	}
+	if !reflect.DeepEqual(plan.Streams, wantStreams) {
+		t.Fatalf("plan.Streams = %#v, want %#v", plan.Streams, wantStreams)
+	}
+	if len(plan.JoinKVStores) != 0 {
+		t.Fatalf("plan.JoinKVStores = %#v, want none", plan.JoinKVStores)
+	}
+}
+
+func TestBuildNATSResourcePlanOTLPWithDedup(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	pipeline := etlv1alpha1.Pipeline{
+		Spec: etlv1alpha1.PipelineSpec{
+			ID: "pipe-otlp-dedup",
+			Source: etlv1alpha1.Sources{
+				Type: etlv1alpha1.SourceTypeOTLPTraces,
+			},
+			Transform: etlv1alpha1.Transform{IsDedupEnabled: true},
+			Sink:      etlv1alpha1.Sink{Type: "clickhouse"},
+			Resources: &etlv1alpha1.PipelineResources{
+				Dedup: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(1)},
+			},
+		},
+	}
+
+	plan, err := reconciler.buildNATSResourcePlan(pipeline)
+	if err != nil {
+		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
+	}
+
+	hash := generatePipelineHash(pipeline.Spec.ID)
+	wantStreams := []nats.StreamConfig{
+		{
+			Name:     fmt.Sprintf("gfm-%s-otlp-out_0", hash),
+			Subjects: []string{fmt.Sprintf("gfm-%s-otlp-out.0", hash)},
+		},
+		{
+			Name:     fmt.Sprintf("gfm-%s-dedup-out_0", hash),
+			Subjects: []string{fmt.Sprintf("gfm-%s-dedup-out.0", hash)},
+		},
+	}
+	if !reflect.DeepEqual(plan.Streams, wantStreams) {
+		t.Fatalf("plan.Streams = %#v, want %#v", plan.Streams, wantStreams)
+	}
+	if len(plan.JoinKVStores) != 0 {
+		t.Fatalf("plan.JoinKVStores = %#v, want none", plan.JoinKVStores)
+	}
+}
+
 func TestBuildNATSResourcePlanJoinWithLeftDedupKVStores(t *testing.T) {
 	t.Parallel()
 

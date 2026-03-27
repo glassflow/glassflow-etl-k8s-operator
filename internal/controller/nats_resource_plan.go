@@ -26,11 +26,13 @@ type natsNodePlan struct {
 }
 
 func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (natsResourcePlan, error) {
-	if len(p.Spec.Source.Streams) == 0 {
-		return natsResourcePlan{}, fmt.Errorf("pipeline spec must contain at least one source stream")
-	}
-	if p.Spec.Join.Enabled && len(p.Spec.Source.Streams) < 2 {
-		return natsResourcePlan{}, fmt.Errorf("join pipelines must contain at least two source streams")
+	if !p.Spec.IsOTLPSource() {
+		if len(p.Spec.Source.Streams) == 0 {
+			return natsResourcePlan{}, fmt.Errorf("pipeline spec must contain at least one source stream")
+		}
+		if p.Spec.Join.Enabled && len(p.Spec.Source.Streams) < 2 {
+			return natsResourcePlan{}, fmt.Errorf("join pipelines must contain at least two source streams")
+		}
 	}
 
 	maxAge, maxBytes := r.NATSClient.DefaultStreamLimits()
