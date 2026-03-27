@@ -66,13 +66,21 @@ func ConfigFromOTLPPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 	otlpID := OTLPSourceNodeID()
 	sinkID := SinkNodeID()
 
+	// The otlp virtual node's replica count must equal the immediate downstream replica
+	// count so that buildStreams produces one stream per downstream replica, giving each
+	// replica its own NATS subject for parallel consumption.
+	otlpReplicas := getSinkReplicas(spec)
+	if transformsAreEnabled(spec) {
+		otlpReplicas = getDedupReplicas(spec)
+	}
+
 	config := Config{
 		PipelineID: spec.ID,
 		Nodes: []NodeConfig{
 			{
 				ID:       otlpID,
 				Type:     NodeTypeOTLPSource,
-				Replicas: constants.DefaultMinReplicas,
+				Replicas: otlpReplicas,
 			},
 		},
 	}
