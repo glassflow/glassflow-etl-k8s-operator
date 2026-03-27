@@ -176,12 +176,12 @@ func (g *Graph) validateTopology() error {
 		outgoing := g.outgoing[nodeID]
 
 		switch node.Type {
-		case NodeTypeIngestor:
+		case NodeTypeIngestor, NodeTypeOTLPSource:
 			if len(incoming) != 0 {
-				return fmt.Errorf("ingestor %q cannot have inputs", nodeID)
+				return fmt.Errorf("%s %q cannot have inputs", node.Type, nodeID)
 			}
 			if len(outgoing) != 1 {
-				return fmt.Errorf("ingestor %q must have exactly one output", nodeID)
+				return fmt.Errorf("%s %q must have exactly one output", node.Type, nodeID)
 			}
 		case NodeTypeDedup:
 			if len(incoming) != 1 || incoming[0].TargetInputType != InputTypeIn {
@@ -269,7 +269,7 @@ func validateNode(node NodeConfig) error {
 	}
 
 	switch node.Type {
-	case NodeTypeDedup, NodeTypeJoin, NodeTypeSink, NodeTypeIngestor:
+	case NodeTypeDedup, NodeTypeJoin, NodeTypeSink, NodeTypeIngestor, NodeTypeOTLPSource:
 	default:
 		return fmt.Errorf("node %q has unsupported type %q", node.ID, node.Type)
 	}
@@ -282,7 +282,7 @@ func (g *Graph) buildOutputPrefix(node NodeConfig) (string, error) {
 	baseName := truncateName(fmt.Sprintf("%s-%s-%s-%s", namePrefix, hash, sanitizeName(node.ID), nodeOutSuffix))
 
 	switch node.Type {
-	case NodeTypeDedup, NodeTypeJoin, NodeTypeIngestor:
+	case NodeTypeDedup, NodeTypeJoin, NodeTypeIngestor, NodeTypeOTLPSource:
 		return baseName, nil
 	default:
 		return "", fmt.Errorf("node %q of type %q does not produce output streams", node.ID, node.Type)

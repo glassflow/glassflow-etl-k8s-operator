@@ -42,11 +42,72 @@ func SinkNodeID() string {
 
 // ConfigFromPipelineSpec converts a PipelineSpec into a graph topology config.
 func ConfigFromPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
+	if spec.IsOTLPSource() {
+		return ConfigFromOTLPPipelineSpec(spec)
+	}
 	if spec.Join.Enabled {
 		return ConfigFromJoinPipelineSpec(spec)
 	}
 
 	return ConfigFromJoinlessPipelineSpec(spec)
+}
+
+const otlpSourceNodeID = "otlp"
+
+// OTLPSourceNodeID returns the graph node ID for the OTLP source node.
+func OTLPSourceNodeID() string {
+	return otlpSourceNodeID
+}
+
+// ConfigFromOTLPPipelineSpec builds a graph config for an OTLP-sourced pipeline.
+// A virtual otlp_source node is always the first node — it has no K8s StatefulSet but
+// its output binding defines the NATS subject the shared OTLP receiver publishes to.
+func ConfigFromOTLPPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
+	otlpID := OTLPSourceNodeID()
+	sinkID := SinkNodeID()
+
+	config := Config{
+		PipelineID: spec.ID,
+		Nodes: []NodeConfig{
+			{
+				ID:       otlpID,
+				Type:     NodeTypeOTLPSource,
+				Replicas: constants.DefaultMinReplicas,
+			},
+		},
+	}
+
+	upstreamID := otlpID
+
+	if transformsAreEnabled(spec) {
+		dedupID := DedupNodeID(spec, 0)
+		config.Nodes = append(config.Nodes, NodeConfig{
+			ID:       dedupID,
+			Type:     NodeTypeDedup,
+			Replicas: getDedupReplicas(spec),
+		})
+		config.Edges = append(config.Edges, EdgeConfig{
+			ID:              edgeID(otlpID, dedupID),
+			SourceID:        otlpID,
+			TargetID:        dedupID,
+			TargetInputType: InputTypeIn,
+		})
+		upstreamID = dedupID
+	}
+
+	config.Nodes = append(config.Nodes, NodeConfig{
+		ID:       sinkID,
+		Type:     NodeTypeSink,
+		Replicas: getSinkReplicas(spec),
+	})
+	config.Edges = append(config.Edges, EdgeConfig{
+		ID:              edgeID(upstreamID, sinkID),
+		SourceID:        upstreamID,
+		TargetID:        sinkID,
+		TargetInputType: InputTypeIn,
+	})
+
+	return config, nil
 }
 
 // ConfigFromJoinlessPipelineSpec builds a graph config for a single-source pipeline:
@@ -101,12 +162,12 @@ func ConfigFromJoinlessPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, erro
 func ConfigFromJoinPipelineSpec(spec etlv1alpha1.PipelineSpec) (Config, error) {
 	config := Config{
 		PipelineID: spec.ID,
-		Nodes:      make([]NodeConfig, 0, len(spec.Ingestor.Streams)),
-		Edges:      make([]EdgeConfig, 0, len(spec.Ingestor.Streams)),
+		Nodes:      make([]NodeConfig, 0, len(spec.Source.Streams)),
+		Edges:      make([]EdgeConfig, 0, len(spec.Source.Streams)),
 	}
 
-	upstreamNodeIDs := make([]string, 0, len(spec.Ingestor.Streams))
-	for i, stream := range spec.Ingestor.Streams {
+	upstreamNodeIDs := make([]string, 0, len(spec.Source.Streams))
+	for i, stream := range spec.Source.Streams {
 		ingestorID := IngestorNodeID(spec, i)
 		config.Nodes = append(config.Nodes, NodeConfig{
 			ID:       ingestorID,
@@ -265,7 +326,7 @@ func transformsAreEnabled(spec etlv1alpha1.PipelineSpec) bool {
 		return true
 	}
 
-	for _, stream := range spec.Ingestor.Streams {
+	for _, stream := range spec.Source.Streams {
 		if stream.Deduplication != nil && stream.Deduplication.Enabled {
 			return true
 		}

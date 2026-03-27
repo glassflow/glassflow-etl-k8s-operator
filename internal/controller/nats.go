@@ -110,7 +110,7 @@ func (r *PipelineReconciler) getTotalPendingCount(ctx context.Context, p etlv1al
 	}
 
 	// Dedup per stream (if enabled)
-	for i, stream := range p.Spec.Ingestor.Streams {
+	for i, stream := range p.Spec.Source.Streams {
 		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 			continue
 		}
@@ -175,7 +175,7 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
 func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
-	stream := p.Spec.Ingestor.Streams[streamIndex]
+	stream := p.Spec.Source.Streams[streamIndex]
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 		return nil
 	}

@@ -463,7 +463,7 @@ func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logg
 
 	namespace := r.getTargetNamespace(p)
 
-	for i, stream := range p.Spec.Ingestor.Streams {
+	for i, stream := range p.Spec.Source.Streams {
 		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 			continue
 		}

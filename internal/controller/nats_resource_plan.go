@@ -26,10 +26,10 @@ type natsNodePlan struct {
 }
 
 func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (natsResourcePlan, error) {
-	if len(p.Spec.Ingestor.Streams) == 0 {
+	if len(p.Spec.Source.Streams) == 0 {
 		return natsResourcePlan{}, fmt.Errorf("pipeline spec must contain at least one source stream")
 	}
-	if p.Spec.Join.Enabled && len(p.Spec.Ingestor.Streams) < 2 {
+	if p.Spec.Join.Enabled && len(p.Spec.Source.Streams) < 2 {
 		return natsResourcePlan{}, fmt.Errorf("join pipelines must contain at least two source streams")
 	}
 
@@ -69,7 +69,7 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 		switch node.Type {
 		case pipelinegraph.NodeTypeJoin:
 			nodePlan, err = buildJoinNodePlan(graph, node, p.Spec.Join, maxAge, maxBytes)
-		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeDedup:
+		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeOTLPSource, pipelinegraph.NodeTypeDedup:
 			nodePlan, err = buildNodePlan(graph, node, maxAge, maxBytes)
 		// sink doesn't have output
 		default:

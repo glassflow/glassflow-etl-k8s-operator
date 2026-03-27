@@ -20,7 +20,7 @@ func TestBuildNATSResourcePlanJoinless(t *testing.T) {
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-1",
-			Ingestor: etlv1alpha1.Sources{
+			Source: etlv1alpha1.Sources{
 				Type: "kafka",
 				Streams: []etlv1alpha1.SourceStream{
 					{TopicName: "orders.events"},
@@ -86,7 +86,7 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-join",
-			Ingestor: etlv1alpha1.Sources{
+			Source: etlv1alpha1.Sources{
 				Type: "kafka",
 				Streams: []etlv1alpha1.SourceStream{
 					{TopicName: "users"},
@@ -179,7 +179,7 @@ func TestBuildNATSResourcePlanJoinWithLeftDedupKVStores(t *testing.T) {
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-join-left-dedup",
-			Ingestor: etlv1alpha1.Sources{
+			Source: etlv1alpha1.Sources{
 				Type: "kafka",
 				Streams: []etlv1alpha1.SourceStream{
 					{
