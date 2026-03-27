@@ -95,15 +95,15 @@ func (r *PipelineReconciler) clearOperationAnnotationAndStatus(
 
 func (r *PipelineReconciler) recordOperationSuccess(
 	ctx context.Context,
-	metricsOperation string,
-	usageStatsOperation string,
+	operation string,
 	pipelineID string,
+	message string,
 ) {
 	r.recordMetricsIfEnabled(func(m *observability.Meter) {
-		m.RecordReconcileOperation(ctx, metricsOperation, "success", pipelineID)
+		m.RecordReconcileOperation(ctx, operation, "success", pipelineID)
 	})
-	r.sendReconcileSuccessEvent(ctx, usageStatsOperation, pipelineID)
-	r.sendOperationSuccessNotification(ctx, usageStatsOperation, pipelineID)
+	r.sendReconcileSuccessEvent(ctx, operation, pipelineID)
+	r.sendOperationSuccessNotification(ctx, operation, pipelineID, message)
 }
 
 func defaultOperationRequeueResult() ctrl.Result {

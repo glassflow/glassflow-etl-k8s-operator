@@ -72,7 +72,7 @@ func TestBuildOperationSuccessNotification(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOperationSuccessNotification(tt.operation, pipelineID, metadata)
+			got := buildOperationSuccessNotification(tt.operation, pipelineID, "", metadata)
 			if got == nil {
 				t.Fatalf("notification is nil")
 			}
@@ -93,7 +93,7 @@ func TestBuildOperationSuccessNotification(t *testing.T) {
 }
 
 func TestBuildOperationSuccessNotificationUnknownOperation(t *testing.T) {
-	got := buildOperationSuccessNotification("unknown", "pipeline-123", nil)
+	got := buildOperationSuccessNotification("unknown", "pipeline-123", "", nil)
 	if got != nil {
 		t.Fatalf("expected nil notification for unknown operation")
 	}

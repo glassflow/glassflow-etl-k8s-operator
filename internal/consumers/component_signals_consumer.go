@@ -159,6 +159,10 @@ func (c *ComponentSignalsConsumer) stopPipeline(ctx context.Context, message mod
 
 	// Add stop annotation
 	annotations[constants.PipelineStopAnnotation] = "true"
+	// Persist the reason from the component signal so the controller can include it in the stop notification.
+	if message.Text != "" {
+		annotations[constants.PipelineStopReasonAnnotation] = message.Text
+	}
 	pipeline.SetAnnotations(annotations)
 
 	// Update the resource with the stop annotation

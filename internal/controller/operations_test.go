@@ -284,7 +284,7 @@ func TestRecordOperationSuccessNoopWhenObserversDisabled(t *testing.T) {
 	t.Parallel()
 
 	r := &PipelineReconciler{}
-	r.recordOperationSuccess(context.Background(), "create", "create", "pipeline-id")
+	r.recordOperationSuccess(context.Background(), "create", "pipeline-id", "")
 }
 
 func newOperationTestReconcilerWithPipeline(t *testing.T, annotations map[string]string) (*PipelineReconciler, etlv1alpha1.Pipeline) {
