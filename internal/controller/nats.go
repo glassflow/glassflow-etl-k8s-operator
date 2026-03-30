@@ -109,14 +109,11 @@ func (r *PipelineReconciler) getTotalPendingCount(ctx context.Context, p etlv1al
 		total += rightN
 	}
 
-	// Dedup per stream (if enabled)
-	for i, stream := range p.Spec.Ingestor.Streams {
-		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
-			continue
-		}
+	// Dedup (if enabled)
+	for _, i := range dedupStreamIndices(p) {
 		dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, i))
 		if err != nil {
-			return 0, fmt.Errorf("resolve dedup input for stream %d: %w", i, err)
+			return 0, fmt.Errorf("resolve dedup input for index %d: %w", i, err)
 		}
 		n, err := r.countInputBindingPending(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
 		if err != nil {
@@ -174,23 +171,18 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 }
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
+// Only called for indices returned by dedupStreamIndices, so dedup is guaranteed enabled.
 func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
-	stream := p.Spec.Ingestor.Streams[streamIndex]
-	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
-		return nil
-	}
-
-	baseConsumerName := getNATSDedupConsumerName(p.Spec.ID)
 	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
 		return fmt.Errorf("build pipeline graph for dedup checks: %w", err)
 	}
 	dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, streamIndex))
 	if err != nil {
-		return fmt.Errorf("resolve dedup input for stream %d: %w", streamIndex, err)
+		return fmt.Errorf("resolve dedup input for index %d: %w", streamIndex, err)
 	}
 
-	return r.checkInputBindingPendingMessages(ctx, dedupInput, baseConsumerName)
+	return r.checkInputBindingPendingMessages(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
 }
 
 // createNATSStreams creates all NATS streams and KV stores for a pipeline.
