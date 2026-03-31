@@ -290,8 +290,8 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		withEnv(append(append(append([]v1.EnvVar{
 			{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
 			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.Streams[0].Name},
-			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.Streams[0].Name},
+			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.StreamPrefix},
+			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.StreamPrefix},
 			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Join},
 

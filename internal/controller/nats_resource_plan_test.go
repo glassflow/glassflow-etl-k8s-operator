@@ -172,6 +172,55 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 	}
 }
 
+func TestBuildNATSResourcePlanJoinWithMultipleReplicas(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	pipeline := etlv1alpha1.Pipeline{
+		Spec: etlv1alpha1.PipelineSpec{
+			ID: "pipe-join-scaled",
+			Source: etlv1alpha1.Sources{
+				Type: "kafka",
+				Streams: []etlv1alpha1.SourceStream{
+					{TopicName: "left"},
+					{TopicName: "right"},
+				},
+			},
+			Join: etlv1alpha1.Join{
+				Enabled:        true,
+				LeftBufferTTL:  time.Minute,
+				RightBufferTTL: 2 * time.Minute,
+			},
+			Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+			Resources: &etlv1alpha1.PipelineResources{
+				Ingestor: &etlv1alpha1.IngestorResources{
+					Left:  &etlv1alpha1.ComponentResources{Replicas: ptrInt32(2)},
+					Right: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(2)},
+				},
+				Join: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(2)},
+				Sink: &etlv1alpha1.ComponentResources{Replicas: ptrInt32(2)},
+			},
+		},
+	}
+
+	plan, err := reconciler.buildNATSResourcePlan(pipeline)
+	if err != nil {
+		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
+	}
+
+	hash := generatePipelineHash(pipeline.Spec.ID)
+	// Each join replica gets its own KV store for left and right inputs.
+	wantJoinKVStores := []natsJoinKVStorePlan{
+		{Name: fmt.Sprintf("gfm-%s-ingestor_left-out_0", hash), TTL: time.Minute},
+		{Name: fmt.Sprintf("gfm-%s-ingestor_left-out_1", hash), TTL: time.Minute},
+		{Name: fmt.Sprintf("gfm-%s-ingestor_right-out_0", hash), TTL: 2 * time.Minute},
+		{Name: fmt.Sprintf("gfm-%s-ingestor_right-out_1", hash), TTL: 2 * time.Minute},
+	}
+	if !reflect.DeepEqual(plan.JoinKVStores, wantJoinKVStores) {
+		t.Fatalf("plan.JoinKVStores = %#v, want %#v", plan.JoinKVStores, wantJoinKVStores)
+	}
+}
+
 func TestBuildNATSResourcePlanOTLPSinkOnly(t *testing.T) {
 	t.Parallel()
 

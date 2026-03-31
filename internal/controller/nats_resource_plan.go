@@ -122,28 +122,24 @@ func buildJoinNodePlan(
 		return natsNodePlan{}, fmt.Errorf("resolve join inputs for node %s: %w", node.ID, err)
 	}
 
-	leftStore, err := inputBindingStoreName(inputs.Left)
-	if err != nil {
-		return natsNodePlan{}, fmt.Errorf("resolve left join input store name: %w", err)
+	if len(inputs.Left.Streams) == 0 {
+		return natsNodePlan{}, fmt.Errorf("left join input has no streams")
+	}
+	if len(inputs.Right.Streams) == 0 {
+		return natsNodePlan{}, fmt.Errorf("right join input has no streams")
 	}
 
-	rightStore, err := inputBindingStoreName(inputs.Right)
-	if err != nil {
-		return natsNodePlan{}, fmt.Errorf("resolve right join input store name: %w", err)
+	kvStores := make([]natsJoinKVStorePlan, 0, len(inputs.Left.Streams)+len(inputs.Right.Streams))
+	for _, s := range inputs.Left.Streams {
+		kvStores = append(kvStores, natsJoinKVStorePlan{Name: s.Name, TTL: join.LeftBufferTTL})
+	}
+	for _, s := range inputs.Right.Streams {
+		kvStores = append(kvStores, natsJoinKVStorePlan{Name: s.Name, TTL: join.RightBufferTTL})
 	}
 
 	return natsNodePlan{
-		Streams: producerPlan.Streams,
-		JoinKVStores: []natsJoinKVStorePlan{
-			{
-				Name: leftStore,
-				TTL:  join.LeftBufferTTL,
-			},
-			{
-				Name: rightStore,
-				TTL:  join.RightBufferTTL,
-			},
-		},
+		Streams:      producerPlan.Streams,
+		JoinKVStores: kvStores,
 	}, nil
 }
 
@@ -162,12 +158,4 @@ func buildOutputStreams(
 		})
 	}
 	return streams
-}
-
-func inputBindingStoreName(binding pipelinegraph.InputBinding) (string, error) {
-	if len(binding.Streams) == 0 {
-		return "", fmt.Errorf("input binding has no streams")
-	}
-
-	return binding.Streams[0].Name, nil
 }
