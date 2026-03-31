@@ -544,23 +544,23 @@ func (r *PipelineReconciler) createSingleDedup(
 		return fmt.Errorf("create dedup headless service %s: %w", resourceRef, err)
 	}
 
-	dedupEnv := []v1.EnvVar{
-		{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
-		{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-		{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
-		{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Dedup},
-
-		{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
-		{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
-		{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
-		{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
-		{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Dedup},
-		{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-		{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-		{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+	dedupEnv := make([]v1.EnvVar, 0, 12+len(extraEnv)+2)
+	dedupEnv = append(dedupEnv,
+		v1.EnvVar{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
+		v1.EnvVar{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+		v1.EnvVar{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
+		v1.EnvVar{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Dedup},
+		v1.EnvVar{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
+		v1.EnvVar{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
+		v1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
+		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
+		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Dedup},
+		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
+		v1.EnvVar{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
 			FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"},
 		}},
-	}
+	)
 	dedupEnv = append(dedupEnv, extraEnv...)
 	dedupEnv = append(dedupEnv,
 		v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: dedupInput.StreamPrefix},

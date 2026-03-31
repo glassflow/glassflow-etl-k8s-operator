@@ -138,11 +138,11 @@ func TestGetComponentEncryptionHelpersUseConfig(t *testing.T) {
 	if vol.Name != "encryption-key" {
 		t.Fatalf("unexpected encryption volume name: %s", vol.Name)
 	}
-	if vol.VolumeSource.Secret == nil {
+	if vol.Secret == nil {
 		t.Fatalf("expected secret volume source")
 	}
-	if vol.VolumeSource.Secret.SecretName != constants.ComponentEncryptionSecretName {
-		t.Fatalf("unexpected encryption secret name: %s", vol.VolumeSource.Secret.SecretName)
+	if vol.Secret.SecretName != constants.ComponentEncryptionSecretName {
+		t.Fatalf("unexpected encryption secret name: %s", vol.Secret.SecretName)
 	}
 
 	mount, ok := reconcilerEnabled.getComponentEncryptionVolumeMount()
