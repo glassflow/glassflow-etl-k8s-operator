@@ -224,6 +224,138 @@ func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamNam
 	return hasPending, pending, unacknowledged, nil
 }
 
+// UnbindStreamSubjects updates a stream to have no real subject bindings.
+// Existing messages remain in the stream, but no new messages can be published to it.
+// This is used to release subject ownership before reassigning to another stream.
+// NATS doesn't allow empty subjects, so we use an unreachable sentinel.
+func (n *NATSClient) UnbindStreamSubjects(ctx context.Context, streamName string) error {
+	stream, err := n.js.Stream(ctx, streamName)
+	if err != nil {
+		return fmt.Errorf("get stream %s: %w", streamName, err)
+	}
+	cfg := stream.CachedInfo().Config
+	cfg.Subjects = []string{streamName + ".__unbound__"}
+	_, err = n.js.CreateOrUpdateStream(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("unbind subjects from stream %s: %w", streamName, err)
+	}
+	return nil
+}
+
+// AddStreamSource configures destStream to pull messages from sourceStream.
+// NATS server-side copies all messages from source to destination.
+// With WorkQueue retention, messages are removed from source as they're consumed.
+// Idempotent — adding the same source twice is a no-op.
+func (n *NATSClient) AddStreamSource(ctx context.Context, destStreamName, sourceStreamName string) error {
+	stream, err := n.js.Stream(ctx, destStreamName)
+	if err != nil {
+		return fmt.Errorf("get stream %s: %w", destStreamName, err)
+	}
+	cfg := stream.CachedInfo().Config
+	for _, src := range cfg.Sources {
+		if src.Name == sourceStreamName {
+			return nil // already added
+		}
+	}
+	cfg.Sources = append(cfg.Sources, &jetstream.StreamSource{
+		Name: sourceStreamName,
+	})
+	_, err = n.js.CreateOrUpdateStream(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("add source %s to stream %s: %w", sourceStreamName, destStreamName, err)
+	}
+	return nil
+}
+
+// IsStreamSourceComplete checks if all messages from sourceStream have been
+// transferred to destStream (lag == 0).
+func (n *NATSClient) IsStreamSourceComplete(ctx context.Context, destStreamName, sourceStreamName string) (bool, error) {
+	stream, err := n.js.Stream(ctx, destStreamName)
+	if err != nil {
+		return false, fmt.Errorf("get stream %s: %w", destStreamName, err)
+	}
+	info, err := stream.Info(ctx)
+	if err != nil {
+		return false, fmt.Errorf("get stream info %s: %w", destStreamName, err)
+	}
+	for _, src := range info.Sources {
+		if src.Name == sourceStreamName {
+			return src.Lag == 0, nil
+		}
+	}
+	return true, nil // source not found = already done
+}
+
+// RemoveStreamSource removes a source from destStream's configuration.
+func (n *NATSClient) RemoveStreamSource(ctx context.Context, destStreamName, sourceStreamName string) error {
+	stream, err := n.js.Stream(ctx, destStreamName)
+	if err != nil {
+		return fmt.Errorf("get stream %s: %w", destStreamName, err)
+	}
+	cfg := stream.CachedInfo().Config
+	filtered := make([]*jetstream.StreamSource, 0, len(cfg.Sources))
+	for _, src := range cfg.Sources {
+		if src.Name != sourceStreamName {
+			filtered = append(filtered, src)
+		}
+	}
+	cfg.Sources = filtered
+	_, err = n.js.CreateOrUpdateStream(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("remove source %s from stream %s: %w", sourceStreamName, destStreamName, err)
+	}
+	return nil
+}
+
+// ListPipelineStreams returns all NATS stream names matching the pipeline's hash prefix.
+func (n *NATSClient) ListPipelineStreams(ctx context.Context, pipelineHash string) ([]string, error) {
+	prefix := fmt.Sprintf("gfm-%s-", pipelineHash)
+	namesCh := n.js.StreamNames(ctx)
+	var names []string
+	for name := range namesCh.Name() {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	if err := namesCh.Err(); err != nil {
+		return nil, fmt.Errorf("list streams with prefix %s: %w", prefix, err)
+	}
+	return names, nil
+}
+
+// GetStreamMessageCount returns the number of messages in a stream (0 if not found).
+func (n *NATSClient) GetStreamMessageCount(ctx context.Context, streamName string) (uint64, error) {
+	stream, err := n.js.Stream(ctx, streamName)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("get stream %s: %w", streamName, err)
+	}
+	info, err := stream.Info(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("get stream info %s: %w", streamName, err)
+	}
+	return info.State.Msgs, nil
+}
+
+// DeleteConsumer deletes a consumer from a stream. Best-effort — returns nil if
+// the consumer or stream doesn't exist.
+func (n *NATSClient) DeleteConsumer(ctx context.Context, streamName, consumerName string) error {
+	stream, err := n.js.Stream(ctx, streamName)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
+			return nil
+		}
+		return fmt.Errorf("get stream %s: %w", streamName, err)
+	}
+	err = stream.DeleteConsumer(ctx, consumerName)
+	if err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		return fmt.Errorf("delete consumer %s from stream %s: %w", consumerName, streamName, err)
+	}
+	return nil
+}
+
 func (n *NATSClient) Close() error {
 	n.nc.Close()
 	return nil

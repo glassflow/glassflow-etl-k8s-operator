@@ -185,6 +185,117 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 	return r.checkInputBindingPendingMessages(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
 }
 
+// unbindStaleStreamSubjects releases subject ownership from all stale streams
+// so that active streams can claim those subjects via CreateOrUpdate.
+// This must be called BEFORE createNATSStreams to avoid NATS subject overlap errors.
+func (r *PipelineReconciler) unbindStaleStreamSubjects(
+	ctx context.Context,
+	log logr.Logger,
+	staleNames []string,
+) error {
+	for _, name := range staleNames {
+		log.Info("unbinding subjects from stale stream", "stream", name)
+		if err := r.NATSClient.UnbindStreamSubjects(ctx, name); err != nil {
+			return fmt.Errorf("unbind subjects from %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// reassignStaleStreams moves messages from stale streams into active streams using
+// NATS Stream Sources, then deletes the stale streams once transfer is complete.
+//
+// The sequence for each stale stream is:
+//  1. Delete old durable consumers (prevent conflict with Stream Source in WorkQueue mode)
+//  2. Add stale stream as Source on an active stream (server-side message move)
+//  3. Wait for transfer to complete (Lag == 0)
+//  4. Remove Source config and delete stale stream
+//
+// Returns (requeue bool, error). Requeue=true means transfer is still in progress.
+func (r *PipelineReconciler) reassignStaleStreams(
+	ctx context.Context,
+	log logr.Logger,
+	p etlv1alpha1.Pipeline,
+	staleNames []string,
+	plan natsResourcePlan,
+) (bool, error) {
+	if len(staleNames) == 0 || len(plan.Streams) == 0 {
+		return false, nil
+	}
+
+	for i, staleName := range staleNames {
+		// Round-robin assign stale streams to remaining active streams
+		destStream := plan.Streams[i%len(plan.Streams)]
+
+		// Check if stale stream has any messages at all
+		msgCount, err := r.NATSClient.GetStreamMessageCount(ctx, staleName)
+		if err != nil {
+			return false, fmt.Errorf("check stale stream %s: %w", staleName, err)
+		}
+		if msgCount == 0 {
+			log.Info("stale stream is empty, deleting", "stream", staleName)
+			if err := r.deleteNATSStream(ctx, log, staleName); err != nil {
+				return false, err
+			}
+			continue
+		}
+
+		// Delete old durable consumer to prevent conflict with Stream Source.
+		// With WorkQueue retention, both Source and consumer would compete for messages.
+		oldConsumerName := getNATSSinkConsumerName(p.Spec.ID)
+		_ = r.NATSClient.DeleteConsumer(ctx, staleName, oldConsumerName)
+
+		// Add stale stream as source on active stream for server-side message transfer
+		log.Info("adding stale stream as source for message transfer",
+			"stale_stream", staleName,
+			"dest_stream", destStream.Name,
+			"pending_messages", msgCount)
+		if err := r.NATSClient.AddStreamSource(ctx, destStream.Name, staleName); err != nil {
+			return false, fmt.Errorf("add source %s to %s: %w", staleName, destStream.Name, err)
+		}
+
+		// Check transfer progress
+		complete, err := r.NATSClient.IsStreamSourceComplete(ctx, destStream.Name, staleName)
+		if err != nil {
+			return false, fmt.Errorf("check source progress %s→%s: %w", staleName, destStream.Name, err)
+		}
+		if !complete {
+			log.Info("stream source transfer in progress, requeuing",
+				"stale_stream", staleName,
+				"dest_stream", destStream.Name)
+			return true, nil
+		}
+
+		// Transfer complete — clean up
+		log.Info("stream source transfer complete, cleaning up",
+			"stale_stream", staleName,
+			"dest_stream", destStream.Name)
+		if err := r.NATSClient.RemoveStreamSource(ctx, destStream.Name, staleName); err != nil {
+			return false, fmt.Errorf("remove source %s from %s: %w", staleName, destStream.Name, err)
+		}
+		if err := r.deleteNATSStream(ctx, log, staleName); err != nil {
+			return false, err
+		}
+	}
+
+	return false, nil
+}
+
+// discoverStaleStreams finds NATS streams that belong to this pipeline but are not
+// in the current resource plan (i.e., orphaned after a downscale).
+func (r *PipelineReconciler) discoverStaleStreams(ctx context.Context, p etlv1alpha1.Pipeline) ([]string, error) {
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return nil, fmt.Errorf("build NATS plan for stale detection: %w", err)
+	}
+	hash := generatePipelineHash(p.Spec.ID)
+	existing, err := r.NATSClient.ListPipelineStreams(ctx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("list pipeline streams: %w", err)
+	}
+	return streamDiff(existing, plan), nil
+}
+
 // createNATSStreams creates all NATS streams and KV stores for a pipeline.
 func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	plan, err := r.buildNATSResourcePlan(p)

@@ -630,9 +630,15 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	}
 
 	// Remove NATS streams/KV stores for this pipeline before marking it Stopped, while preserving DLQ.
-	err = r.cleanupNATSPipelineResourcesKeepDLQ(ctx, log, p)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for stop: %w", err)
+	// For OTLP pipelines, skip stream cleanup — the shared OTLP receiver keeps writing to NATS
+	// even when the pipeline is stopped. Messages accumulate in streams until resume.
+	if !p.Spec.IsOTLPSource() {
+		err = r.cleanupNATSPipelineResourcesKeepDLQ(ctx, log, p)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for stop: %w", err)
+		}
+	} else {
+		log.Info("OTLP pipeline: preserving NATS streams during stop (receiver keeps writing)", "pipeline_id", pipelineID)
 	}
 
 	// Update status to Stopped
@@ -708,10 +714,48 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
 	}
 
+	// Discover stale streams BEFORE updating NATS plan.
+	// These are streams from the old topology that won't exist in the new plan (e.g., after downscale).
+	staleNames, staleErr := r.discoverStaleStreams(ctx, p)
+	if staleErr != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, staleErr)
+		return ctrl.Result{}, fmt.Errorf("discover stale streams: %w", staleErr)
+	}
+
+	// Unbind subjects from stale streams so createNATSStreams can claim them
+	// without NATS subject overlap errors. Brief µs gap where unbound subjects
+	// have no stream — OTLP receiver's batch writer retries on next flush.
+	if len(staleNames) > 0 {
+		if unbindErr := r.unbindStaleStreamSubjects(ctx, log, staleNames); unbindErr != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, unbindErr)
+			return ctrl.Result{}, fmt.Errorf("unbind stale stream subjects: %w", unbindErr)
+		}
+	}
+
+	// Create/update NATS streams with new plan.
+	// Now safe — stale subjects are unbound, active streams can claim them via round-robin.
 	err = r.createNATSStreams(ctx, p)
 	if err != nil {
 		r.recordReconcileError(ctx, "edit", pipelineID, err)
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+	}
+
+	// Reassign existing messages from stale streams via NATS Stream Sources.
+	// Server-side transfer: messages are moved (not copied) with WorkQueue retention.
+	if len(staleNames) > 0 {
+		plan, planErr := r.buildNATSResourcePlan(p)
+		if planErr != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, planErr)
+			return ctrl.Result{}, fmt.Errorf("build plan for reassignment: %w", planErr)
+		}
+		requeue, reassignErr := r.reassignStaleStreams(ctx, log, p, staleNames, plan)
+		if reassignErr != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, reassignErr)
+			return ctrl.Result{}, fmt.Errorf("reassign stale streams: %w", reassignErr)
+		}
+		if requeue {
+			return ctrl.Result{Requeue: true, RequeueAfter: 2 * time.Second}, nil
+		}
 	}
 
 	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {

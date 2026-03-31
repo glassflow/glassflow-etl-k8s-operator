@@ -164,6 +164,34 @@ func buildOutputStreams(
 	return streams
 }
 
+// streamDiff computes which NATS streams need to be removed after a pipeline edit.
+// It compares what currently exists in NATS ("have") against what the new plan requires
+// ("want"), and returns the names that are in "have" but not in "want".
+//
+// "want" includes: all planned streams + DLQ stream + KV store backing streams (KV_ prefix).
+// "have" is the list of stream names discovered in NATS for this pipeline.
+func streamDiff(have []string, want natsResourcePlan) []string {
+	wantSet := make(map[string]bool, len(want.Streams)+1+len(want.JoinKVStores))
+	// DLQ is always kept — never stale
+	wantSet[want.DLQStream.Name] = true
+	// Pipeline data streams (one per component output per replica)
+	for _, s := range want.Streams {
+		wantSet[s.Name] = true
+	}
+	// NATS backs KV stores as streams with "KV_" prefix
+	for _, kv := range want.JoinKVStores {
+		wantSet["KV_"+kv.Name] = true
+	}
+
+	var toRemove []string
+	for _, name := range have {
+		if !wantSet[name] {
+			toRemove = append(toRemove, name)
+		}
+	}
+	return toRemove
+}
+
 func inputBindingStoreName(binding pipelinegraph.InputBinding) (string, error) {
 	if len(binding.Streams) == 0 {
 		return "", fmt.Errorf("input binding has no streams")
