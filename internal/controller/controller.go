@@ -51,10 +51,10 @@ import (
 // pipelineOperationPredicate filters events to trigger reconcile on spec changes or annotation changes
 // but not on status-only changes, does not filter requeue
 var pipelineOperationPredicate = predicate.Funcs{
-	CreateFunc: func(e event.CreateEvent) bool {
+	CreateFunc: func(_ event.CreateEvent) bool {
 		return true // Always reconcile on create
 	},
-	DeleteFunc: func(e event.DeleteEvent) bool {
+	DeleteFunc: func(_ event.DeleteEvent) bool {
 		return true // Always reconcile on delete
 	},
 	UpdateFunc: func(e event.UpdateEvent) bool {
@@ -71,7 +71,7 @@ var pipelineOperationPredicate = predicate.Funcs{
 		newAnnotations := newObj.GetAnnotations()
 		return !reflect.DeepEqual(oldAnnotations, newAnnotations)
 	},
-	GenericFunc: func(e event.GenericEvent) bool {
+	GenericFunc: func(_ event.GenericEvent) bool {
 		return true // Always reconcile on generic events
 	},
 }
@@ -127,10 +127,9 @@ func (r *PipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if apierrors.IsNotFound(err) {
 			log.Info("pipeline not found", "request", req.String())
 			return ctrl.Result{}, client.IgnoreNotFound(err)
-		} else {
-			log.Error(err, "unable to fetch pipeline")
-			return ctrl.Result{}, fmt.Errorf("get pipeline: %w", err)
 		}
+		log.Error(err, "unable to fetch pipeline")
+		return ctrl.Result{}, fmt.Errorf("get pipeline: %w", err)
 	}
 
 	operation := getPipelineOperationFromAnnotations(p.GetAnnotations())

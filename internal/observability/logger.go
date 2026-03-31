@@ -96,7 +96,7 @@ type zapLogrSink struct {
 	logger *zap.Logger
 }
 
-func (s *zapLogrSink) Init(info logr.RuntimeInfo) {
+func (s *zapLogrSink) Init(_ logr.RuntimeInfo) {
 	// No initialization needed
 }
 
