@@ -161,6 +161,30 @@ func ptrBool(v bool) *bool {
 	return &v
 }
 
+// getBaseComponentEnvVars returns env vars common to all pipeline components:
+// NATS server address, pipeline config path, log level, OTel fields, and pod identity.
+// The serviceName and serviceVersion are component-specific (e.g. constants.IngestorComponent).
+func (r *PipelineReconciler) getBaseComponentEnvVars(
+	p etlv1alpha1.Pipeline, logLevel, serviceName, serviceVersion string,
+) []v1.EnvVar {
+	envVars := []v1.EnvVar{
+		{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
+		{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
+		{Name: "GLASSFLOW_LOG_LEVEL", Value: logLevel},
+		{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
+		{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
+		{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
+		{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: serviceName},
+		{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: serviceVersion},
+		{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
+		{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
+		{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
+			FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"},
+		}},
+	}
+	return append(envVars, r.getStatefulSetPodIdentityEnvVars()...)
+}
+
 // getUsageStatsEnvVars returns environment variables for usage stats configuration
 // Values are passed directly (not from secrets)
 func (r *PipelineReconciler) getUsageStatsEnvVars() []v1.EnvVar {

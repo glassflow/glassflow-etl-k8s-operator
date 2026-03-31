@@ -159,6 +159,18 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			return fmt.Errorf("create ingestor headless service %s: %w", resourceRef, err)
 		}
 
+		ingestorEnv := r.getBaseComponentEnvVars(
+			p, r.Config.Observability.LogLevels.Ingestor,
+			constants.IngestorComponent, r.Config.Observability.ImageTags.Ingestor,
+		)
+		ingestorEnv = append(ingestorEnv,
+			v1.EnvVar{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
+			v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: outputBinding.SubjectPrefix},
+		)
+		ingestorEnv = append(ingestorEnv, subjectCountEnvVars...)
+		ingestorEnv = append(ingestorEnv, r.getComponentDatabaseEnvVars()...)
+		ingestorEnv = append(ingestorEnv, r.getUsageStatsEnvVars()...)
+
 		containerBuilder := newComponentContainerBuilder().
 			withName(resourceRef).
 			withImage(r.Config.Images.Ingestor).
@@ -168,26 +180,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				ReadOnly:  true,
 				MountPath: "/config",
 			}).
-			withEnv(append(append(append(append([]v1.EnvVar{
-				{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
-				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
-				{Name: "NATS_SUBJECT_PREFIX", Value: outputBinding.SubjectPrefix},
-				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Ingestor},
-
-				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
-				{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
-				{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.IngestorComponent},
-				{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Ingestor},
-				{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-				{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-				{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
-					FieldRef: &v1.ObjectFieldSelector{
-						FieldPath: "metadata.name",
-					},
-				}},
-			}, subjectCountEnvVars...), r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+			withEnv(ingestorEnv).
 			withResources(cpuReq, cpuLim, memReq, memLim)
 		if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 			containerBuilder = containerBuilder.withVolumeMount(mount)
@@ -278,6 +271,18 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		return fmt.Errorf("create join headless service: %w", err)
 	}
 
+	joinEnv := r.getBaseComponentEnvVars(
+		p, r.Config.Observability.LogLevels.Join,
+		constants.JoinComponent, r.Config.Observability.ImageTags.Join,
+	)
+	joinEnv = append(joinEnv,
+		v1.EnvVar{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.Streams[0].Name},
+		v1.EnvVar{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.Streams[0].Name},
+		v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
+	)
+	joinEnv = append(joinEnv, r.getComponentDatabaseEnvVars()...)
+	joinEnv = append(joinEnv, r.getUsageStatsEnvVars()...)
+
 	joinContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.Config.Images.Join).
@@ -287,27 +292,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv(append(append(append([]v1.EnvVar{
-			{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
-			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.Streams[0].Name},
-			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.Streams[0].Name},
-			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
-			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Join},
-
-			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
-			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
-			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.JoinComponent},
-			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Join},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
-				FieldRef: &v1.ObjectFieldSelector{
-					FieldPath: "metadata.name",
-				},
-			}},
-		}, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		withEnv(joinEnv).
 		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		joinContainerBuilder = joinContainerBuilder.withVolumeMount(mount)
@@ -382,6 +367,16 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		return fmt.Errorf("create sink headless service: %w", err)
 	}
 
+	sinkEnv := r.getBaseComponentEnvVars(
+		p, r.Config.Observability.LogLevels.Sink,
+		constants.SinkComponent, r.Config.Observability.ImageTags.Sink,
+	)
+	sinkEnv = append(sinkEnv,
+		v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: sinkInput.StreamPrefix},
+	)
+	sinkEnv = append(sinkEnv, r.getComponentDatabaseEnvVars()...)
+	sinkEnv = append(sinkEnv, r.getUsageStatsEnvVars()...)
+
 	sinkContainerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
 		withImage(r.Config.Images.Sink).
@@ -391,25 +386,7 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 			ReadOnly:  true,
 			MountPath: "/config",
 		}).
-		withEnv(append(append(append([]v1.EnvVar{
-			{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
-			{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-			{Name: "NATS_INPUT_STREAM_PREFIX", Value: sinkInput.StreamPrefix},
-			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Sink},
-
-			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
-			{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
-			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.SinkComponent},
-			{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Sink},
-			{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-			{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-			{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
-				FieldRef: &v1.ObjectFieldSelector{
-					FieldPath: "metadata.name",
-				},
-			}},
-		}, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		withEnv(sinkEnv).
 		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		sinkContainerBuilder = sinkContainerBuilder.withVolumeMount(mount)
@@ -544,28 +521,18 @@ func (r *PipelineReconciler) createSingleDedup(
 		return fmt.Errorf("create dedup headless service %s: %w", resourceRef, err)
 	}
 
-	dedupEnv := make([]v1.EnvVar, 0, 12+len(extraEnv)+2)
-	dedupEnv = append(dedupEnv,
-		v1.EnvVar{Name: "GLASSFLOW_NATS_SERVER", Value: r.Config.NATS.ComponentAddr},
-		v1.EnvVar{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
-		v1.EnvVar{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"},
-		v1.EnvVar{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Dedup},
-		v1.EnvVar{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
-		v1.EnvVar{Name: "GLASSFLOW_OTEL_METRICS_ENABLED", Value: r.Config.Observability.MetricsEnabled},
-		v1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: r.Config.Observability.OTelEndpoint},
-		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_NAME", Value: constants.DedupComponent},
-		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_VERSION", Value: r.Config.Observability.ImageTags.Dedup},
-		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_NAMESPACE", Value: r.getTargetNamespace(p)},
-		v1.EnvVar{Name: "GLASSFLOW_OTEL_PIPELINE_ID", Value: p.Spec.ID},
-		v1.EnvVar{Name: "GLASSFLOW_OTEL_SERVICE_INSTANCE_ID", ValueFrom: &v1.EnvVarSource{
-			FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"},
-		}},
+	dedupEnv := r.getBaseComponentEnvVars(
+		p, r.Config.Observability.LogLevels.Dedup,
+		constants.DedupComponent, r.Config.Observability.ImageTags.Dedup,
 	)
+	dedupEnv = append(dedupEnv, v1.EnvVar{Name: "GLASSFLOW_BADGER_PATH", Value: "/data/badger"})
 	dedupEnv = append(dedupEnv, extraEnv...)
 	dedupEnv = append(dedupEnv,
 		v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: dedupInput.StreamPrefix},
 		v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: dedupOutput.SubjectPrefix},
 	)
+	dedupEnv = append(dedupEnv, r.getComponentDatabaseEnvVars()...)
+	dedupEnv = append(dedupEnv, r.getUsageStatsEnvVars()...)
 
 	containerBuilder := newComponentContainerBuilder().
 		withName(resourceRef).
@@ -573,7 +540,7 @@ func (r *PipelineReconciler) createSingleDedup(
 		withImagePullPolicy(r.Config.PullPolicies.Dedup).
 		withVolumeMount(v1.VolumeMount{Name: "config", ReadOnly: true, MountPath: "/config"}).
 		withVolumeMount(v1.VolumeMount{Name: "data", MountPath: "/data/badger"}).
-		withEnv(append(append(append(dedupEnv, r.getStatefulSetPodIdentityEnvVars()...), r.getComponentDatabaseEnvVars()...), r.getUsageStatsEnvVars()...)).
+		withEnv(dedupEnv).
 		withResources(cpuReq, cpuLim, memReq, memLim)
 	if mount, ok := r.getComponentEncryptionVolumeMount(); ok {
 		containerBuilder = containerBuilder.withVolumeMount(mount)
