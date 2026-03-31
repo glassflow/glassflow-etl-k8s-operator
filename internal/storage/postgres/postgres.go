@@ -38,9 +38,13 @@ func NewPostgres(ctx context.Context, dsn string, logger logr.Logger) (*Postgres
 	}
 
 	// Configure connection pool
-	config.MaxConns = 25
-	config.MinConns = 5
+	config.MaxConns = 5
+	config.MinConns = 1
 	config.MaxConnLifetime = 5 * time.Minute
+
+	config.ConnConfig.RuntimeParams = map[string]string{
+		"application_name": "operator",
+	}
 
 	var pool *pgxpool.Pool
 
