@@ -97,7 +97,7 @@ func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx
 	_, err = tx.Exec(ctx, `
 		INSERT INTO pipeline_history (pipeline_id, type, event)
 		VALUES ($1, $2, $3)
-	`, pipelineID, eventType, eventJSON)
+	`, pipelineID, eventType, string(eventJSON))
 	if err != nil {
 		return fmt.Errorf("insert pipeline history event: %w", err)
 	}
