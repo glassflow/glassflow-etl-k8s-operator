@@ -131,7 +131,10 @@ func TestConfigFromJoinPipelineSpecWithOneDedupDisabled(t *testing.T) {
 			{ID: "sink", Type: NodeTypeSink, Replicas: 2},
 		},
 		Edges: []EdgeConfig{
-			{ID: "ingestor_right_to_dedup_right", SourceID: "ingestor_right", TargetID: "dedup_right", TargetInputType: InputTypeIn},
+			{
+				ID: "ingestor_right_to_dedup_right", SourceID: "ingestor_right",
+				TargetID: "dedup_right", TargetInputType: InputTypeIn,
+			},
 			{ID: "ingestor_left_to_join", SourceID: "ingestor_left", TargetID: "join", TargetInputType: InputTypeLeft},
 			{ID: "dedup_right_to_join", SourceID: "dedup_right", TargetID: "join", TargetInputType: InputTypeRight},
 			{ID: "join_to_sink", SourceID: "join", TargetID: "sink", TargetInputType: InputTypeIn},

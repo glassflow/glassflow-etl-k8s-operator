@@ -31,7 +31,8 @@ const NATSConsumerNamePrefix = "gf-nats"
 // DLQSuffix is the DLQ stream suffix (aligned with glassflow-api).
 const DLQSuffix = "DLQ"
 
-// generatePipelineHash returns the first 8 hex chars of SHA256(pipelineID), aligned with glassflow-api GenerateStreamHash.
+// generatePipelineHash returns the first 8 hex chars of SHA256(pipelineID),
+// aligned with glassflow-api GenerateStreamHash.
 func generatePipelineHash(pipelineID string) string {
 	hash := sha256.Sum256([]byte(pipelineID))
 	return hex.EncodeToString(hash[:])[:8]

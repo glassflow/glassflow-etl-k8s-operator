@@ -673,7 +673,9 @@ func TestResolveOutputRejectsMissingNodes(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	_, err = graph.resolveOutput(EdgeConfig{ID: "broken", SourceID: "missing", TargetID: "sink_0", TargetInputType: InputTypeIn})
+	_, err = graph.resolveOutput(EdgeConfig{
+		ID: "broken", SourceID: "missing", TargetID: "sink_0", TargetInputType: InputTypeIn,
+	})
 	if err == nil {
 		t.Fatal("resolveOutput returned nil error for missing source node")
 	}
@@ -681,7 +683,9 @@ func TestResolveOutputRejectsMissingNodes(t *testing.T) {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
 
-	_, err = graph.resolveOutput(EdgeConfig{ID: "broken", SourceID: "ingestor_0", TargetID: "missing", TargetInputType: InputTypeIn})
+	_, err = graph.resolveOutput(EdgeConfig{
+		ID: "broken", SourceID: "ingestor_0", TargetID: "missing", TargetInputType: InputTypeIn,
+	})
 	if err == nil {
 		t.Fatal("resolveOutput returned nil error for missing target node")
 	}

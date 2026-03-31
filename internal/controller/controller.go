@@ -83,8 +83,8 @@ type PipelineReconciler struct {
 	client.Client
 	Scheme           *runtime.Scheme
 	Meter            *observability.Meter
-	NATSClient       *nats.NATSClient
-	PostgresStorage  *postgresstorage.PostgresStorage
+	NATSClient       *nats.Client
+	PostgresStorage  *postgresstorage.Storage
 	Config           ReconcilerConfig
 	UsageStatsClient *usagestats.Client
 }
@@ -158,7 +158,9 @@ func (r *PipelineReconciler) createPipeline(ctx context.Context, p etlv1alpha1.P
 
 // -------------------------------------------------------------------------------------------------------------------
 
-func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) reconcileCreate(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline creation", "pipeline_id", pipelineID)
@@ -208,7 +210,8 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	secret, err := r.createSecret(ctx, types.NamespacedName{Namespace: ns.GetName(), Name: secretName}, labels, p)
 	if err != nil {
 		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
-			log.Info("pipeline config secret not found, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+			log.Info("pipeline config secret not found, requeuing to wait for API to create it",
+				"pipeline_id", pipelineID, "error", err)
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("create secret for pipeline config %s: %w", p.Spec.ID, err)
@@ -248,7 +251,9 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	return ctrl.Result{}, nil
 }
 
-func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) reconcileTerminate(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline termination", "pipeline_id", pipelineID)
@@ -297,7 +302,9 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	return ctrl.Result{}, nil
 }
 
-func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) reconcileDelete(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline deletion", "pipeline_id", pipelineID)
@@ -371,9 +378,12 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	return ctrl.Result{}, nil
 }
 
-func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) reconcileHelmUninstall(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
-	log.Info("reconciling pipeline helm uninstall - FORCING cleanup regardless of current status", "pipeline_id", pipelineID, "current_status", p.Status)
+	log.Info("reconciling pipeline helm uninstall - FORCING cleanup regardless of current status",
+		"pipeline_id", pipelineID, "current_status", p.Status)
 
 	// FORCE cleanup regardless of current status - this is helm uninstall!
 	log.Info("HELM UNINSTALL: Forcing immediate cleanup of pipeline", "pipeline_id", pipelineID)
@@ -405,7 +415,8 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	// FORCE cleanup - skip normal termination process for helm uninstall
 	log.Info("HELM UNINSTALL: Force deleting pipeline namespace and resources", "pipeline_id", pipelineID)
 
-	// Force delete namespace for this pipeline (this will delete all resources in the namespace: StatefulSets, Services, Deployments, etc.)
+	// Force delete namespace for this pipeline (this will delete all resources in the namespace:
+	// StatefulSets, Services, Deployments, etc.)
 	err := r.deleteNamespace(ctx, log, p)
 	if err != nil {
 		log.Error(err, "failed to delete pipeline namespace during helm uninstall", "pipeline_id", pipelineID)
@@ -464,11 +475,14 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 
 	r.recordOperationSuccess(ctx, "helm-uninstall", pipelineID, "")
 
-	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP", "pipeline", p.Name, "pipeline_id", pipelineID)
+	log.Info("pipeline helm uninstall completed successfully - FORCE CLEANUP",
+		"pipeline", p.Name, "pipeline_id", pipelineID)
 	return ctrl.Result{}, nil
 }
 
-func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) reconcileResume(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline resume", "pipeline_id", pipelineID)
@@ -519,7 +533,8 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 			secret, err = r.createSecret(ctx, secretName, labels, p)
 			if err != nil {
 				if errors.Is(err, ErrPipelineConfigSecretNotFound) {
-					log.Info("pipeline config secret not found during resume, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+					log.Info("pipeline config secret not found during resume, requeuing to wait for API to create it",
+						"pipeline_id", pipelineID, "error", err)
 					return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
 				}
 				return ctrl.Result{}, fmt.Errorf("create secret for resume: %w", err)
@@ -571,7 +586,9 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	return ctrl.Result{}, nil
 }
 
-func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) reconcileStop(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline stop", "pipeline_id", pipelineID)
@@ -664,7 +681,9 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	return ctrl.Result{}, nil
 }
 
-func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) reconcileEdit(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 
 	log.Info("reconciling pipeline edit", "pipeline_id", pipelineID)
@@ -681,7 +700,8 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	secret, err := r.updateSecret(ctx, secretName, labels, p)
 	if err != nil {
 		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
-			log.Info("pipeline config secret not found during edit, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+			log.Info("pipeline config secret not found during edit, requeuing to wait for API to create it",
+				"pipeline_id", pipelineID, "error", err)
 			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("update secret for edit: %w", err)

@@ -30,7 +30,7 @@ type notificationClient struct {
 }
 
 // NewClient creates a new notification client
-func NewClient(ctx context.Context, cfg *Config, natsClient *nats.NATSClient, logger logr.Logger) (Client, error) {
+func NewClient(ctx context.Context, cfg *Config, natsClient *nats.Client, logger logr.Logger) (Client, error) {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}

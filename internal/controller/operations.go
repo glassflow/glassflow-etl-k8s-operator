@@ -62,7 +62,9 @@ func (r *PipelineReconciler) checkOperationTimeoutAndLogProgress(
 	return ctrl.Result{}, false, nil
 }
 
-func (r *PipelineReconciler) setOperationStartTimeBestEffort(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) {
+func (r *PipelineReconciler) setOperationStartTimeBestEffort(
+	ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline,
+) {
 	if err := r.setOperationStartTime(ctx, p); err != nil {
 		log.Error(err, "failed to set operation start time", "pipeline_id", p.Spec.ID)
 	}

@@ -16,7 +16,7 @@ import (
 func TestBuildNATSResourcePlanJoinless(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	reconciler := &PipelineReconciler{NATSClient: &nats.Client{}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-1",
@@ -82,7 +82,7 @@ func TestBuildNATSResourcePlanJoinless(t *testing.T) {
 func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	reconciler := &PipelineReconciler{NATSClient: &nats.Client{}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-join",
@@ -175,7 +175,7 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 func TestBuildNATSResourcePlanOTLPSinkOnly(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	reconciler := &PipelineReconciler{NATSClient: &nats.Client{}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-otlp-sink",
@@ -209,7 +209,7 @@ func TestBuildNATSResourcePlanOTLPSinkOnly(t *testing.T) {
 func TestBuildNATSResourcePlanOTLPWithDedup(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	reconciler := &PipelineReconciler{NATSClient: &nats.Client{}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-otlp-dedup",
@@ -251,7 +251,7 @@ func TestBuildNATSResourcePlanOTLPWithDedup(t *testing.T) {
 func TestBuildNATSResourcePlanJoinWithLeftDedupKVStores(t *testing.T) {
 	t.Parallel()
 
-	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	reconciler := &PipelineReconciler{NATSClient: &nats.Client{}}
 	pipeline := etlv1alpha1.Pipeline{
 		Spec: etlv1alpha1.PipelineSpec{
 			ID: "pipe-join-left-dedup",

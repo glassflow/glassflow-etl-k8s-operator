@@ -25,7 +25,9 @@ func (r *PipelineReconciler) failureNotificationMetadata(operation string, err e
 	}
 }
 
-func (r *PipelineReconciler) sendOperationSuccessNotification(ctx context.Context, operation, pipelineID, message string) {
+func (r *PipelineReconciler) sendOperationSuccessNotification(
+	ctx context.Context, operation, pipelineID, message string,
+) {
 	if !notifications.IsEnabled() {
 		return
 	}
@@ -81,7 +83,9 @@ func buildOperationSuccessNotification(
 	}
 }
 
-func (r *PipelineReconciler) sendOperationFailureNotification(ctx context.Context, operation, pipelineID string, err error) {
+func (r *PipelineReconciler) sendOperationFailureNotification(
+	ctx context.Context, operation, pipelineID string, err error,
+) {
 	if !notifications.IsEnabled() {
 		return
 	}

@@ -27,26 +27,17 @@ linters:
         - name: comment-spacings
   exclusions:
     generated: lax
-    rules:
-      - linters:
-          - lll
-        path: api/
-      - linters:
-          - dupl
-          - lll
-        path: internal/
-      - linters:
-          - revive
-        text: "dot-imports"
-        path: _test\.go
-      - linters:
-          - revive
-        text: "stutters"
-        path: (internal/nats|internal/storage/postgres)/
     paths:
       - third_party$
       - builtin$
       - examples$
+issues:
+  exclude-rules:
+    # Ginkgo/Gomega dot imports are idiomatic and recommended by the Ginkgo project
+    - path: "_test\\.go"
+      linters:
+        - revive
+      text: "dot-imports"
 formatters:
   exclusions:
     generated: lax

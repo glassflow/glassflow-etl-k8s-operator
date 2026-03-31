@@ -54,7 +54,9 @@ const (
 
 // IsOTLPSource returns true if the pipeline's source type is any OTLP variant.
 func (s PipelineSpec) IsOTLPSource() bool {
-	return s.Source.Type == SourceTypeOTLPLogs || s.Source.Type == SourceTypeOTLPTraces || s.Source.Type == SourceTypeOTLPMetrics
+	return s.Source.Type == SourceTypeOTLPLogs ||
+		s.Source.Type == SourceTypeOTLPTraces ||
+		s.Source.Type == SourceTypeOTLPMetrics
 }
 
 type Sources struct {

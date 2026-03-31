@@ -58,7 +58,9 @@ func (r *PipelineReconciler) checkInputBindingPendingMessages(
 }
 
 // countInputBindingPending returns the total pending + unacknowledged count across all streams in a binding.
-func (r *PipelineReconciler) countInputBindingPending(ctx context.Context, binding pipelinegraph.InputBinding, consumerName string) (int, error) {
+func (r *PipelineReconciler) countInputBindingPending(
+	ctx context.Context, binding pipelinegraph.InputBinding, consumerName string,
+) (int, error) {
 	total := 0
 	for _, stream := range binding.Streams {
 		_, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, stream.Name, consumerName)
@@ -172,7 +174,9 @@ func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etl
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
 // Only called for indices returned by dedupStreamIndices, so dedup is guaranteed enabled.
-func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
+func (r *PipelineReconciler) checkDedupPendingMessages(
+	ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int,
+) error {
 	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
 		return fmt.Errorf("build pipeline graph for dedup checks: %w", err)
@@ -222,12 +226,16 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 }
 
 // cleanupNATSPipelineResources cleans up all NATS resources for a pipeline, including DLQ.
-func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) cleanupNATSPipelineResources(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) error {
 	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, true)
 }
 
 // cleanupNATSPipelineResourcesKeepDLQ cleans up pipeline NATS resources while preserving DLQ.
-func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepDLQ(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepDLQ(
+	ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline,
+) error {
 	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, false)
 }
 
@@ -271,7 +279,8 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 	for _, kvStore := range plan.JoinKVStores {
 		err = r.deleteNATSKeyValueStore(ctx, log, kvStore.Name)
 		if err != nil {
-			log.Error(err, "failed to delete join key-value store", "pipeline", p.Name, "pipeline_id", p.Spec.ID, "bucket", kvStore.Name)
+			log.Error(err, "failed to delete join key-value store",
+				"pipeline", p.Name, "pipeline_id", p.Spec.ID, "bucket", kvStore.Name)
 			return fmt.Errorf("failed to delete NATS KV Store: %w", err)
 		}
 	}

@@ -287,7 +287,9 @@ func TestRecordOperationSuccessNoopWhenObserversDisabled(t *testing.T) {
 	r.recordOperationSuccess(context.Background(), "create", "pipeline-id", "")
 }
 
-func newOperationTestReconcilerWithPipeline(t *testing.T, annotations map[string]string) (*PipelineReconciler, etlv1alpha1.Pipeline) {
+func newOperationTestReconcilerWithPipeline(
+	t *testing.T, annotations map[string]string,
+) (*PipelineReconciler, etlv1alpha1.Pipeline) {
 	t.Helper()
 
 	pipeline := &etlv1alpha1.Pipeline{
@@ -332,7 +334,9 @@ type operationTestClient struct {
 	objects map[types.NamespacedName]*etlv1alpha1.Pipeline
 }
 
-func (c *operationTestClient) Get(_ context.Context, key client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+func (c *operationTestClient) Get(
+	_ context.Context, key client.ObjectKey, obj client.Object, _ ...client.GetOption,
+) error {
 	pipeline, ok := obj.(*etlv1alpha1.Pipeline)
 	if !ok {
 		return fmt.Errorf("unsupported object type %T", obj)

@@ -52,7 +52,7 @@ type Config struct {
 	AllowAtomicPublish bool
 }
 
-type NATSClient struct {
+type Client struct {
 	nc                 *nats.Conn
 	js                 jetstream.JetStream
 	maxAge             time.Duration
@@ -62,7 +62,7 @@ type NATSClient struct {
 	allowAtomicPublish bool
 }
 
-func New(ctx context.Context, cfg Config) (*NATSClient, error) {
+func New(ctx context.Context, cfg Config) (*Client, error) {
 	var (
 		nc  *nats.Conn
 		err error
@@ -106,7 +106,7 @@ func New(ctx context.Context, cfg Config) (*NATSClient, error) {
 		return nil, fmt.Errorf("failed to connect to JetStream: %w", err)
 	}
 
-	return &NATSClient{
+	return &Client{
 		nc:                 nc,
 		js:                 js,
 		maxAge:             cfg.MaxAge,
@@ -126,13 +126,13 @@ type StreamConfig struct {
 }
 
 // DefaultStreamLimits returns the operator-level default stream limits.
-func (n *NATSClient) DefaultStreamLimits() (time.Duration, int64) {
+func (n *Client) DefaultStreamLimits() (time.Duration, int64) {
 	return n.maxAge, n.maxBytes
 }
 
 // CreateOrUpdateStream creates or updates a NATS stream using the provided StreamConfig.
 // If Subjects is empty, defaults to []string{cfg.Name + ".*"}.
-func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, cfg StreamConfig) error {
+func (n *Client) CreateOrUpdateStream(ctx context.Context, cfg StreamConfig) error {
 	subjects := cfg.Subjects
 	if len(subjects) == 0 {
 		subjects = []string{cfg.Name + ".*"}
@@ -157,12 +157,14 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, cfg StreamConfig)
 		// Skip if update fails for old pipelines with existing streams with different retention policy
 		var apiErr *jetstream.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode == JSErrCodeStreamRetentionPolicyChange {
-			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", cfg.Name)
+			log.Printf("skipping stream %s: old pipeline with existing stream,"+
+				" retention policy change to/from workqueue not supported by NATS", cfg.Name)
 			return nil
 		}
 		// Fallback: check error string for err_code=10052 in case error structure varies
 		if strings.Contains(err.Error(), "10052") && strings.Contains(err.Error(), "retention policy") {
-			log.Printf("skipping stream %s: old pipeline with existing stream, retention policy change to/from workqueue not supported by NATS", cfg.Name)
+			log.Printf("skipping stream %s: old pipeline with existing stream,"+
+				" retention policy change to/from workqueue not supported by NATS", cfg.Name)
 			return nil
 		}
 
@@ -173,7 +175,7 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, cfg StreamConfig)
 }
 
 // CreateOrUpdateJoinKeyValueStore creates or updates a NATS KeyValue store
-func (n *NATSClient) CreateOrUpdateJoinKeyValueStore(ctx context.Context, storeName string, ttl time.Duration) error {
+func (n *Client) CreateOrUpdateJoinKeyValueStore(ctx context.Context, storeName string, ttl time.Duration) error {
 	//nolint:exhaustruct // optional config
 	cfg := jetstream.KeyValueConfig{
 		Bucket:      storeName,
@@ -189,13 +191,15 @@ func (n *NATSClient) CreateOrUpdateJoinKeyValueStore(ctx context.Context, storeN
 	return nil
 }
 
-func (n *NATSClient) JetStream() jetstream.JetStream {
+func (n *Client) JetStream() jetstream.JetStream {
 	return n.js
 }
 
 // CheckConsumerPendingMessages checks if a consumer has any pending or unacknowledged messages
 // Returns: hasPending (bool), pendingCount (int), unacknowledgedCount (int), error
-func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamName, consumerName string) (bool, int, int, error) {
+func (n *Client) CheckConsumerPendingMessages(
+	ctx context.Context, streamName, consumerName string,
+) (bool, int, int, error) {
 	// Add timeout for consumer info retrieval
 	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -224,7 +228,7 @@ func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamNam
 	return hasPending, pending, unacknowledged, nil
 }
 
-func (n *NATSClient) Close() error {
+func (n *Client) Close() error {
 	n.nc.Close()
 	return nil
 }

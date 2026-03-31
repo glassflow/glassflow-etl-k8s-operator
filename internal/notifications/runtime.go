@@ -16,7 +16,7 @@ var (
 )
 
 // Initialize configures the package-level notification client used across the operator.
-func Initialize(ctx context.Context, cfg *Config, natsClient *nats.NATSClient, logger logr.Logger) error {
+func Initialize(ctx context.Context, cfg *Config, natsClient *nats.Client, logger logr.Logger) error {
 	client, err := NewClient(ctx, cfg, natsClient, logger)
 	if err != nil {
 		return err

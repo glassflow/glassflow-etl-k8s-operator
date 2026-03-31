@@ -20,14 +20,14 @@ const (
 	PostgresMaxConnectionWait = 2 * time.Minute
 )
 
-// PostgresStorage implements pipeline storage using PostgreSQL
-type PostgresStorage struct {
+// Storage implements pipeline storage using PostgreSQL
+type Storage struct {
 	pool   *pgxpool.Pool
 	logger logr.Logger
 }
 
-// NewPostgres creates a new PostgresStorage instance with retry logic
-func NewPostgres(ctx context.Context, dsn string, logger logr.Logger) (*PostgresStorage, error) {
+// NewPostgres creates a new Storage instance with retry logic
+func NewPostgres(ctx context.Context, dsn string, logger logr.Logger) (*Storage, error) {
 	connCtx, cancel := context.WithTimeout(ctx, PostgresMaxConnectionWait)
 	defer cancel()
 
@@ -98,11 +98,11 @@ func NewPostgres(ctx context.Context, dsn string, logger logr.Logger) (*Postgres
 
 	logger.Info("postgres connection established", "max_conns", 25, "min_conns", 5)
 
-	return &PostgresStorage{pool: pool, logger: logger}, nil
+	return &Storage{pool: pool, logger: logger}, nil
 }
 
 // Close closes the database connection pool
-func (s *PostgresStorage) Close() error {
+func (s *Storage) Close() error {
 	s.pool.Close()
 	return nil
 }

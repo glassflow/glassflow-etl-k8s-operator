@@ -30,7 +30,9 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
-func (r *PipelineReconciler) sendUsageStatsEvent(ctx context.Context, eventName string, payload map[string]interface{}) {
+func (r *PipelineReconciler) sendUsageStatsEvent(
+	ctx context.Context, eventName string, payload map[string]interface{},
+) {
 	if r.UsageStatsClient == nil {
 		return
 	}
@@ -75,7 +77,9 @@ func (r *PipelineReconciler) recordMetricsIfEnabled(fn func(*observability.Meter
 }
 
 // updatePipelineStatus updates PostgreSQL and CRD status (validation handled by backend API)
-func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus models.PipelineStatus, errors []string) error {
+func (r *PipelineReconciler) updatePipelineStatus(
+	ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus models.PipelineStatus, errors []string,
+) error {
 	// Check if status is already the same - avoid duplicate updates and history entries
 	currentStatus := models.PipelineStatus(p.Status)
 	if currentStatus == newStatus {
@@ -90,7 +94,8 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 		pgStatus := newStatus
 		err := r.PostgresStorage.UpdatePipelineStatus(ctx, p.Spec.ID, pgStatus, errors)
 		if err != nil {
-			log.Info("failed to update pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus, "error", err)
+			log.Info("failed to update pipeline status in PostgreSQL",
+				"pipeline_id", p.Spec.ID, "status", newStatus, "error", err)
 			// Don't fail the reconciliation if PostgreSQL update fails, just log the error
 		} else {
 			log.Info("successfully updated pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus)

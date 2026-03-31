@@ -12,7 +12,12 @@ import (
 )
 
 // UpdatePipelineStatus updates the pipeline status and creates a history event
-func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string) error {
+func (s *Storage) UpdatePipelineStatus(
+	ctx context.Context,
+	pipelineID string,
+	status models.PipelineStatus,
+	errors []string,
+) error {
 
 	// Begin transaction
 	tx, err := s.pool.Begin(ctx)
@@ -71,7 +76,13 @@ type HistoryEntry struct {
 }
 
 // insertPipelineHistoryEvent inserts a pipeline history event
-func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx.Tx, pipelineID string, status string, errors []string) error {
+func (s *Storage) insertPipelineHistoryEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	pipelineID string,
+	status string,
+	errors []string,
+) error {
 	// Determine event type: "error" if errors present, otherwise "status"
 	eventType := "status"
 	if len(errors) > 0 {
@@ -106,7 +117,7 @@ func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx
 }
 
 // DeletePipeline deletes a pipeline and all associated entities
-func (s *PostgresStorage) DeletePipeline(ctx context.Context, pipelineID string) error {
+func (s *Storage) DeletePipeline(ctx context.Context, pipelineID string) error {
 	s.logger.Info("deleting pipeline", "pipeline_id", pipelineID)
 
 	// Delete pipeline

@@ -132,7 +132,8 @@ func (r *PipelineReconciler) getPipelineConfigFromSecret(ctx context.Context, pi
 	err := r.Get(ctx, secretNamespacedName, &secret)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", fmt.Errorf("%w: %s in namespace %s (may need to wait for API to create it)", ErrPipelineConfigSecretNotFound, secretName, r.Config.GlassflowNamespace)
+			return "", fmt.Errorf("%w: %s in namespace %s (may need to wait for API to create it)",
+				ErrPipelineConfigSecretNotFound, secretName, r.Config.GlassflowNamespace)
 		}
 		return "", fmt.Errorf("get pipeline config secret %s: %w", secretNamespacedName, err)
 	}
@@ -147,7 +148,9 @@ func (r *PipelineReconciler) getPipelineConfigFromSecret(ctx context.Context, pi
 }
 
 // createSecret creates a secret for pipeline configuration
-func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
+func (r *PipelineReconciler) createSecret(
+	ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline,
+) (zero v1.Secret, _ error) {
 	// Check if a secret already exists
 	var existingSecret v1.Secret
 	err := r.Get(ctx, namespacedName, &existingSecret)
@@ -201,7 +204,9 @@ func (r *PipelineReconciler) createSecret(ctx context.Context, namespacedName ty
 }
 
 // updateSecret updates a secret by deleting and recreating it (since secrets are immutable)
-func (r *PipelineReconciler) updateSecret(ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline) (zero v1.Secret, _ error) {
+func (r *PipelineReconciler) updateSecret(
+	ctx context.Context, namespacedName types.NamespacedName, labels map[string]string, p etlv1alpha1.Pipeline,
+) (zero v1.Secret, _ error) {
 	// Check if a secret already exists
 	var existingSecret v1.Secret
 	err := r.Get(ctx, namespacedName, &existingSecret)
@@ -283,9 +288,12 @@ func (r *PipelineReconciler) deleteSecret(ctx context.Context, log logr.Logger, 
 	return nil
 }
 
-// ensureComponentSecretsInPipelineNamespace ensures DSN and optionally encryption secrets exist in the target namespace (same as API).
+// ensureComponentSecretsInPipelineNamespace ensures DSN and optionally encryption secrets exist in
+// the target namespace (same as API).
 // targetNamespace is r.getTargetNamespace(p). Works for both per-pipeline and single shared namespace.
-func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx context.Context, targetNamespace string) error {
+func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(
+	ctx context.Context, targetNamespace string,
+) error {
 	// Database: create secret from operator's DatabaseURL (same as GLASSFLOW_DATABASE_URL used by API)
 	if r.Config.DatabaseURL != "" {
 		name := constants.ComponentDatabaseSecretName
@@ -363,7 +371,9 @@ func (r *PipelineReconciler) ensureComponentSecretsInPipelineNamespace(ctx conte
 // -------------------------------------------------------------------------------------------------------------------
 
 // createHeadlessService creates a headless Service for a StatefulSet (ClusterIP: None, selector = labels).
-func (r *PipelineReconciler) createHeadlessService(ctx context.Context, namespace, name string, labels map[string]string) error {
+func (r *PipelineReconciler) createHeadlessService(
+	ctx context.Context, namespace, name string, labels map[string]string,
+) error {
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,

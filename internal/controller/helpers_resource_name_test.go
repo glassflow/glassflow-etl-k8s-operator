@@ -20,7 +20,8 @@ func TestGetStatefulSetResourceNameTruncatesPipelineID(t *testing.T) {
 
 	name := reconciler.getStatefulSetResourceName(pipeline, "ingestor-0")
 
-	expectedPipelineIDLen := maxStatefulSetNameLengthForRevHash - (len(pipelineScopedResourcePrefix) + 1 + len("ingestor-0"))
+	expectedPipelineIDLen := maxStatefulSetNameLengthForRevHash -
+		(len(pipelineScopedResourcePrefix) + 1 + len("ingestor-0"))
 	expectedPipelineID := pipeline.Spec.ID[:expectedPipelineIDLen]
 	expectedName := fmt.Sprintf("%s%s-%s", pipelineScopedResourcePrefix, expectedPipelineID, "ingestor-0")
 	if name != expectedName {

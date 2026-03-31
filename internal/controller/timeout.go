@@ -141,7 +141,9 @@ func (r *PipelineReconciler) clearOperationStartTime(p *etlv1alpha1.Pipeline) {
 }
 
 // handleOperationTimeout handles a timed-out operation by updating status to Failed and clearing annotations
-func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) handleOperationTimeout(
+	ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 	operation := getPipelineOperationFromAnnotations(p.GetAnnotations())
 	if operation == "" {
@@ -149,7 +151,8 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 		operation = "unknown"
 	}
 
-	log.Error(fmt.Errorf("operation timed out after %v", constants.ReconcileTimeout), "operation timed out", "pipeline_id", pipelineID, "operation", operation)
+	log.Error(fmt.Errorf("operation timed out after %v", constants.ReconcileTimeout),
+		"operation timed out", "pipeline_id", pipelineID, "operation", operation)
 
 	// Update status to Failed with error message
 	errorMsg := fmt.Sprintf("operation timed out after %v", constants.ReconcileTimeout)
@@ -252,7 +255,9 @@ func (r *PipelineReconciler) clearStopLastPendingCount(p *etlv1alpha1.Pipeline) 
 // times out. If the count has decreased since the last check, it extends the timeout window and
 // returns true so the caller can requeue. If no progress is detected, it returns false and the
 // caller should proceed with the normal timeout failure path.
-func (r *PipelineReconciler) tryExtendStopTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (bool, error) {
+func (r *PipelineReconciler) tryExtendStopTimeout(
+	ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline,
+) (bool, error) {
 	pipelineID := p.Spec.ID
 
 	currentCount, err := r.getTotalPendingCount(ctx, *p)

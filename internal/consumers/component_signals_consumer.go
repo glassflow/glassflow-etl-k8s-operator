@@ -21,18 +21,18 @@ import (
 )
 
 type ComponentSignalsConsumer struct {
-	natsClient *nats.NATSClient
+	natsClient *nats.Client
 	log        logr.Logger
 	client     client.Client
-	storage    *postgres.PostgresStorage
+	storage    *postgres.Storage
 	namespace  string
 }
 
 func NewComponentSignalsConsumer(
-	natsClient *nats.NATSClient,
+	natsClient *nats.Client,
 	log logr.Logger,
 	client client.Client,
-	storage *postgres.PostgresStorage,
+	storage *postgres.Storage,
 	namespace string,
 ) *ComponentSignalsConsumer {
 	return &ComponentSignalsConsumer{
@@ -63,7 +63,9 @@ func (c *ComponentSignalsConsumer) Start(ctx context.Context) error {
 		return fmt.Errorf("create component signals messages consumer: %w", err)
 	}
 
-	c.log.Info("component signals messages consumer started", "stream", constants.ComponentSignalsStream, "consumer", constants.OperatorConsumer)
+	c.log.Info("component signals messages consumer started",
+		"stream", constants.ComponentSignalsStream,
+		"consumer", constants.OperatorConsumer)
 
 	// Start consuming messages
 	consumeCtx, err := consumer.Consume(func(msg jetstream.Msg) {

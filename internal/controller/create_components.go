@@ -25,12 +25,16 @@ const (
 )
 
 // stopPipelineComponents stops all pipeline components in the correct order with pending message checks.
-func (r *PipelineReconciler) stopPipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) stopPipelineComponents(
+	ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	return r.reconcilePipelineTeardown(ctx, log, p, true)
 }
 
 // terminatePipelineComponents terminates all pipeline components immediately.
-func (r *PipelineReconciler) terminatePipelineComponents(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
+func (r *PipelineReconciler) terminatePipelineComponents(
+	ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline,
+) (ctrl.Result, error) {
 	return r.reconcilePipelineTeardown(ctx, log, p, false)
 }
 
@@ -45,7 +49,9 @@ func (r *PipelineReconciler) createPipelineComponents(
 	namespace := r.getTargetNamespace(*p)
 
 	// Step 1: Ensure Sink StatefulSet is ready
-	requeue, err := r.ensureStatefulSetReady(ctx, log, p, namespace, r.getStatefulSetResourceName(*p, constants.SinkComponent), r.createSink, ns, labels, secret)
+	requeue, err := r.ensureStatefulSetReady(
+		ctx, log, p, namespace, r.getStatefulSetResourceName(*p, constants.SinkComponent),
+		r.createSink, ns, labels, secret)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -55,7 +61,9 @@ func (r *PipelineReconciler) createPipelineComponents(
 
 	// Step 2: Ensure Join StatefulSet is ready (if enabled)
 	if p.Spec.Join.Enabled {
-		requeue, err = r.ensureStatefulSetReady(ctx, log, p, namespace, r.getStatefulSetResourceName(*p, constants.JoinComponent), r.createJoin, ns, labels, secret)
+		requeue, err = r.ensureStatefulSetReady(
+			ctx, log, p, namespace, r.getStatefulSetResourceName(*p, constants.JoinComponent),
+			r.createJoin, ns, labels, secret)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -100,7 +108,10 @@ func (r *PipelineReconciler) createPipelineComponents(
 }
 
 // createIngestors creates ingestor deployments for the pipeline
-func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) createIngestors(
+	ctx context.Context, _ logr.Logger, ns v1.Namespace,
+	labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline,
+) error {
 	ing := p.Spec.Source
 	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
@@ -113,7 +124,10 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 		ingestorLabels := r.getKafkaIngestorLabels(t.TopicName)
 		maps.Copy(ingestorLabels, labels)
 
-		cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Ingestor.CPURequest, r.Config.ResourceDefaults.Ingestor.CPULimit, r.Config.ResourceDefaults.Ingestor.MemoryRequest, r.Config.ResourceDefaults.Ingestor.MemoryLimit
+		cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Ingestor.CPURequest,
+			r.Config.ResourceDefaults.Ingestor.CPULimit,
+			r.Config.ResourceDefaults.Ingestor.MemoryRequest,
+			r.Config.ResourceDefaults.Ingestor.MemoryLimit
 		ingestorReplicas := constants.DefaultMinReplicas
 		if p.Spec.Resources != nil && p.Spec.Resources.Ingestor != nil {
 			ingRes := p.Spec.Resources.Ingestor
@@ -219,7 +233,9 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 }
 
 // createJoin creates a join StatefulSet (and headless Service) for the pipeline.
-func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) createJoin(
+	ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline,
+) error {
 	if len(p.Spec.Source.Streams) < 2 {
 		return fmt.Errorf("join requires at least 2 source streams")
 	}
@@ -236,7 +252,10 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 	maps.Copy(joinLabels, labels)
 
-	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Join.CPURequest, r.Config.ResourceDefaults.Join.CPULimit, r.Config.ResourceDefaults.Join.MemoryRequest, r.Config.ResourceDefaults.Join.MemoryLimit
+	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Join.CPURequest,
+		r.Config.ResourceDefaults.Join.CPULimit,
+		r.Config.ResourceDefaults.Join.MemoryRequest,
+		r.Config.ResourceDefaults.Join.MemoryLimit
 	joinReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Join != nil {
 		comp := p.Spec.Resources.Join
@@ -330,7 +349,9 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 }
 
 // createSink creates a sink StatefulSet (and headless Service) for the pipeline.
-func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) createSink(
+	ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline,
+) error {
 	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
 		return fmt.Errorf("build pipeline graph for sink: %w", err)
@@ -342,7 +363,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 	sinkLabels := r.getSinkLabels()
 	maps.Copy(sinkLabels, labels)
 
-	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Sink.CPURequest, r.Config.ResourceDefaults.Sink.CPULimit, r.Config.ResourceDefaults.Sink.MemoryRequest, r.Config.ResourceDefaults.Sink.MemoryLimit
+	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Sink.CPURequest,
+		r.Config.ResourceDefaults.Sink.CPULimit,
+		r.Config.ResourceDefaults.Sink.MemoryRequest,
+		r.Config.ResourceDefaults.Sink.MemoryLimit
 	sinkReplicas := constants.DefaultMinReplicas
 	if p.Spec.Resources != nil && p.Spec.Resources.Sink != nil {
 		comp := p.Spec.Resources.Sink
@@ -425,7 +449,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 
 // createDedups creates dedup StatefulSets for the pipeline.
 // For Kafka: one per stream with dedup enabled. For OTLP: one (index 0) when IsDedupEnabled.
-func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
+func (r *PipelineReconciler) createDedups(
+	ctx context.Context, _ logr.Logger, ns v1.Namespace,
+	labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline,
+) error {
 	indices := dedupStreamIndices(p)
 	if len(indices) == 0 {
 		return nil
@@ -465,7 +492,9 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			}
 		}
 
-		if err := r.createSingleDedup(ctx, ns, labels, secret, p, graph, i, topicName, storageSize, storageClass, extraEnv); err != nil {
+		if err := r.createSingleDedup(
+			ctx, ns, labels, secret, p, graph, i, topicName, storageSize, storageClass, extraEnv,
+		); err != nil {
 			return fmt.Errorf("create dedup-%d statefulset: %w", i, err)
 		}
 	}
@@ -494,7 +523,10 @@ func (r *PipelineReconciler) createSingleDedup(
 	maps.Copy(dedupLabels, labels)
 
 	replicas := constants.DefaultMinReplicas
-	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Dedup.CPURequest, r.Config.ResourceDefaults.Dedup.CPULimit, r.Config.ResourceDefaults.Dedup.MemoryRequest, r.Config.ResourceDefaults.Dedup.MemoryLimit
+	cpuReq, cpuLim, memReq, memLim := r.Config.ResourceDefaults.Dedup.CPURequest,
+		r.Config.ResourceDefaults.Dedup.CPULimit,
+		r.Config.ResourceDefaults.Dedup.MemoryRequest,
+		r.Config.ResourceDefaults.Dedup.MemoryLimit
 	if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil {
 		comp := p.Spec.Resources.Dedup
 		if comp.Requests != nil {
