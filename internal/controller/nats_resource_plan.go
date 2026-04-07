@@ -15,9 +15,10 @@ type natsJoinKVStorePlan struct {
 }
 
 type natsResourcePlan struct {
-	DLQStream    nats.StreamConfig
-	Streams      []nats.StreamConfig
-	JoinKVStores []natsJoinKVStorePlan
+	DLQStream         nats.StreamConfig
+	Streams           []nats.StreamConfig
+	OTLPSourceStreams []nats.StreamConfig
+	JoinKVStores      []natsJoinKVStorePlan
 }
 
 type natsNodePlan struct {
@@ -82,7 +83,11 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 			return natsResourcePlan{}, err
 		}
 
-		plan.Streams = append(plan.Streams, nodePlan.Streams...)
+		if node.Type == pipelinegraph.NodeTypeOTLPSource {
+			plan.OTLPSourceStreams = append(plan.OTLPSourceStreams, nodePlan.Streams...)
+		} else {
+			plan.Streams = append(plan.Streams, nodePlan.Streams...)
+		}
 		plan.JoinKVStores = append(plan.JoinKVStores, nodePlan.JoinKVStores...)
 	}
 

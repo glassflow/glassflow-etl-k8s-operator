@@ -204,6 +204,13 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 		m.RecordNATSOperation(ctx, "create_dlq_stream", "success", p.Spec.ID)
 	})
 
+	for _, stream := range plan.OTLPSourceStreams {
+		err = r.NATSClient.CreateOrUpdateStream(ctx, stream)
+		if err != nil {
+			return fmt.Errorf("create stream %s: %w", stream.Name, err)
+		}
+	}
+
 	for _, stream := range plan.Streams {
 		err = r.NATSClient.CreateOrUpdateStream(ctx, stream)
 		if err != nil {
@@ -221,21 +228,33 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 	return nil
 }
 
+type natsCleanupOptions struct {
+	deleteDLQ       bool
+	keepOTLPStreams bool
+}
+
 // cleanupNATSPipelineResources cleans up all NATS resources for a pipeline, including DLQ.
 func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, true)
+	return r.cleanupNATSPipelineResourcesWithOptions(ctx, log, p, natsCleanupOptions{
+		deleteDLQ:       true,
+		keepOTLPStreams: false,
+	})
 }
 
-// cleanupNATSPipelineResourcesKeepDLQ cleans up pipeline NATS resources while preserving DLQ.
+// cleanupNATSPipelineResourcesKeepDLQ cleans up pipeline NATS resources while preserving DLQ
+// and OTLP source streams (so the shared OTLP receiver can continue buffering events).
 func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepDLQ(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, false)
+	return r.cleanupNATSPipelineResourcesWithOptions(ctx, log, p, natsCleanupOptions{
+		deleteDLQ:       false,
+		keepOTLPStreams: true,
+	})
 }
 
-func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithOptions(
 	ctx context.Context,
 	log logr.Logger,
 	p etlv1alpha1.Pipeline,
-	deleteDLQ bool,
+	opts natsCleanupOptions,
 ) error {
 	log.Info("cleaning up NATS streams", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
@@ -249,7 +268,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		return fmt.Errorf("build NATS resource plan: %w", err)
 	}
 
-	if deleteDLQ {
+	if opts.deleteDLQ {
 		// delete the DLQ stream
 		log.Info("deleting NATS DLQ stream", "stream", plan.DLQStream.Name)
 		err = r.deleteNATSStream(ctx, log, plan.DLQStream.Name)
@@ -266,6 +285,19 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		log.Info("NATS DLQ stream deleted successfully", "stream", plan.DLQStream.Name)
 	} else {
 		log.Info("skipping NATS DLQ stream cleanup", "pipeline_id", p.Spec.ID)
+	}
+
+	if opts.keepOTLPStreams && len(plan.OTLPSourceStreams) > 0 {
+		for _, stream := range plan.OTLPSourceStreams {
+			log.Info("preserving OTLP source stream during stop", "stream", stream.Name, "pipeline_id", p.Spec.ID)
+		}
+	} else {
+		for _, stream := range plan.OTLPSourceStreams {
+			err = r.deleteNATSStream(ctx, log, stream.Name)
+			if err != nil {
+				return fmt.Errorf("delete OTLP source stream %s: %w", stream.Name, err)
+			}
+		}
 	}
 
 	for _, kvStore := range plan.JoinKVStores {

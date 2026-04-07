@@ -192,14 +192,17 @@ func TestBuildNATSResourcePlanOTLPSinkOnly(t *testing.T) {
 	}
 
 	hash := generatePipelineHash(pipeline.Spec.ID)
-	wantStreams := []nats.StreamConfig{
+	wantOTLPStreams := []nats.StreamConfig{
 		{
 			Name:     fmt.Sprintf("gfm-%s-otlp-out_0", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-otlp-out.0", hash)},
 		},
 	}
-	if !reflect.DeepEqual(plan.Streams, wantStreams) {
-		t.Fatalf("plan.Streams = %#v, want %#v", plan.Streams, wantStreams)
+	if !reflect.DeepEqual(plan.OTLPSourceStreams, wantOTLPStreams) {
+		t.Fatalf("plan.OTLPSourceStreams = %#v, want %#v", plan.OTLPSourceStreams, wantOTLPStreams)
+	}
+	if len(plan.Streams) != 0 {
+		t.Fatalf("plan.Streams = %#v, want none", plan.Streams)
 	}
 	if len(plan.JoinKVStores) != 0 {
 		t.Fatalf("plan.JoinKVStores = %#v, want none", plan.JoinKVStores)
@@ -230,11 +233,16 @@ func TestBuildNATSResourcePlanOTLPWithDedup(t *testing.T) {
 	}
 
 	hash := generatePipelineHash(pipeline.Spec.ID)
-	wantStreams := []nats.StreamConfig{
+	wantOTLPStreams := []nats.StreamConfig{
 		{
 			Name:     fmt.Sprintf("gfm-%s-otlp-out_0", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-otlp-out.0", hash)},
 		},
+	}
+	if !reflect.DeepEqual(plan.OTLPSourceStreams, wantOTLPStreams) {
+		t.Fatalf("plan.OTLPSourceStreams = %#v, want %#v", plan.OTLPSourceStreams, wantOTLPStreams)
+	}
+	wantStreams := []nats.StreamConfig{
 		{
 			Name:     fmt.Sprintf("gfm-%s-dedup-out_0", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-dedup-out.0", hash)},
