@@ -112,6 +112,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;delete
 
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.0/pkg/reconcile
@@ -712,6 +713,12 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	if err != nil {
 		r.recordReconcileError(ctx, "edit", pipelineID, err)
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+	}
+
+	// Clean up PVCs for dedup instances that are now disabled.
+	if err = r.cleanupDisabledDedupPVCs(ctx, log, p); err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("cleanup disabled dedup PVCs: %w", err)
 	}
 
 	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {

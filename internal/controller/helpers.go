@@ -82,17 +82,6 @@ func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream, ingestorRe
 	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(ingestorReplicas)}}
 }
 
-func getDedupReplicas(p etlv1alpha1.Pipeline) int {
-	replicas := constants.DefaultMinReplicas
-	if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil && p.Spec.Resources.Dedup.Replicas != nil {
-		replicas = int(*p.Spec.Resources.Dedup.Replicas)
-	}
-	if replicas <= 0 {
-		return constants.DefaultMinReplicas
-	}
-	return replicas
-}
-
 // preparePipelineLabels returns labels for pipeline resources
 func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 	return map[string]string{"etl.glassflow.io/glassflow-etl-k8s-operator-id": p.Spec.ID}

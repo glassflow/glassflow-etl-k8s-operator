@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 	"github.com/go-logr/logr"
@@ -454,45 +455,64 @@ func (r *PipelineReconciler) deleteStatefulSetByName(ctx context.Context, namesp
 	})
 }
 
-// cleanupDedupPVCs deletes PVCs associated with dedup StatefulSets
+// cleanupDedupPVCsForIndex lists all PVCs in the pipeline namespace and deletes those
+// belonging to the dedup StatefulSet at the given index. Listing avoids the need to know
+// the prior replica count, handling any scale configuration cleanly.
+func (r *PipelineReconciler) cleanupDedupPVCsForIndex(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline, index int) error {
+	namespace := r.getTargetNamespace(p)
+	dedupName := r.getStatefulSetResourceName(p, fmt.Sprintf("dedup-%d", index))
+	pvcPrefix := fmt.Sprintf("data-%s-", dedupName)
+
+	var pvcList v1.PersistentVolumeClaimList
+	if err := r.List(ctx, &pvcList, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("list pvcs in namespace %s: %w", namespace, err)
+	}
+
+	for i := range pvcList.Items {
+		pvc := &pvcList.Items[i]
+		if !strings.HasPrefix(pvc.Name, pvcPrefix) {
+			continue
+		}
+		log.Info("deleting dedup PVC", "pvc", pvc.Name, "namespace", namespace)
+		if err := r.Delete(ctx, pvc); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete pvc %s: %w", pvc.Name, err)
+		}
+	}
+	return nil
+}
+
+// cleanupDedupPVCs deletes all PVCs associated with dedup StatefulSets for the pipeline,
+// regardless of whether dedup is currently enabled. Called during pipeline deletion.
 func (r *PipelineReconciler) cleanupDedupPVCs(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	if !p.Spec.Transform.IsDedupEnabled {
-		log.Info("dedup PVC cleanup skipped: dedup persistent storage disabled", "pipeline_id", p.Spec.ID)
+	if p.Spec.IsOTLPSource() {
+		return r.cleanupDedupPVCsForIndex(ctx, log, p, 0)
+	}
+
+	for i := range p.Spec.Source.Streams {
+		if err := r.cleanupDedupPVCsForIndex(ctx, log, p, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// cleanupDisabledDedupPVCs deletes PVCs for dedup instances that are currently disabled.
+// Called during pipeline edit when dedup may have been turned off for one or more streams.
+func (r *PipelineReconciler) cleanupDisabledDedupPVCs(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	if p.Spec.IsOTLPSource() {
+		if !p.Spec.Transform.IsDedupEnabled {
+			return r.cleanupDedupPVCsForIndex(ctx, log, p, 0)
+		}
 		return nil
 	}
 
-	namespace := r.getTargetNamespace(p)
-
 	for i, stream := range p.Spec.Source.Streams {
 		if stream.Deduplication == nil || !stream.Deduplication.Enabled {
-			continue
-		}
-
-		dedupName := r.getStatefulSetResourceName(p, fmt.Sprintf("dedup-%d", i))
-
-		replicas := getDedupReplicas(p)
-
-		// StatefulSet PVCs have format: data-{statefulset-name}-{ordinal}
-		for replica := 0; replica < replicas; replica++ {
-			pvcName := fmt.Sprintf("data-%s-%d", dedupName, replica)
-
-			var pvc v1.PersistentVolumeClaim
-			err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: pvcName}, &pvc)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					continue
-				}
-				return fmt.Errorf("get pvc %s: %w", pvcName, err)
-			}
-
-			log.Info("deleting dedup PVC", "pvc", pvcName, "namespace", namespace)
-			err = r.Delete(ctx, &pvc)
-			if err != nil {
-				return fmt.Errorf("delete pvc %s: %w", pvcName, err)
+			if err := r.cleanupDedupPVCsForIndex(ctx, log, p, i); err != nil {
+				return err
 			}
 		}
 	}
-
 	return nil
 }
 
