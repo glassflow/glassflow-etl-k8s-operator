@@ -164,7 +164,7 @@ func TestConfigFromOTLPPipelineSpecSinkOnly(t *testing.T) {
 	want := Config{
 		PipelineID: "pipe-otlp",
 		Nodes: []NodeConfig{
-			{ID: "otlp", Type: NodeTypeOTLPSource, Replicas: 1},
+			{ID: "otlp", Type: NodeTypeOTLPSource, Replicas: 2},
 			{ID: "sink", Type: NodeTypeSink, Replicas: 2},
 		},
 		Edges: []EdgeConfig{
@@ -200,7 +200,7 @@ func TestConfigFromOTLPPipelineSpecWithDedup(t *testing.T) {
 	want := Config{
 		PipelineID: "pipe-otlp-dedup",
 		Nodes: []NodeConfig{
-			{ID: "otlp", Type: NodeTypeOTLPSource, Replicas: 1},
+			{ID: "otlp", Type: NodeTypeOTLPSource, Replicas: 2},
 			{ID: "dedup", Type: NodeTypeDedup, Replicas: 2},
 			{ID: "sink", Type: NodeTypeSink, Replicas: 1},
 		},
