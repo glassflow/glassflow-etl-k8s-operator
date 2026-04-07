@@ -82,7 +82,6 @@ func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream, ingestorRe
 	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(ingestorReplicas)}}
 }
 
-
 // preparePipelineLabels returns labels for pipeline resources
 func preparePipelineLabels(p etlv1alpha1.Pipeline) map[string]string {
 	return map[string]string{"etl.glassflow.io/glassflow-etl-k8s-operator-id": p.Spec.ID}
