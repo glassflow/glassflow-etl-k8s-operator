@@ -47,9 +47,10 @@ type StreamBinding struct {
 }
 
 type OutputBinding struct {
-	StreamPrefix  string          `json:"stream_prefix"`
-	SubjectPrefix string          `json:"subject_prefix"`
-	Streams       []StreamBinding `json:"streams"`
+	StreamPrefix      string          `json:"stream_prefix"`
+	SubjectPrefix     string          `json:"subject_prefix"`
+	Streams           []StreamBinding `json:"streams"`
+	TotalSubjectCount int             `json:"total_subject_count"`
 }
 
 type InputBinding struct {
