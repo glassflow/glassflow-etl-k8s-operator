@@ -709,10 +709,76 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
 	}
 
-	err = r.createNATSStreams(ctx, p)
+	// For OTLP pipelines: detect stale source streams left over from a downscale.
+	// On a stopped pipeline only OTLP source streams + DLQ survive, so only those can be stale.
+	var (
+		staleNames      []string
+		oldSubjectCount int
+	)
+	if p.Spec.IsOTLPSource() {
+		staleNames, oldSubjectCount, err = r.discoverStaleStreams(ctx, p)
+		if err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("discover stale streams: %w", err)
+		}
+
+		// Dedup downscale protection: stale streams + dedup enabled means dedup replicas
+		// were decreased, which corrupts pod-local Badger state.
+		if len(staleNames) > 0 && p.Spec.Transform.IsDedupEnabled {
+			msg := "dedup replica count cannot be decreased: dedup stores pod-local state"
+			log.Info(msg, "pipeline_id", pipelineID, "stale_streams", staleNames)
+			// Re-fetch to get the latest ResourceVersion — prior Status and annotation
+			// writes may have bumped it, leaving our local copy stale.
+			err = r.Get(ctx, types.NamespacedName{Name: p.Name, Namespace: p.Namespace}, &p)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("refresh pipeline before status update: %w", err)
+			}
+			err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusFailed, []string{msg})
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("update pipeline status: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+
+		// Unbind subjects from stale streams so active streams can claim them.
+		if len(staleNames) > 0 {
+			if err = r.unbindStaleStreamSubjects(ctx, log, staleNames); err != nil {
+				r.recordReconcileError(ctx, "edit", pipelineID, err)
+				return ctrl.Result{}, fmt.Errorf("unbind stale stream subjects: %w", err)
+			}
+		}
+	}
+
+	// Build the NATS resource plan, applying subject override when downscaling OTLP streams.
+	// The override redistributes old subjects across new streams so the OTLP receiver's cached
+	// SubjectCount is fully covered — no writes are lost during the gap before it refreshes.
+	natsPlan, err := r.buildNATSResourcePlan(p)
 	if err != nil {
 		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("build NATS plan: %w", err)
+	}
+	if len(staleNames) > 0 {
+		overrideOTLPSourceSubjects(&natsPlan, oldSubjectCount)
+		log.Info("applied OTLP subject override for downscale",
+			"old_subject_count", oldSubjectCount,
+			"new_stream_count", len(natsPlan.OTLPSourceStreams))
+	}
+
+	if err = r.createNATSStreamsFromPlan(ctx, p, natsPlan); err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
 		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+	}
+
+	// Move messages from stale OTLP source streams to active streams via Stream Sources.
+	if len(staleNames) > 0 {
+		requeue, err := r.reassignStaleStreams(ctx, log, p, staleNames, natsPlan)
+		if err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("reassign stale streams: %w", err)
+		}
+		if requeue {
+			return ctrl.Result{Requeue: true, RequeueAfter: 2 * time.Second}, nil
+		}
 	}
 
 	// Clean up PVCs for dedup instances that are now disabled.
