@@ -234,11 +234,16 @@ func (g *Graph) resolveOutput(edge EdgeConfig) (OutputBinding, error) {
 		return OutputBinding{}, err
 	}
 
+	streams := buildStreams(basePrefix, source.Replicas, target.Replicas)
+	totalSubjects := 0
+	for _, s := range streams {
+		totalSubjects += len(s.Subjects)
+	}
 	return OutputBinding{
 		StreamPrefix:      basePrefix,
 		SubjectPrefix:     basePrefix,
-		Streams:           buildStreams(basePrefix, source.Replicas, target.Replicas),
-		TotalSubjectCount: max(source.Replicas, target.Replicas),
+		Streams:           streams,
+		TotalSubjectCount: totalSubjects,
 	}, nil
 }
 
