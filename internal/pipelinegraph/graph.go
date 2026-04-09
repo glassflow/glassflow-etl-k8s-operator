@@ -234,28 +234,39 @@ func (g *Graph) resolveOutput(edge EdgeConfig) (OutputBinding, error) {
 		return OutputBinding{}, err
 	}
 
+	streams := buildStreams(basePrefix, source.Replicas, target.Replicas)
+	totalSubjects := 0
+	for _, s := range streams {
+		totalSubjects += len(s.Subjects)
+	}
 	return OutputBinding{
-		StreamPrefix:  basePrefix,
-		SubjectPrefix: basePrefix,
-		Streams:       buildStreams(basePrefix, source.Replicas, target.Replicas),
+		StreamPrefix:      basePrefix,
+		SubjectPrefix:     basePrefix,
+		Streams:           streams,
+		TotalSubjectCount: totalSubjects,
 	}, nil
 }
 
-// buildStreams assigns subjects to streams round-robin (subject r -> stream r%streamCount).
-// e.g. 3 subjects and 2 streams
-// [subject_0, subject_1, subject_2]
-// [stream_0, stream_1]
-// result:
-// stream_0 = [subject_0, subject_2]
-// stream_1 = [subject_1]
+// buildStreams assigns subjects to streams round-robin (subject s -> stream s%streamCount).
+// Always creates exactly streamCount streams (one per downstream consumer).
+// Total subjects = max(sourceReplicas, streamCount), so when downstream > upstream,
+// the upstream replicas are each responsible for multiple subjects (round-robin publish).
+//
+// e.g. 1 source replica, 2 streams (1 ingestor → 2 sinks):
+// subjects: [0, 1] -> stream_0=[subject_0], stream_1=[subject_1]
+// source pod 0 publishes to both subjects round-robin.
+//
+// e.g. 3 source replicas, 2 streams:
+// subjects: [0, 1, 2] -> stream_0=[subject_0, subject_2], stream_1=[subject_1]
+// each source pod publishes to its own subject.
 func buildStreams(prefix string, sourceReplicas, streamCount int) []StreamBinding {
-	streams := make([]StreamBinding, min(sourceReplicas, streamCount))
+	totalSubjects := max(sourceReplicas, streamCount)
+	streams := make([]StreamBinding, streamCount)
 	for i := range streams {
 		streams[i].Name = fmt.Sprintf("%s_%d", prefix, i)
 	}
-	for r := range sourceReplicas {
-		s := &streams[r%streamCount]
-		s.Subjects = append(s.Subjects, prefix+"."+strconv.Itoa(r))
+	for s := range totalSubjects {
+		streams[s%streamCount].Subjects = append(streams[s%streamCount].Subjects, prefix+"."+strconv.Itoa(s))
 	}
 	return streams
 }
