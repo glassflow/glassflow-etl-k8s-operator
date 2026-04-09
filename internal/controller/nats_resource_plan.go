@@ -169,6 +169,24 @@ func buildOutputStreams(
 	return streams
 }
 
+// staleStreamNames returns stream names that exist in NATS but are not in the planned
+// OTLP source streams or DLQ. On a stopped OTLP pipeline only OTLP source streams + DLQ
+// survive, so only OTLP source streams can be stale after a downscale.
+func staleStreamNames(existingNames []string, newPlan natsResourcePlan) []string {
+	planned := make(map[string]bool, len(newPlan.OTLPSourceStreams)+1)
+	planned[newPlan.DLQStream.Name] = true
+	for _, s := range newPlan.OTLPSourceStreams {
+		planned[s.Name] = true
+	}
+	var stale []string
+	for _, name := range existingNames {
+		if !planned[name] {
+			stale = append(stale, name)
+		}
+	}
+	return stale
+}
+
 func inputBindingStoreName(binding pipelinegraph.InputBinding) (string, error) {
 	if len(binding.Streams) == 0 {
 		return "", fmt.Errorf("input binding has no streams")
