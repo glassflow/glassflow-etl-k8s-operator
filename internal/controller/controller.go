@@ -673,8 +673,35 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	namespace := r.getTargetNamespace(p)
 
-	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
-		return result, err
+	// Discover stale OTLP source streams early — before the timeout check — so that we can use
+	// them to decide whether a timed-out edit should be extended (drain still making progress).
+	var (
+		staleNames      []string
+		oldSubjectCount int
+	)
+	var err error
+	if p.Spec.IsOTLPSource() {
+		staleNames, oldSubjectCount, err = r.discoverStaleStreams(ctx, p)
+		if err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("discover stale streams: %w", err)
+		}
+	}
+
+	// Timeout check — extend if a drain is still making progress (mirrors reconcileStop).
+	timedOut, elapsed := r.checkOperationTimeout(log, &p)
+	if timedOut {
+		if len(staleNames) > 0 {
+			if extended, extErr := r.tryExtendEditDrainTimeout(ctx, log, &p, staleNames); extErr != nil {
+				log.Error(extErr, "failed to check drain progress during edit timeout", "pipeline_id", pipelineID)
+			} else if extended {
+				return ctrl.Result{Requeue: true, RequeueAfter: 2 * time.Second}, nil
+			}
+		}
+		return r.handleOperationTimeout(ctx, log, &p)
+	}
+	if elapsed > 0 {
+		log.Info("operation in progress", "pipeline_id", p.Spec.ID, "elapsed", elapsed)
 	}
 
 	// Update the pipeline config secret with new config
@@ -709,22 +736,10 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
 	}
 
-	// For OTLP pipelines: detect stale source streams left over from a downscale.
-	// On a stopped pipeline only OTLP source streams + DLQ survive, so only those can be stale.
-	var (
-		staleNames      []string
-		oldSubjectCount int
-	)
-	if p.Spec.IsOTLPSource() {
-		staleNames, oldSubjectCount, err = r.discoverStaleStreams(ctx, p)
-		if err != nil {
-			r.recordReconcileError(ctx, "edit", pipelineID, err)
-			return ctrl.Result{}, fmt.Errorf("discover stale streams: %w", err)
-		}
-
+	if p.Spec.IsOTLPSource() && len(staleNames) > 0 {
 		// Dedup downscale protection: stale streams + dedup enabled means dedup replicas
 		// were decreased, which corrupts pod-local Badger state.
-		if len(staleNames) > 0 && p.Spec.Transform.IsDedupEnabled {
+		if p.Spec.Transform.IsDedupEnabled {
 			msg := "dedup replica count cannot be decreased: dedup stores pod-local state"
 			log.Info(msg, "pipeline_id", pipelineID, "stale_streams", staleNames)
 			// Re-fetch to get the latest ResourceVersion — prior Status and annotation
@@ -741,11 +756,10 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		}
 
 		// Unbind subjects from stale streams so active streams can claim them.
-		if len(staleNames) > 0 {
-			if err = r.unbindStaleStreamSubjects(ctx, log, staleNames); err != nil {
-				r.recordReconcileError(ctx, "edit", pipelineID, err)
-				return ctrl.Result{}, fmt.Errorf("unbind stale stream subjects: %w", err)
-			}
+		err = r.unbindStaleStreamSubjects(ctx, log, staleNames)
+		if err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("unbind stale stream subjects: %w", err)
 		}
 	}
 

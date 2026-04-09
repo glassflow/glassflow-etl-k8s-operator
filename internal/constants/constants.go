@@ -23,6 +23,11 @@ const (
 	// during a stop operation, used to detect whether messages are being consumed.
 	PipelineStopLastPendingCountAnnotation = "pipeline.etl.glassflow.io/stop-last-pending-count"
 
+	// PipelineEditDrainLastMsgCountAnnotation tracks the last observed total message count across
+	// stale OTLP source streams during an edit-downscale drain, used to detect whether the
+	// NATS Stream Source transfer is making progress before extending the operation timeout.
+	PipelineEditDrainLastMsgCountAnnotation = "pipeline.etl.glassflow.io/edit-drain-last-msg-count"
+
 	// PipelineStopReasonAnnotation stores the reason a pipeline was stopped (e.g. from a component signal).
 	// If absent, the stop was triggered via API.
 	PipelineStopReasonAnnotation = "pipeline.etl.glassflow.io/stop-reason"

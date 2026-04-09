@@ -248,6 +248,46 @@ func (r *PipelineReconciler) clearStopLastPendingCount(p *etlv1alpha1.Pipeline) 
 	}
 }
 
+// tryExtendEditDrainTimeout extends the edit operation timeout when NATS Stream Source transfer
+// is still making progress. It sums message counts across stale streams and compares against the
+// last recorded value; returns true (extend) if decreasing, false (give up) if stalled.
+func (r *PipelineReconciler) tryExtendEditDrainTimeout(
+	ctx context.Context,
+	log logr.Logger,
+	p *etlv1alpha1.Pipeline,
+	staleNames []string,
+) (bool, error) {
+	var current uint64
+	for _, name := range staleNames {
+		count, err := r.NATSClient.GetStreamMessageCount(ctx, name)
+		if err != nil {
+			return false, fmt.Errorf("get message count for stale stream %s: %w", name, err)
+		}
+		current += count
+	}
+
+	annotations := p.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+
+	lastStr := annotations[constants.PipelineEditDrainLastMsgCountAnnotation]
+	lastTotal, _ := strconv.ParseUint(lastStr, 10, 64)
+	if lastStr != "" && current >= lastTotal {
+		log.Info("stale stream drain stalled, honoring edit timeout", "pipeline_id", p.Spec.ID, "total_msgs", current)
+		return false, nil
+	}
+
+	log.Info("stale stream drain in progress, extending edit timeout", "pipeline_id", p.Spec.ID, "total_msgs", current)
+	annotations[constants.PipelineEditDrainLastMsgCountAnnotation] = strconv.FormatUint(current, 10)
+	annotations[constants.PipelineOperationStartTimeAnnotation] = time.Now().UTC().Format(time.RFC3339)
+	p.SetAnnotations(annotations)
+	if err := r.Update(ctx, p); err != nil {
+		return false, fmt.Errorf("extend edit drain timeout: %w", err)
+	}
+	return true, nil
+}
+
 // tryExtendStopTimeout checks whether pending messages are still decreasing when a stop operation
 // times out. If the count has decreased since the last check, it extends the timeout window and
 // returns true so the caller can requeue. If no progress is detected, it returns false and the
