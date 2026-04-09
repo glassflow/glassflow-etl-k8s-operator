@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go/jetstream"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
@@ -313,6 +315,56 @@ func (r *PipelineReconciler) reassignStaleStreams(
 	}
 
 	return false, nil
+}
+
+// setupEditNATSStreams handles the NATS portion of an edit operation: unbinds stale stream
+// subjects (if any), builds and applies the resource plan (with subject override for downscale),
+// creates/updates streams, and drains messages from stale streams via Stream Sources.
+// Returns requeue=true when the drain is still in progress.
+func (r *PipelineReconciler) setupEditNATSStreams(
+	ctx context.Context,
+	log logr.Logger,
+	pipelineID string,
+	p etlv1alpha1.Pipeline,
+	staleNames []string,
+	oldSubjectCount int,
+) (ctrl.Result, error) {
+	if len(staleNames) > 0 {
+		if err := r.unbindStaleStreamSubjects(ctx, log, staleNames); err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("unbind stale stream subjects: %w", err)
+		}
+	}
+
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("build NATS plan: %w", err)
+	}
+	if oldSubjectCount > len(plan.OTLPSourceStreams) {
+		overrideOTLPSourceSubjects(&plan, oldSubjectCount)
+		log.Info("applied OTLP subject override for downscale",
+			"old_subject_count", oldSubjectCount,
+			"new_stream_count", len(plan.OTLPSourceStreams))
+	}
+
+	if err = r.createNATSStreamsFromPlan(ctx, p, plan); err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+	}
+
+	if len(staleNames) > 0 {
+		requeue, err := r.reassignStaleStreams(ctx, log, p, staleNames, plan)
+		if err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("reassign stale streams: %w", err)
+		}
+		if requeue {
+			return ctrl.Result{Requeue: true, RequeueAfter: 2 * time.Second}, nil
+		}
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // createNATSStreams creates all NATS streams and KV stores for a pipeline.
