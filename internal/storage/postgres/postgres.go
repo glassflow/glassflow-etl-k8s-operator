@@ -7,6 +7,7 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	"github.com/go-logr/logr"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -41,6 +42,9 @@ func NewPostgres(ctx context.Context, dsn string, logger logr.Logger) (*Postgres
 	config.MaxConns = 5
 	config.MinConns = 1
 	config.MaxConnLifetime = 5 * time.Minute
+
+	// Since we use pgbouncer pool, prepared statements might fail
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 
 	config.ConnConfig.RuntimeParams = map[string]string{
 		"application_name": "operator",
