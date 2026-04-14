@@ -75,7 +75,7 @@ func (r *PipelineReconciler) recordMetricsIfEnabled(fn func(*observability.Meter
 }
 
 // updatePipelineStatus updates PostgreSQL and CRD status (validation handled by backend API)
-func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus models.PipelineStatus, errors []string) error {
+func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline, newStatus models.PipelineStatus, errors []string, reason string) error {
 	// Check if status is already the same - avoid duplicate updates and history entries
 	currentStatus := models.PipelineStatus(p.Status)
 	if currentStatus == newStatus {
@@ -87,7 +87,7 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 
 	// Update PostgreSQL storage
 	pgStatus := newStatus
-	err := r.PostgresStorage.UpdatePipelineStatus(ctx, p.Spec.ID, pgStatus, errors, string(newStatus))
+	err := r.PostgresStorage.UpdatePipelineStatus(ctx, p.Spec.ID, pgStatus, errors, reason)
 	if err != nil {
 		log.Info("failed to update pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus, "error", err)
 		// Don't fail the reconciliation if PostgreSQL update fails, just log the error

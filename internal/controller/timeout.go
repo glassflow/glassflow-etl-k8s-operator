@@ -153,7 +153,7 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 
 	// Update status to Failed with error message
 	errorMsg := fmt.Sprintf("operation timed out after %v", constants.ReconcileTimeout)
-	err := r.updatePipelineStatus(ctx, log, p, models.PipelineStatusFailed, []string{errorMsg})
+	err := r.updatePipelineStatus(ctx, log, p, models.PipelineStatusFailed, []string{errorMsg}, "timeout")
 	if err != nil {
 		log.Error(err, "failed to update pipeline status to Failed", "pipeline_id", pipelineID)
 		// Continue anyway to clear annotations

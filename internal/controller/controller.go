@@ -236,7 +236,7 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil, "create")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
@@ -285,7 +285,7 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 	}
 
 	// Update pipeline status to "Stopped"
-	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil, "terminate")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
@@ -501,7 +501,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		// Continue with the resume process
 	} else {
 		// Transition to Resuming status first
-		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil)
+		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil, "resume")
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
@@ -563,7 +563,7 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil, "resume")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
@@ -619,7 +619,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		// Continue with the stop process
 	} else {
 		// Transition to Stopping status first
-		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopping, nil)
+		err := r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopping, nil, "stop")
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to stopping: %w", err)
 		}
@@ -646,7 +646,7 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 	}
 
 	// Update status to Stopped
-	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusStopped, nil, "stop")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to stopped: %w", err)
 	}
@@ -739,7 +739,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		// Continue with the resume process
 	} else {
 		// Transition status to Resuming
-		err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil)
+		err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusResuming, nil, "edit")
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status to resuming: %w", err)
 		}
@@ -764,7 +764,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		if err = r.Get(ctx, types.NamespacedName{Name: p.Name, Namespace: p.Namespace}, &p); err != nil {
 			return ctrl.Result{}, fmt.Errorf("refresh pipeline before status update: %w", err)
 		}
-		if err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusFailed, []string{msg}); err != nil {
+		if err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusFailed, []string{msg}, "edit"); err != nil {
 			return ctrl.Result{}, fmt.Errorf("update pipeline status: %w", err)
 		}
 		return ctrl.Result{}, nil
@@ -795,7 +795,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 	}
 
 	// All deployments are ready, update status to Running
-	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil)
+	err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusRunning, nil, "edit")
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
