@@ -140,19 +140,12 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}
 		}
 
-		subjectCountEnvVars := ingestorNATSSubjectCountEnvVars(t, ingestorReplicas)
-		if t.Deduplication != nil && t.Deduplication.Enabled {
-			replicasForSubjects := ingestorReplicas
-			if replicasForSubjects <= 0 {
-				replicasForSubjects = 1
-			}
-			subjectCountEnvVars = []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: fmt.Sprintf("%d", replicasForSubjects)}}
-		}
-
 		outputBinding, err := graph.GetOutput(pipelinegraph.IngestorNodeID(p.Spec, i))
 		if err != nil {
 			return fmt.Errorf("resolve ingestor output for stream %d: %w", i, err)
 		}
+
+		subjectCountEnvVars := ingestorNATSSubjectCountEnvVars(t, outputBinding.TotalSubjectCount)
 
 		err = r.createHeadlessService(ctx, ns.GetName(), resourceRef, ingestorLabels)
 		if err != nil {
@@ -173,6 +166,7 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 				{Name: "GLASSFLOW_PIPELINE_CONFIG", Value: "/config/pipeline.json"},
 				{Name: "GLASSFLOW_INGESTOR_TOPIC", Value: t.TopicName},
 				{Name: "NATS_SUBJECT_PREFIX", Value: outputBinding.SubjectPrefix},
+				{Name: "NATS_SUBJECT_TOTAL_COUNT", Value: fmt.Sprintf("%d", outputBinding.TotalSubjectCount)},
 				{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Ingestor},
 
 				{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
@@ -293,6 +287,7 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 			{Name: "NATS_LEFT_INPUT_STREAM_PREFIX", Value: joinInputs.Left.Streams[0].Name},
 			{Name: "NATS_RIGHT_INPUT_STREAM_PREFIX", Value: joinInputs.Right.Streams[0].Name},
 			{Name: "NATS_SUBJECT_PREFIX", Value: joinOutput.SubjectPrefix},
+			{Name: "NATS_SUBJECT_TOTAL_COUNT", Value: fmt.Sprintf("%d", joinOutput.TotalSubjectCount)},
 			{Name: "GLASSFLOW_LOG_LEVEL", Value: r.Config.Observability.LogLevels.Join},
 
 			{Name: "GLASSFLOW_OTEL_LOGS_ENABLED", Value: r.Config.Observability.LogsEnabled},
@@ -565,6 +560,7 @@ func (r *PipelineReconciler) createSingleDedup(
 	dedupEnv = append(dedupEnv,
 		v1.EnvVar{Name: "NATS_INPUT_STREAM_PREFIX", Value: dedupInput.StreamPrefix},
 		v1.EnvVar{Name: "NATS_SUBJECT_PREFIX", Value: dedupOutput.SubjectPrefix},
+		v1.EnvVar{Name: "NATS_SUBJECT_TOTAL_COUNT", Value: fmt.Sprintf("%d", dedupOutput.TotalSubjectCount)},
 	)
 
 	containerBuilder := newComponentContainerBuilder().

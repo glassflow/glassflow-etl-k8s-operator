@@ -15,9 +15,10 @@ type natsJoinKVStorePlan struct {
 }
 
 type natsResourcePlan struct {
-	DLQStream    nats.StreamConfig
-	Streams      []nats.StreamConfig
-	JoinKVStores []natsJoinKVStorePlan
+	DLQStream         nats.StreamConfig
+	Streams           []nats.StreamConfig
+	OTLPSourceStreams []nats.StreamConfig
+	JoinKVStores      []natsJoinKVStorePlan
 }
 
 type natsNodePlan struct {
@@ -82,7 +83,11 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 			return natsResourcePlan{}, err
 		}
 
-		plan.Streams = append(plan.Streams, nodePlan.Streams...)
+		if node.Type == pipelinegraph.NodeTypeOTLPSource {
+			plan.OTLPSourceStreams = append(plan.OTLPSourceStreams, nodePlan.Streams...)
+		} else {
+			plan.Streams = append(plan.Streams, nodePlan.Streams...)
+		}
 		plan.JoinKVStores = append(plan.JoinKVStores, nodePlan.JoinKVStores...)
 	}
 
@@ -162,6 +167,24 @@ func buildOutputStreams(
 		})
 	}
 	return streams
+}
+
+// staleStreamNames returns stream names that exist in NATS but are not in the planned
+// OTLP source streams or DLQ. On a stopped OTLP pipeline only OTLP source streams + DLQ
+// survive, so only OTLP source streams can be stale after a downscale.
+func staleStreamNames(existingNames []string, newPlan natsResourcePlan) []string {
+	planned := make(map[string]bool, len(newPlan.OTLPSourceStreams)+1)
+	planned[newPlan.DLQStream.Name] = true
+	for _, s := range newPlan.OTLPSourceStreams {
+		planned[s.Name] = true
+	}
+	var stale []string
+	for _, name := range existingNames {
+		if !planned[name] {
+			stale = append(stale, name)
+		}
+	}
+	return stale
 }
 
 func inputBindingStoreName(binding pipelinegraph.InputBinding) (string, error) {

@@ -20,9 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/nats-io/nats.go/jetstream"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
@@ -185,15 +188,197 @@ func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p et
 	return r.checkInputBindingPendingMessages(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
 }
 
+// discoverStaleStreams finds NATS streams that belong to this pipeline but are not in the
+// current OTLP source stream plan — orphaned after a downscale. Also returns the old OTLP
+// source stream count (existing streams minus DLQ), needed for subject override.
+// Only meaningful for OTLP pipelines: on a stopped pipeline only OTLP source streams + DLQ survive.
+func (r *PipelineReconciler) discoverStaleStreams(ctx context.Context, p etlv1alpha1.Pipeline) (staleNames []string, oldSubjectCount int, err error) {
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		return nil, 0, fmt.Errorf("build NATS plan for stale detection: %w", err)
+	}
+	hash := generatePipelineHash(p.Spec.ID)
+	existing, err := r.NATSClient.ListPipelineStreams(ctx, hash)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list pipeline streams: %w", err)
+	}
+	stale := staleStreamNames(existing, plan)
+	oldOTLPStreamCount := max(len(existing)-1, 0) // subtract DLQ
+	return stale, oldOTLPStreamCount, nil
+}
+
+// overrideOTLPSourceSubjects redistributes oldSubjectCount subjects round-robin across the
+// OTLP source streams in the plan so the OTLP receiver's cached SubjectCount is fully covered.
+//
+// Example: downscale 3→2, oldSubjectCount=3, new streams=2:
+//
+//	stream_0 gets [.0, .2]  stream_1 gets [.1]
+//
+// The extra binding (.2 on stream_0) becomes idle once the receiver refreshes its config.
+func overrideOTLPSourceSubjects(plan *natsResourcePlan, oldSubjectCount int) {
+	newStreamCount := len(plan.OTLPSourceStreams)
+	if newStreamCount == 0 || oldSubjectCount <= newStreamCount {
+		return
+	}
+	// Extract subject prefix from the first stream's first subject (e.g., "gfm-abc-otlp-out.0" → "gfm-abc-otlp-out")
+	firstSubjects := plan.OTLPSourceStreams[0].Subjects
+	if len(firstSubjects) == 0 {
+		return
+	}
+	dotIdx := strings.LastIndex(firstSubjects[0], ".")
+	if dotIdx < 0 {
+		return
+	}
+	subjectPrefix := firstSubjects[0][:dotIdx]
+
+	for i := range plan.OTLPSourceStreams {
+		plan.OTLPSourceStreams[i].Subjects = nil
+	}
+	for s := range oldSubjectCount {
+		streamIdx := s % newStreamCount
+		plan.OTLPSourceStreams[streamIdx].Subjects = append(
+			plan.OTLPSourceStreams[streamIdx].Subjects,
+			fmt.Sprintf("%s.%d", subjectPrefix, s),
+		)
+	}
+}
+
+// unbindStaleStreamSubjects releases subject ownership from stale streams so that active
+// streams can claim those subjects without NATS subject-overlap errors.
+// Must be called BEFORE createNATSStreamsFromPlan.
+func (r *PipelineReconciler) unbindStaleStreamSubjects(ctx context.Context, log logr.Logger, staleNames []string) error {
+	for _, name := range staleNames {
+		log.Info("unbinding subjects from stale stream", "stream", name)
+		if err := r.NATSClient.UnbindStreamSubjects(ctx, name); err != nil {
+			return fmt.Errorf("unbind subjects from %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// reassignStaleStreams moves messages from stale OTLP source streams into active streams via
+// NATS Stream Sources (server-side move). Returns requeue=true when a transfer is still in
+// progress so the reconciler retries after a short delay.
+func (r *PipelineReconciler) reassignStaleStreams(
+	ctx context.Context,
+	log logr.Logger,
+	p etlv1alpha1.Pipeline,
+	staleNames []string,
+	plan natsResourcePlan,
+) (bool, error) {
+	if len(staleNames) == 0 || len(plan.OTLPSourceStreams) == 0 {
+		return false, nil
+	}
+
+	for i, staleName := range staleNames {
+		destStream := plan.OTLPSourceStreams[i%len(plan.OTLPSourceStreams)]
+
+		msgCount, err := r.NATSClient.GetStreamMessageCount(ctx, staleName)
+		if err != nil {
+			return false, fmt.Errorf("check stale stream %s: %w", staleName, err)
+		}
+		if msgCount == 0 {
+			log.Info("stale stream is empty, deleting", "stream", staleName)
+			if err := r.deleteNATSStream(ctx, log, staleName); err != nil {
+				return false, err
+			}
+			continue
+		}
+
+		// Delete old durable consumer so it doesn't compete with Stream Source for messages.
+		_ = r.NATSClient.DeleteConsumer(ctx, staleName, getNATSSinkConsumerName(p.Spec.ID))
+
+		log.Info("adding stale stream as source for message transfer",
+			"stale_stream", staleName, "dest_stream", destStream.Name, "pending_messages", msgCount)
+		if err := r.NATSClient.AddStreamSource(ctx, destStream.Name, staleName); err != nil {
+			return false, fmt.Errorf("add source %s to %s: %w", staleName, destStream.Name, err)
+		}
+
+		complete, err := r.NATSClient.IsStreamSourceComplete(ctx, destStream.Name, staleName)
+		if err != nil {
+			return false, fmt.Errorf("check source progress %s→%s: %w", staleName, destStream.Name, err)
+		}
+		if !complete {
+			log.Info("stream source transfer in progress, requeuing",
+				"stale_stream", staleName, "dest_stream", destStream.Name)
+			return true, nil
+		}
+
+		log.Info("stream source transfer complete, cleaning up",
+			"stale_stream", staleName, "dest_stream", destStream.Name)
+		if err := r.NATSClient.RemoveStreamSource(ctx, destStream.Name, staleName); err != nil {
+			return false, fmt.Errorf("remove source %s from %s: %w", staleName, destStream.Name, err)
+		}
+		if err := r.deleteNATSStream(ctx, log, staleName); err != nil {
+			return false, err
+		}
+	}
+
+	return false, nil
+}
+
+// setupEditNATSStreams handles the NATS portion of an edit operation: unbinds stale stream
+// subjects (if any), builds and applies the resource plan (with subject override for downscale),
+// creates/updates streams, and drains messages from stale streams via Stream Sources.
+// Returns requeue=true when the drain is still in progress.
+func (r *PipelineReconciler) setupEditNATSStreams(
+	ctx context.Context,
+	log logr.Logger,
+	pipelineID string,
+	p etlv1alpha1.Pipeline,
+	staleNames []string,
+	oldSubjectCount int,
+) (ctrl.Result, error) {
+	if len(staleNames) > 0 {
+		if err := r.unbindStaleStreamSubjects(ctx, log, staleNames); err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("unbind stale stream subjects: %w", err)
+		}
+	}
+
+	plan, err := r.buildNATSResourcePlan(p)
+	if err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("build NATS plan: %w", err)
+	}
+	if oldSubjectCount > len(plan.OTLPSourceStreams) {
+		overrideOTLPSourceSubjects(&plan, oldSubjectCount)
+		log.Info("applied OTLP subject override for downscale",
+			"old_subject_count", oldSubjectCount,
+			"new_stream_count", len(plan.OTLPSourceStreams))
+	}
+
+	if err = r.createNATSStreamsFromPlan(ctx, p, plan); err != nil {
+		r.recordReconcileError(ctx, "edit", pipelineID, err)
+		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+	}
+
+	if len(staleNames) > 0 {
+		requeue, err := r.reassignStaleStreams(ctx, log, p, staleNames, plan)
+		if err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("reassign stale streams: %w", err)
+		}
+		if requeue {
+			return ctrl.Result{Requeue: true, RequeueAfter: 2 * time.Second}, nil
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
 // createNATSStreams creates all NATS streams and KV stores for a pipeline.
 func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	plan, err := r.buildNATSResourcePlan(p)
 	if err != nil {
 		return fmt.Errorf("build NATS resource plan: %w", err)
 	}
+	return r.createNATSStreamsFromPlan(ctx, p, plan)
+}
 
-	// create DLQ
-	err = r.NATSClient.CreateOrUpdateStream(ctx, plan.DLQStream)
+// createNATSStreamsFromPlan creates all NATS streams and KV stores from a (possibly overridden) plan.
+func (r *PipelineReconciler) createNATSStreamsFromPlan(ctx context.Context, p etlv1alpha1.Pipeline, plan natsResourcePlan) error {
+	err := r.NATSClient.CreateOrUpdateStream(ctx, plan.DLQStream)
 	if err != nil {
 		r.recordMetricsIfEnabled(func(m *observability.Meter) {
 			m.RecordNATSOperation(ctx, "create_stream", "failure", p.Spec.ID)
@@ -204,16 +389,20 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 		m.RecordNATSOperation(ctx, "create_dlq_stream", "success", p.Spec.ID)
 	})
 
+	for _, stream := range plan.OTLPSourceStreams {
+		if err = r.NATSClient.CreateOrUpdateStream(ctx, stream); err != nil {
+			return fmt.Errorf("create OTLP source stream %s: %w", stream.Name, err)
+		}
+	}
+
 	for _, stream := range plan.Streams {
-		err = r.NATSClient.CreateOrUpdateStream(ctx, stream)
-		if err != nil {
+		if err = r.NATSClient.CreateOrUpdateStream(ctx, stream); err != nil {
 			return fmt.Errorf("create stream %s: %w", stream.Name, err)
 		}
 	}
 
 	for _, kvStore := range plan.JoinKVStores {
-		err = r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStore.Name, kvStore.TTL)
-		if err != nil {
+		if err = r.NATSClient.CreateOrUpdateJoinKeyValueStore(ctx, kvStore.Name, kvStore.TTL); err != nil {
 			return fmt.Errorf("create join KV store %s: %w", kvStore.Name, err)
 		}
 	}
@@ -221,21 +410,33 @@ func (r *PipelineReconciler) createNATSStreams(ctx context.Context, p etlv1alpha
 	return nil
 }
 
+type natsCleanupOptions struct {
+	deleteDLQ       bool
+	keepOTLPStreams bool
+}
+
 // cleanupNATSPipelineResources cleans up all NATS resources for a pipeline, including DLQ.
 func (r *PipelineReconciler) cleanupNATSPipelineResources(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, true)
+	return r.cleanupNATSPipelineResourcesWithOptions(ctx, log, p, natsCleanupOptions{
+		deleteDLQ:       true,
+		keepOTLPStreams: false,
+	})
 }
 
-// cleanupNATSPipelineResourcesKeepDLQ cleans up pipeline NATS resources while preserving DLQ.
+// cleanupNATSPipelineResourcesKeepDLQ cleans up pipeline NATS resources while preserving DLQ
+// and OTLP source streams (so the shared OTLP receiver can continue buffering events).
 func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepDLQ(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
-	return r.cleanupNATSPipelineResourcesWithDLQOption(ctx, log, p, false)
+	return r.cleanupNATSPipelineResourcesWithOptions(ctx, log, p, natsCleanupOptions{
+		deleteDLQ:       false,
+		keepOTLPStreams: true,
+	})
 }
 
-func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithOptions(
 	ctx context.Context,
 	log logr.Logger,
 	p etlv1alpha1.Pipeline,
-	deleteDLQ bool,
+	opts natsCleanupOptions,
 ) error {
 	log.Info("cleaning up NATS streams", "pipeline", p.Name, "pipeline_id", p.Spec.ID)
 
@@ -249,7 +450,7 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		return fmt.Errorf("build NATS resource plan: %w", err)
 	}
 
-	if deleteDLQ {
+	if opts.deleteDLQ {
 		// delete the DLQ stream
 		log.Info("deleting NATS DLQ stream", "stream", plan.DLQStream.Name)
 		err = r.deleteNATSStream(ctx, log, plan.DLQStream.Name)
@@ -266,6 +467,19 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithDLQOption(
 		log.Info("NATS DLQ stream deleted successfully", "stream", plan.DLQStream.Name)
 	} else {
 		log.Info("skipping NATS DLQ stream cleanup", "pipeline_id", p.Spec.ID)
+	}
+
+	if opts.keepOTLPStreams && len(plan.OTLPSourceStreams) > 0 {
+		for _, stream := range plan.OTLPSourceStreams {
+			log.Info("preserving OTLP source stream during stop", "stream", stream.Name, "pipeline_id", p.Spec.ID)
+		}
+	} else {
+		for _, stream := range plan.OTLPSourceStreams {
+			err = r.deleteNATSStream(ctx, log, stream.Name)
+			if err != nil {
+				return fmt.Errorf("delete OTLP source stream %s: %w", stream.Name, err)
+			}
+		}
 	}
 
 	for _, kvStore := range plan.JoinKVStores {

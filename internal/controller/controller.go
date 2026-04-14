@@ -112,6 +112,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;delete
 
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.0/pkg/reconcile
@@ -672,8 +673,44 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 
 	namespace := r.getTargetNamespace(p)
 
-	if result, handled, err := r.checkOperationTimeoutAndLogProgress(ctx, log, &p); handled || err != nil {
-		return result, err
+	// Discover stale OTLP source streams early — before the timeout check — so that we can use
+	// them to decide whether a timed-out edit should be extended (drain still making progress).
+	var (
+		staleNames      []string
+		oldSubjectCount int
+	)
+	var err error
+	if p.Spec.IsOTLPSource() {
+		staleNames, oldSubjectCount, err = r.discoverStaleStreams(ctx, p)
+		if err != nil {
+			r.recordReconcileError(ctx, "edit", pipelineID, err)
+			return ctrl.Result{}, fmt.Errorf("discover stale streams: %w", err)
+		}
+		if len(staleNames) > 0 {
+			// Persist so the subject override survives passes after stale streams are deleted.
+			if persistErr := r.setOTLPDownscaleSubjectCount(ctx, &p, oldSubjectCount); persistErr != nil {
+				log.Error(persistErr, "failed to persist downscale subject count", "pipeline_id", pipelineID)
+			}
+		} else if saved, ok := getOTLPDownscaleSubjectCount(&p); ok {
+			// Stale streams already gone — restore count from the previous pass.
+			oldSubjectCount = saved
+		}
+	}
+
+	// Timeout check — extend if a drain is still making progress (mirrors reconcileStop).
+	timedOut, elapsed := r.checkOperationTimeout(log, &p)
+	if timedOut {
+		if len(staleNames) > 0 {
+			if extended, extErr := r.tryExtendEditDrainTimeout(ctx, log, &p, staleNames); extErr != nil {
+				log.Error(extErr, "failed to check drain progress during edit timeout", "pipeline_id", pipelineID)
+			} else if extended {
+				return ctrl.Result{Requeue: true, RequeueAfter: 2 * time.Second}, nil
+			}
+		}
+		return r.handleOperationTimeout(ctx, log, &p)
+	}
+	if elapsed > 0 {
+		log.Info("operation in progress", "pipeline_id", p.Spec.ID, "elapsed", elapsed)
 	}
 
 	// Update the pipeline config secret with new config
@@ -708,10 +745,30 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
 	}
 
-	err = r.createNATSStreams(ctx, p)
-	if err != nil {
+	// Dedup downscale protection: stale streams + dedup enabled means dedup replicas
+	// were decreased, which corrupts pod-local Badger state.
+	if p.Spec.IsOTLPSource() && len(staleNames) > 0 && p.Spec.Transform.IsDedupEnabled {
+		msg := "dedup replica count cannot be decreased: dedup stores pod-local state"
+		log.Info(msg, "pipeline_id", pipelineID, "stale_streams", staleNames)
+		// Re-fetch to get the latest ResourceVersion — prior Status and annotation
+		// writes may have bumped it, leaving our local copy stale.
+		if err = r.Get(ctx, types.NamespacedName{Name: p.Name, Namespace: p.Namespace}, &p); err != nil {
+			return ctrl.Result{}, fmt.Errorf("refresh pipeline before status update: %w", err)
+		}
+		if err = r.updatePipelineStatus(ctx, log, &p, models.PipelineStatusFailed, []string{msg}); err != nil {
+			return ctrl.Result{}, fmt.Errorf("update pipeline status: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if result, err := r.setupEditNATSStreams(ctx, log, pipelineID, p, staleNames, oldSubjectCount); err != nil || result.Requeue {
+		return result, err
+	}
+
+	// Clean up PVCs for dedup instances that are now disabled.
+	if err = r.cleanupDisabledDedupPVCs(ctx, log, p); err != nil {
 		r.recordReconcileError(ctx, "edit", pipelineID, err)
-		return ctrl.Result{}, fmt.Errorf("setup streams: %w", err)
+		return ctrl.Result{}, fmt.Errorf("cleanup disabled dedup PVCs: %w", err)
 	}
 
 	if err = r.ensureComponentSecretsInPipelineNamespace(ctx, r.getTargetNamespace(p)); err != nil {
@@ -734,6 +791,7 @@ func (r *PipelineReconciler) reconcileEdit(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, fmt.Errorf("update pipeline status to running: %w", err)
 	}
 
+	r.clearOTLPDownscaleSubjectCount(&p)
 	r.clearOperationAnnotationAndStatus(
 		ctx,
 		log,

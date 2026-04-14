@@ -71,26 +71,17 @@ func (r *PipelineReconciler) getDedupLabels(topic string) map[string]string {
 	return labels
 }
 
-// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=ingestorReplicas when dedup is enabled for the stream.
-func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream, ingestorReplicas int) []v1.EnvVar {
+// ingestorNATSSubjectCountEnvVars returns NATS_SUBJECT_COUNT=totalSubjectCount when dedup is enabled for the stream.
+// totalSubjectCount must be max(ingestorReplicas, downstreamReplicas) so that dedup key hashing covers
+// the full set of subjects the ingestor may publish to.
+func ingestorNATSSubjectCountEnvVars(stream etlv1alpha1.SourceStream, totalSubjectCount int) []v1.EnvVar {
 	if stream.Deduplication == nil || !stream.Deduplication.Enabled {
 		return nil
 	}
-	if ingestorReplicas <= 0 {
-		ingestorReplicas = constants.DefaultMinReplicas
+	if totalSubjectCount <= 0 {
+		totalSubjectCount = constants.DefaultMinReplicas
 	}
-	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(ingestorReplicas)}}
-}
-
-func getDedupReplicas(p etlv1alpha1.Pipeline) int {
-	replicas := constants.DefaultMinReplicas
-	if p.Spec.Resources != nil && p.Spec.Resources.Dedup != nil && p.Spec.Resources.Dedup.Replicas != nil {
-		replicas = int(*p.Spec.Resources.Dedup.Replicas)
-	}
-	if replicas <= 0 {
-		return constants.DefaultMinReplicas
-	}
-	return replicas
+	return []v1.EnvVar{{Name: "NATS_SUBJECT_COUNT", Value: strconv.Itoa(totalSubjectCount)}}
 }
 
 // preparePipelineLabels returns labels for pipeline resources
