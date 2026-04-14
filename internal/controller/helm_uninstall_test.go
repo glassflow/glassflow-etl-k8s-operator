@@ -81,7 +81,7 @@ func (f *fakeStorage) DeletePipeline(_ context.Context, pipelineID string) error
 	return nil
 }
 
-func (f *fakeStorage) UpdatePipelineStatus(_ context.Context, _ string, _ models.PipelineStatus, _ []string) error {
+func (f *fakeStorage) UpdatePipelineStatus(_ context.Context, _ string, _ models.PipelineStatus, _ []string, _ string) error {
 	return nil
 }
 

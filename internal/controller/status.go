@@ -86,14 +86,14 @@ func (r *PipelineReconciler) updatePipelineStatus(ctx context.Context, log logr.
 	// Status validation is now handled by the backend API, so we trust the status update
 
 	// Update PostgreSQL storage
-  pgStatus := newStatus
-  err := r.PostgresStorage.UpdatePipelineStatus(ctx, p.Spec.ID, pgStatus, errors, "")
-  if err != nil {
-    log.Info("failed to update pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus, "error", err)
-    // Don't fail the reconciliation if PostgreSQL update fails, just log the error
-  } else {
-    log.Info("successfully updated pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus)
-  }
+	pgStatus := newStatus
+	err := r.PostgresStorage.UpdatePipelineStatus(ctx, p.Spec.ID, pgStatus, errors, "")
+	if err != nil {
+		log.Info("failed to update pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus, "error", err)
+		// Don't fail the reconciliation if PostgreSQL update fails, just log the error
+	} else {
+		log.Info("successfully updated pipeline status in PostgreSQL", "pipeline_id", p.Spec.ID, "status", newStatus)
+	}
 
 	// Update CRD status
 	oldStatus := string(p.Status)

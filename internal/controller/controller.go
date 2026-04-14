@@ -78,7 +78,7 @@ var pipelineOperationPredicate = predicate.Funcs{
 // pipelineStorage is the subset of postgres.PostgresStorage used by the controller.
 type pipelineStorage interface {
 	DeletePipeline(ctx context.Context, pipelineID string) error
-	UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string) error
+	UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string, reason string) error
 }
 
 // -------------------------------------------------------------------------------------------------------------------
