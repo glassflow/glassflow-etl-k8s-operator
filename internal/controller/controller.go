@@ -40,7 +40,6 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/observability"
-	postgresstorage "github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 	"github.com/glassflow/glassflow-etl-k8s-operator/pkg/usagestats"
 )
 
@@ -76,6 +75,12 @@ var pipelineOperationPredicate = predicate.Funcs{
 	},
 }
 
+// pipelineStorage is the subset of postgres.PostgresStorage used by the controller.
+type pipelineStorage interface {
+	DeletePipeline(ctx context.Context, pipelineID string) error
+	UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string) error
+}
+
 // -------------------------------------------------------------------------------------------------------------------
 
 // PipelineReconciler reconciles a Pipeline object
@@ -84,7 +89,7 @@ type PipelineReconciler struct {
 	Scheme           *runtime.Scheme
 	Meter            *observability.Meter
 	NATSClient       *nats.NATSClient
-	PostgresStorage  *postgresstorage.PostgresStorage
+	PostgresStorage  pipelineStorage
 	Config           ReconcilerConfig
 	UsageStatsClient *usagestats.Client
 }
@@ -336,14 +341,12 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	}
 
 	// Clean up pipeline configuration from PostgreSQL
-	if r.PostgresStorage != nil {
-		err = r.PostgresStorage.DeletePipeline(ctx, p.Spec.ID)
-		if err != nil {
-			log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID, "error", err)
-			// Don't return error here - we're in force cleanup mode
-		} else {
-			log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID)
-		}
+	err = r.PostgresStorage.DeletePipeline(ctx, p.Spec.ID)
+	if err != nil {
+		log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID, "error", err)
+		// Don't return error here - we're in force cleanup mode
+	} else {
+		log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID)
 	}
 
 	r.clearOperationAnnotationAndStatus(
@@ -383,6 +386,14 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	// Check if pipeline is already stopped
 	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusStopped) {
 		log.Info("pipeline already stopped during helm uninstall", "pipeline_id", pipelineID)
+
+		// Delete pipeline configuration from PostgreSQL for stopped pipelines
+		if err := r.PostgresStorage.DeletePipeline(ctx, pipelineID); err != nil {
+			log.Info("failed to delete stopped pipeline configuration from PostgreSQL", "pipeline_id", pipelineID, "error", err)
+		} else {
+			log.Info("successfully deleted stopped pipeline configuration from PostgreSQL", "pipeline_id", pipelineID)
+		}
+
 		// Remove helm uninstall annotation and finalizer to allow cleanup
 		annotations := p.GetAnnotations()
 		if annotations != nil {
@@ -422,14 +433,12 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	}
 
 	// Clean up pipeline configuration from PostgreSQL
-	if r.PostgresStorage != nil {
-		err = r.PostgresStorage.DeletePipeline(ctx, pipelineID)
-		if err != nil {
-			log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", pipelineID, "error", err)
-			// Don't return error here - we're in force cleanup mode
-		} else {
-			log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", pipelineID)
-		}
+	err = r.PostgresStorage.DeletePipeline(ctx, pipelineID)
+	if err != nil {
+		log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", pipelineID, "error", err)
+		// Don't return error here - we're in force cleanup mode
+	} else {
+		log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", pipelineID)
 	}
 
 	// Remove all pipeline operation annotations
