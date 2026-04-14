@@ -66,8 +66,8 @@ func (c *helmUninstallTestClient) Delete(_ context.Context, obj client.Object, _
 
 // fakeStorage records DeletePipeline calls and can simulate errors.
 type fakeStorage struct {
-	mu      sync.Mutex
-	deleted []string
+	mu        sync.Mutex
+	deleted   []string
 	returnErr error
 }
 
