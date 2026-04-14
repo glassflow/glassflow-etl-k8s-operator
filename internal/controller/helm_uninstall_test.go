@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -63,15 +64,19 @@ func (c *helmUninstallTestClient) Delete(_ context.Context, obj client.Object, _
 	return nil
 }
 
-// fakeStorage records DeletePipeline calls.
+// fakeStorage records DeletePipeline calls and can simulate errors.
 type fakeStorage struct {
 	mu      sync.Mutex
 	deleted []string
+	returnErr error
 }
 
 func (f *fakeStorage) DeletePipeline(_ context.Context, pipelineID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.returnErr != nil {
+		return f.returnErr
+	}
 	f.deleted = append(f.deleted, pipelineID)
 	return nil
 }
@@ -132,10 +137,10 @@ func TestReconcileHelmUninstallDeletesStoppedPipelineFromPostgres(t *testing.T) 
 	}
 }
 
-func TestReconcileHelmUninstallDeletesStoppedPipelineWithNilPostgres(t *testing.T) {
+func TestReconcileHelmUninstallStoppedPipelineDeleteErrorIsNonFatal(t *testing.T) {
 	t.Parallel()
 
-	const pipelineID = "stopped-pipeline-nil-postgres"
+	const pipelineID = "stopped-pipeline-delete-error"
 
 	pipeline := &etlv1alpha1.Pipeline{
 		ObjectMeta: metav1.ObjectMeta{
@@ -155,22 +160,24 @@ func TestReconcileHelmUninstallDeletesStoppedPipelineWithNilPostgres(t *testing.
 			{Name: pipeline.Name, Namespace: pipeline.Namespace}: pipeline.DeepCopy(),
 		},
 	}
+	storage := &fakeStorage{returnErr: fmt.Errorf("postgres unavailable")}
 
 	r := &PipelineReconciler{
 		Client:          fakeClient,
-		PostgresStorage: nil,
+		PostgresStorage: storage,
 	}
 
 	_, err := r.reconcileHelmUninstall(context.Background(), logr.Discard(), *pipeline)
 	if err != nil {
-		t.Fatalf("reconcileHelmUninstall() returned unexpected error with nil postgres: %v", err)
+		t.Fatalf("reconcileHelmUninstall() should not return error when postgres delete fails: %v", err)
 	}
 
+	// CRD should still be deleted even if postgres failed
 	fakeClient.mu.Lock()
 	deletedCRDs := fakeClient.deleted
 	fakeClient.mu.Unlock()
 
 	if len(deletedCRDs) != 1 || deletedCRDs[0] != pipelineID {
-		t.Fatalf("expected CRD to be deleted even with nil postgres, got deletedCRDs=%v", deletedCRDs)
+		t.Fatalf("expected CRD to be deleted even on postgres error, got deletedCRDs=%v", deletedCRDs)
 	}
 }
