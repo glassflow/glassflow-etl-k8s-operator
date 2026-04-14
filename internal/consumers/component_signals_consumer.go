@@ -171,7 +171,7 @@ func (c *ComponentSignalsConsumer) stopPipeline(ctx context.Context, message mod
 		return fmt.Errorf("update pipeline CRD with stop annotation: %w", err)
 	}
 
-	err = c.storage.UpdatePipelineStatus(ctx, message.PipelineID, models.PipelineStatusStopping, nil)
+	err = c.storage.UpdatePipelineStatus(ctx, message.PipelineID, models.PipelineStatusStopping, nil, message.Text)
 	if err != nil {
 		return fmt.Errorf("update pipeline status: %w", err)
 	}

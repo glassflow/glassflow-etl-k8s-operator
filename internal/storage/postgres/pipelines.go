@@ -12,7 +12,7 @@ import (
 )
 
 // UpdatePipelineStatus updates the pipeline status and creates a history event
-func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string) error {
+func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string, reason string) error {
 
 	// Begin transaction
 	tx, err := s.pool.Begin(ctx)
@@ -46,7 +46,7 @@ func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID s
 	}
 
 	// Create history event with type "status" or "error" (depending on errors parameter)
-	err = s.insertPipelineHistoryEvent(ctx, tx, pipelineID, statusStr, errors)
+	err = s.insertPipelineHistoryEvent(ctx, tx, pipelineID, statusStr, errors, reason)
 	if err != nil {
 		// Log but don't fail the status update
 		s.logger.Info("failed to insert pipeline history event", "pipeline_id", pipelineID, "error", err)
@@ -65,13 +65,14 @@ func (s *PostgresStorage) UpdatePipelineStatus(ctx context.Context, pipelineID s
 
 // HistoryEntry represents a pipeline history entry
 type HistoryEntry struct {
-	Type     string          `json:"type"`     // "history", "error", or "status"
-	Pipeline json.RawMessage `json:"pipeline"` // Full pipeline JSON
-	Errors   []string        `json:"errors"`   // Array of error messages (for error type)
+	Type     string          `json:"type"`             // "history", "error", or "status"
+	Pipeline json.RawMessage `json:"pipeline"`         // Full pipeline JSON
+	Errors   []string        `json:"errors"`           // Array of error messages (for error type)
+	Reason   string          `json:"reason,omitempty"` // Optional reason for the status change
 }
 
 // insertPipelineHistoryEvent inserts a pipeline history event
-func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx.Tx, pipelineID string, status string, errors []string) error {
+func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx.Tx, pipelineID string, status string, errors []string, reason string) error {
 	// Determine event type: "error" if errors present, otherwise "status"
 	eventType := "status"
 	if len(errors) > 0 {
@@ -87,6 +88,7 @@ func (s *PostgresStorage) insertPipelineHistoryEvent(ctx context.Context, tx pgx
 		Type:     eventType,
 		Pipeline: pipelineJSON,
 		Errors:   errors,
+		Reason:   reason,
 	}
 
 	eventJSON, err := json.Marshal(event)
