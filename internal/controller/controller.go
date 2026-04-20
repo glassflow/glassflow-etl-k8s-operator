@@ -278,8 +278,10 @@ func (r *PipelineReconciler) reconcileTerminate(ctx context.Context, log logr.Lo
 		return result, err
 	}
 
-	// Remove all NATS streams/KV stores for this pipeline before marking it Stopped.
-	err = r.cleanupNATSPipelineResources(ctx, log, p)
+	// Remove NATS streams/KV stores for this pipeline before marking it Stopped, while preserving
+	// OTLP source streams so the shared OTLP receiver can continue buffering events if the pipeline
+	// is later resumed. DLQ is still removed on terminate.
+	err = r.cleanupNATSPipelineResourcesKeepOTLP(ctx, log, p)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("cleanup NATS resources for terminate: %w", err)
 	}

@@ -432,6 +432,16 @@ func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepDLQ(ctx context.Con
 	})
 }
 
+// cleanupNATSPipelineResourcesKeepOTLP cleans up pipeline NATS resources while preserving only
+// OTLP source streams (so the shared OTLP receiver can continue buffering events after terminate).
+// DLQ and all other operation streams/KV stores are removed.
+func (r *PipelineReconciler) cleanupNATSPipelineResourcesKeepOTLP(ctx context.Context, log logr.Logger, p etlv1alpha1.Pipeline) error {
+	return r.cleanupNATSPipelineResourcesWithOptions(ctx, log, p, natsCleanupOptions{
+		deleteDLQ:       true,
+		keepOTLPStreams: true,
+	})
+}
+
 func (r *PipelineReconciler) cleanupNATSPipelineResourcesWithOptions(
 	ctx context.Context,
 	log logr.Logger,
