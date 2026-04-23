@@ -521,28 +521,19 @@ func (r *PipelineReconciler) reconcileResume(ctx context.Context, log logr.Logge
 		return ctrl.Result{}, fmt.Errorf("get namespace %s: %w", namespace, err)
 	}
 
-	// Get secret
-	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p)}
-	var secret v1.Secret
-	err = r.Get(ctx, secretName, &secret)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-
-			labels := preparePipelineLabels(p)
-			secret, err = r.createSecret(ctx, secretName, labels, p)
-			if err != nil {
-				if errors.Is(err, ErrPipelineConfigSecretNotFound) {
-					log.Info("pipeline config secret not found during resume, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
-					return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
-				}
-				return ctrl.Result{}, fmt.Errorf("create secret for resume: %w", err)
-			}
-		} else {
-			return ctrl.Result{}, fmt.Errorf("get secret %s: %w", secretName, err)
-		}
-	}
-
 	labels := preparePipelineLabels(p)
+
+	// Always sync the secret from the API-managed pipeline-config secret on resume,
+	// so that any config changes (e.g. v2→v3 migration) are picked up by the pods.
+	secretName := types.NamespacedName{Namespace: namespace, Name: r.getResourceName(p)}
+	secret, err := r.updateSecret(ctx, secretName, labels, p)
+	if err != nil {
+		if errors.Is(err, ErrPipelineConfigSecretNotFound) {
+			log.Info("pipeline config secret not found during resume, requeuing to wait for API to create it", "pipeline_id", pipelineID, "error", err)
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 2}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("sync secret for resume: %w", err)
+	}
 
 	err = r.createNATSStreams(ctx, p)
 	if err != nil {
