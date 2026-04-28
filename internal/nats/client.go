@@ -123,7 +123,6 @@ type StreamConfig struct {
 	Subjects []string // if empty, defaults to []string{Name + ".*"}
 	MaxAge   time.Duration
 	MaxBytes int64
-	Discard  jetstream.DiscardPolicy
 }
 
 // DefaultStreamLimits returns the operator-level default stream limits.
@@ -146,7 +145,7 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, cfg StreamConfig)
 
 		MaxAge:   cfg.MaxAge,
 		MaxBytes: cfg.MaxBytes,
-		Discard:  cfg.Discard,
+		Discard:  jetstream.DiscardOld,
 
 		Retention:          n.retention,
 		AllowDirect:        n.allowDirect,
