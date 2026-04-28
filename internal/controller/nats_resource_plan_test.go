@@ -400,3 +400,119 @@ func TestBuildNATSResourcePlanDiscardPolicy(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildNATSResourcePlanMaxMsgs verifies that MaxMsgs from pipeline resources overrides
+// the operator default and is applied to all streams in the plan, including the DLQ.
+func TestBuildNATSResourcePlanMaxMsgs(t *testing.T) {
+	t.Parallel()
+
+	const customMaxMsgs = int64(500_000)
+
+	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	pipeline := etlv1alpha1.Pipeline{
+		Spec: etlv1alpha1.PipelineSpec{
+			ID: "pipe-maxmsgs",
+			Source: etlv1alpha1.Sources{
+				Type: "kafka",
+				Streams: []etlv1alpha1.SourceStream{
+					{TopicName: "events"},
+				},
+			},
+			Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+			Resources: &etlv1alpha1.PipelineResources{
+				Nats: &etlv1alpha1.NatsResources{
+					Stream: &etlv1alpha1.NatsStreamResources{
+						MaxMsgs: customMaxMsgs,
+					},
+				},
+			},
+		},
+	}
+
+	plan, err := reconciler.buildNATSResourcePlan(pipeline)
+	if err != nil {
+		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
+	}
+
+	if plan.DLQStream.MaxMsgs != customMaxMsgs {
+		t.Errorf("DLQ stream MaxMsgs = %d, want %d", plan.DLQStream.MaxMsgs, customMaxMsgs)
+	}
+	for _, s := range plan.Streams {
+		if s.MaxMsgs != customMaxMsgs {
+			t.Errorf("stream %s MaxMsgs = %d, want %d", s.Name, s.MaxMsgs, customMaxMsgs)
+		}
+	}
+}
+
+// TestBuildNATSResourcePlanMaxMsgsDefault verifies that when MaxMsgs is not set in pipeline
+// resources, the operator-level default (zero for an empty NATSClient) is used.
+func TestBuildNATSResourcePlanMaxMsgsDefault(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	pipeline := etlv1alpha1.Pipeline{
+		Spec: etlv1alpha1.PipelineSpec{
+			ID: "pipe-maxmsgs-default",
+			Source: etlv1alpha1.Sources{
+				Type: "kafka",
+				Streams: []etlv1alpha1.SourceStream{
+					{TopicName: "events"},
+				},
+			},
+			Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+		},
+	}
+
+	plan, err := reconciler.buildNATSResourcePlan(pipeline)
+	if err != nil {
+		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
+	}
+
+	// NATSClient zero value has maxMsgs=0; plan should carry that through unchanged.
+	if plan.DLQStream.MaxMsgs != 0 {
+		t.Errorf("DLQ stream MaxMsgs = %d, want 0 (operator default)", plan.DLQStream.MaxMsgs)
+	}
+	for _, s := range plan.Streams {
+		if s.MaxMsgs != 0 {
+			t.Errorf("stream %s MaxMsgs = %d, want 0 (operator default)", s.Name, s.MaxMsgs)
+		}
+	}
+}
+
+// TestBuildNATSResourcePlanMaxMsgsZeroNotOverride verifies that MaxMsgs=0 in pipeline
+// resources does not override the operator default. Both 0 and -1 mean unlimited in NATS,
+// so 0 is the natural "not configured" zero-value and must not clobber the operator default.
+func TestBuildNATSResourcePlanMaxMsgsZeroNotOverride(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+	pipeline := etlv1alpha1.Pipeline{
+		Spec: etlv1alpha1.PipelineSpec{
+			ID: "pipe-maxmsgs-zero",
+			Source: etlv1alpha1.Sources{
+				Type: "kafka",
+				Streams: []etlv1alpha1.SourceStream{
+					{TopicName: "events"},
+				},
+			},
+			Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+			Resources: &etlv1alpha1.PipelineResources{
+				Nats: &etlv1alpha1.NatsResources{
+					Stream: &etlv1alpha1.NatsStreamResources{
+						MaxMsgs: 0, // explicitly zero — should not override
+					},
+				},
+			},
+		},
+	}
+
+	plan, err := reconciler.buildNATSResourcePlan(pipeline)
+	if err != nil {
+		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
+	}
+
+	// MaxMsgs=0 is treated as "not set"; operator default (0 for empty client) is preserved.
+	if plan.DLQStream.MaxMsgs != 0 {
+		t.Errorf("DLQ stream MaxMsgs = %d, want 0", plan.DLQStream.MaxMsgs)
+	}
+}

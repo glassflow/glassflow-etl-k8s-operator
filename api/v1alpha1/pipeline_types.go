@@ -118,6 +118,9 @@ type NatsResources struct {
 type NatsStreamResources struct {
 	MaxAge   metav1.Duration   `json:"maxAge,omitempty"`
 	MaxBytes resource.Quantity `json:"maxBytes,omitempty"`
+	// MaxMsgs sets the maximum number of messages the stream will store.
+	// NATS treats both 0 and -1 as unlimited; omitting this field (zero value) means use the operator default.
+	MaxMsgs int64 `json:"maxMsgs,omitempty"`
 }
 
 // IngestorResources defines resources for ingestor components.

@@ -368,6 +368,12 @@ spec:
                             - type: string
                             pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                             x-kubernetes-int-or-string: true
+                          maxMsgs:
+                            description: MaxMsgs sets the maximum number of messages
+                              the stream will store. NATS treats both 0 and -1 as unlimited;
+                              omitting this field (zero value) means use the operator default.
+                            format: int64
+                            type: integer
                         type: object
                     type: object
                   sink:

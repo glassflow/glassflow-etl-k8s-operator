@@ -112,13 +112,16 @@ func main() {
 	}
 
 	// NATS stream configuration
-	var natsMaxStreamAge, natsMaxStreamBytes string
+	var natsMaxStreamAge, natsMaxStreamBytes, natsMaxStreamMsgs string
 	flag.StringVar(&natsMaxStreamAge, "nats-max-stream-age", getEnvOrDefault(
 		"NATS_MAX_STREAM_AGE", "168h"),
 		"Maximum age for NATS streams (default: 7 days)")
 	flag.StringVar(&natsMaxStreamBytes, "nats-max-stream-bytes", getEnvOrDefault(
 		"NATS_MAX_STREAM_BYTES", "107374182400"),
 		"Maximum bytes for NATS streams (default: 100GB)")
+	flag.StringVar(&natsMaxStreamMsgs, "nats-max-stream-msgs", getEnvOrDefault(
+		"NATS_MAX_STREAM_MSGS", "1000000"),
+		"Maximum message count for NATS streams (default: 1M)")
 
 	// NATS stream policy configuration
 	var natsStreamRetention, natsStreamAllowDirect, natsStreamAllowAtomicPublish string
@@ -512,6 +515,13 @@ func main() {
 		maxBytes = 107374182400 // 100GB default
 	}
 
+	maxMsgs, err := strconv.ParseInt(natsMaxStreamMsgs, 10, 64)
+	if err != nil || maxMsgs < 0 {
+		setupLog.Error(err, "unable to parse nats max stream msgs, using default",
+			"value", natsMaxStreamMsgs, "default", "1000000")
+		maxMsgs = nats.DefaultStreamMaxMsgs
+	}
+
 	// Parse NATS stream policy configuration
 	retention := nats.ParseRetentionPolicy(natsStreamRetention)
 
@@ -541,6 +551,7 @@ func main() {
 		URL:                natsOperatorAddr,
 		MaxAge:             maxAge,
 		MaxBytes:           maxBytes,
+		MaxMsgs:            maxMsgs,
 		Retention:          retention,
 		AllowDirect:        allowDirect,
 		AllowAtomicPublish: allowAtomicPublish,
@@ -550,11 +561,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	defaultMaxAge, defaultMaxBytes := natsClient.DefaultStreamLimits()
+	defaultMaxAge, defaultMaxBytes, defaultMaxMsgs := natsClient.DefaultStreamLimits()
 	if err := natsClient.CreateOrUpdateStream(ctx, nats.StreamConfig{
 		Name:     constants.ComponentSignalsStream,
 		MaxAge:   defaultMaxAge,
 		MaxBytes: defaultMaxBytes,
+		MaxMsgs:  defaultMaxMsgs,
 	}); err != nil {
 		setupLog.Error(err, "unable to create component signals messages stream")
 		os.Exit(1)
