@@ -120,7 +120,7 @@ func main() {
 		"NATS_MAX_STREAM_BYTES", "107374182400"),
 		"Maximum bytes for NATS streams (default: 100GB)")
 	flag.StringVar(&natsMaxStreamMsgs, "nats-max-stream-msgs", getEnvOrDefault(
-		"NATS_MAX_STREAM_MSGS", "1000000"),
+		"NATS_MAX_STREAM_MSGS", "500000"),
 		"Maximum message count for NATS streams (default: 1M)")
 
 	// NATS stream policy configuration
@@ -516,7 +516,7 @@ func main() {
 	}
 
 	maxMsgs, err := strconv.ParseInt(natsMaxStreamMsgs, 10, 64)
-	if err != nil || maxMsgs < 0 {
+	if err != nil || maxMsgs < -1 {
 		setupLog.Error(err, "unable to parse nats max stream msgs, using default",
 			"value", natsMaxStreamMsgs, "default", "1000000")
 		maxMsgs = nats.DefaultStreamMaxMsgs
