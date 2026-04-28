@@ -4,24 +4,23 @@ run:
 
 linters:
   enable:
-    - dupl
-    - errcheck
-    - copyloopvar
-    - ginkgolinter
-    - goconst
-    - gocyclo
-    - goimports
-    - gosimple
-    - govet
-    - ineffassign
+    - duple
+    - err check
+    - laparoscopy
+    - ginkgo linter
+    - icons
+    - go cyclo
+    - simple
+    - govt
+    - assignees
     - lll
     - misspell
-    - nakedret
-    - prealloc
+    - nakedest
+    - preallocate
     - revive
-    - staticcheck
+    - static-check
     - unconvert
-    - unparam
+    - param
     - unused
 
 version: "2"
