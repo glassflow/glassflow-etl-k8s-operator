@@ -75,11 +75,11 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 	}
 
 	plan := natsResourcePlan{
+		// DLQ has no capacity limits — it must absorb all failed events regardless of volume.
+		// MaxAge=0, MaxBytes=0, MaxMsgs=0 are all interpreted as unlimited by NATS.
+		// Discard policy is left as the zero value (DiscardOld) but is irrelevant with no limits.
 		DLQStream: nats.StreamConfig{
-			Name:     getDLQStreamName(p.Spec.ID),
-			MaxAge:   limits.MaxAge,
-			MaxBytes: limits.MaxBytes,
-			MaxMsgs:  limits.MaxMsgs,
+			Name: getDLQStreamName(p.Spec.ID),
 		},
 		Streams: make([]nats.StreamConfig, 0, len(graphConfig.Nodes)),
 	}

@@ -49,11 +49,8 @@ func TestBuildNATSResourcePlanJoinless(t *testing.T) {
 	}
 
 	hash := generatePipelineHash(pipeline.Spec.ID)
-	wantDLQ := nats.StreamConfig{
-		Name:     getDLQStreamName(pipeline.Spec.ID),
-		MaxAge:   5 * time.Minute,
-		MaxBytes: 42,
-	}
+	// DLQ has no capacity limits regardless of pipeline resource config.
+	wantDLQ := nats.StreamConfig{Name: getDLQStreamName(pipeline.Spec.ID)}
 	if !reflect.DeepEqual(plan.DLQStream, wantDLQ) {
 		t.Fatalf("plan.DLQStream = %#v, want %#v", plan.DLQStream, wantDLQ)
 	}
@@ -355,7 +352,7 @@ func TestBuildNATSResourcePlanDiscardPolicy(t *testing.T) {
 		}
 	})
 
-	t.Run("DLQ stream has DiscardOld", func(t *testing.T) {
+	t.Run("DLQ stream has no limits and DiscardOld default", func(t *testing.T) {
 		t.Parallel()
 		pipeline := etlv1alpha1.Pipeline{
 			Spec: etlv1alpha1.PipelineSpec{
@@ -373,8 +370,10 @@ func TestBuildNATSResourcePlanDiscardPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildNATSResourcePlan() error: %v", err)
 		}
-		if plan.DLQStream.Discard != jetstream.DiscardOld {
-			t.Errorf("DLQ stream: Discard = %v, want DiscardOld", plan.DLQStream.Discard)
+		// DLQ has no capacity limits — all zero-values mean unlimited in NATS.
+		wantDLQ := nats.StreamConfig{Name: getDLQStreamName(pipeline.Spec.ID)}
+		if !reflect.DeepEqual(plan.DLQStream, wantDLQ) {
+			t.Errorf("DLQ stream = %#v, want %#v", plan.DLQStream, wantDLQ)
 		}
 	})
 
@@ -434,8 +433,10 @@ func TestBuildNATSResourcePlanMaxMsgs(t *testing.T) {
 		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
 	}
 
-	if plan.DLQStream.MaxMsgs != customMaxMsgs {
-		t.Errorf("DLQ stream MaxMsgs = %d, want %d", plan.DLQStream.MaxMsgs, customMaxMsgs)
+	// DLQ has no limits regardless of pipeline resources config.
+	wantDLQ := nats.StreamConfig{Name: getDLQStreamName(pipeline.Spec.ID)}
+	if !reflect.DeepEqual(plan.DLQStream, wantDLQ) {
+		t.Errorf("DLQ stream = %#v, want %#v", plan.DLQStream, wantDLQ)
 	}
 	for _, s := range plan.Streams {
 		if s.MaxMsgs != customMaxMsgs {
@@ -468,9 +469,10 @@ func TestBuildNATSResourcePlanMaxMsgsDefault(t *testing.T) {
 		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
 	}
 
-	// NATSClient zero value has maxMsgs=0; plan should carry that through unchanged.
-	if plan.DLQStream.MaxMsgs != 0 {
-		t.Errorf("DLQ stream MaxMsgs = %d, want 0 (operator default)", plan.DLQStream.MaxMsgs)
+	// DLQ always has no limits.
+	wantDLQ := nats.StreamConfig{Name: getDLQStreamName(pipeline.Spec.ID)}
+	if !reflect.DeepEqual(plan.DLQStream, wantDLQ) {
+		t.Errorf("DLQ stream = %#v, want %#v", plan.DLQStream, wantDLQ)
 	}
 	for _, s := range plan.Streams {
 		if s.MaxMsgs != 0 {
@@ -511,8 +513,9 @@ func TestBuildNATSResourcePlanMaxMsgsZeroNotOverride(t *testing.T) {
 		t.Fatalf("buildNATSResourcePlan() returned error: %v", err)
 	}
 
-	// MaxMsgs=0 is treated as "not set"; operator default (0 for empty client) is preserved.
-	if plan.DLQStream.MaxMsgs != 0 {
-		t.Errorf("DLQ stream MaxMsgs = %d, want 0", plan.DLQStream.MaxMsgs)
+	// DLQ always has no limits, regardless of resource configuration.
+	wantDLQ := nats.StreamConfig{Name: getDLQStreamName(pipeline.Spec.ID)}
+	if !reflect.DeepEqual(plan.DLQStream, wantDLQ) {
+		t.Errorf("DLQ stream = %#v, want %#v", plan.DLQStream, wantDLQ)
 	}
 }
