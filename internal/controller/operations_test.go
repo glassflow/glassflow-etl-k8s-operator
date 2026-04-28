@@ -341,7 +341,7 @@ func (c *operationTestClient) Get(_ context.Context, key client.ObjectKey, obj c
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	stored, exists := c.objects[key]
+	stored, exists := c.objects[types.NamespacedName{Name: key.Name, Namespace: key.Namespace}]
 	if !exists {
 		return apierrors.NewNotFound(schema.GroupResource{Group: "etl.glassflow.io", Resource: "pipelines"}, key.Name)
 	}

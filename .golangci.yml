@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
   allow-parallel-runners: true
@@ -11,8 +13,6 @@ linters:
     - ginkgolinter
     - goconst
     - gocyclo
-    - gofmt
-    - goimports
     - govet
     - ineffassign
     - lll
@@ -23,11 +23,13 @@ linters:
     - staticcheck
     - unconvert
     - unparam
+    - unused
   settings:
     revive:
       rules:
         - name: comment-spacings
   exclusions:
+    generated: lax
     rules:
       - path: "api/*"
         linters:
@@ -37,4 +39,7 @@ linters:
           - dupl
           - lll
 
-version: "2"
+formatters:
+  enable:
+    - gofmt
+    - goimports

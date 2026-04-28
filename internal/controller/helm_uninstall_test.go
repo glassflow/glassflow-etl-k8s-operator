@@ -31,7 +31,7 @@ func (c *helmUninstallTestClient) Get(_ context.Context, key client.ObjectKey, o
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	stored, exists := c.objects[key]
+	stored, exists := c.objects[types.NamespacedName{Name: key.Name, Namespace: key.Namespace}]
 	if !exists {
 		return nil
 	}
