@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/pipelinegraph"
@@ -72,8 +74,10 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 		switch node.Type {
 		case pipelinegraph.NodeTypeJoin:
 			nodePlan, err = buildJoinNodePlan(graph, node, p.Spec.Join, maxAge, maxBytes)
-		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeOTLPSource, pipelinegraph.NodeTypeDedup:
-			nodePlan, err = buildNodePlan(graph, node, maxAge, maxBytes)
+		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeDedup:
+			nodePlan, err = buildNodePlan(graph, node, maxAge, maxBytes, jetstream.DiscardNew)
+		case pipelinegraph.NodeTypeOTLPSource:
+			nodePlan, err = buildNodePlan(graph, node, maxAge, maxBytes, jetstream.DiscardOld)
 		// sink doesn't have output
 		default:
 			continue
@@ -99,6 +103,7 @@ func buildNodePlan(
 	node pipelinegraph.NodeConfig,
 	maxAge time.Duration,
 	maxBytes int64,
+	discard jetstream.DiscardPolicy,
 ) (natsNodePlan, error) {
 	output, err := graph.GetOutput(node.ID)
 	if err != nil {
@@ -106,7 +111,7 @@ func buildNodePlan(
 	}
 
 	return natsNodePlan{
-		Streams: buildOutputStreams(output, maxAge, maxBytes),
+		Streams: buildOutputStreams(output, maxAge, maxBytes, discard),
 	}, nil
 }
 
@@ -117,7 +122,7 @@ func buildJoinNodePlan(
 	maxAge time.Duration,
 	maxBytes int64,
 ) (natsNodePlan, error) {
-	producerPlan, err := buildNodePlan(graph, node, maxAge, maxBytes)
+	producerPlan, err := buildNodePlan(graph, node, maxAge, maxBytes, jetstream.DiscardNew)
 	if err != nil {
 		return natsNodePlan{}, err
 	}
@@ -156,6 +161,7 @@ func buildOutputStreams(
 	output pipelinegraph.OutputBinding,
 	maxAge time.Duration,
 	maxBytes int64,
+	discard jetstream.DiscardPolicy,
 ) []nats.StreamConfig {
 	streams := make([]nats.StreamConfig, 0, len(output.Streams))
 	for _, stream := range output.Streams {
@@ -164,6 +170,7 @@ func buildOutputStreams(
 			Subjects: stream.Subjects,
 			MaxAge:   maxAge,
 			MaxBytes: maxBytes,
+			Discard:  discard,
 		})
 	}
 	return streams
