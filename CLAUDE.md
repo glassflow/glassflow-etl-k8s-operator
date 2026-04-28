@@ -75,3 +75,17 @@ Both must be run together — skipping either causes drift between Go types and 
 - Branch naming follows Linear ticket ID: `ETL-XYZ` or `username/ETL-XYZ-description`
 - Backend changes reviewed by: Petr, Pablo, Kiran
 - No `Co-Authored-By: Claude` or AI attribution in commits/PRs
+
+## Domain context
+
+For glossary, architecture diagrams, customer personas, and cross-repo workflows see the shared context repo (sibling directory):
+
+```
+../glassflow-agent-context/
+  domain/glossary.md              # Key terms and definitions
+  domain/deployment-topology.md   # How components fit together in prod
+  projects/k8s-operator/          # Operator-specific architecture notes
+  workflows/linear-tickets.md     # Ticket → branch → PR flow
+```
+
+Load these on demand when doing design work, writing PR descriptions, or when domain terminology is ambiguous. Don't load them for routine code tasks.
