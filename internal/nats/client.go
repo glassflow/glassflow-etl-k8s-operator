@@ -16,10 +16,6 @@ const JSErrCodeStreamRetentionPolicyChange jetstream.ErrorCode = 10052
 
 const DefaultStreamMaxAge = 168 * time.Hour       // 7 days
 const DefaultStreamMaxBytes = int64(107374182400) // 100GB
-// DefaultStreamMaxMsgs is set to ~2.5x the dedup consumer's default MaxAckPending
-// (DefaultDedupComponentBatchSize=50k * 4 = 200k), giving ~6s of headroom at 80k RPS
-// before back-pressure activates.
-const DefaultStreamMaxMsgs = int64(500_000)
 
 // ParseRetentionPolicy parses a string retention policy name to jetstream.RetentionPolicy
 // Valid values: "WorkQueue", "Limits", "Interest"
@@ -51,7 +47,6 @@ type Config struct {
 	URL                string
 	MaxAge             time.Duration
 	MaxBytes           int64
-	MaxMsgs            int64
 	Retention          jetstream.RetentionPolicy
 	AllowDirect        bool
 	AllowAtomicPublish bool
@@ -62,7 +57,6 @@ type NATSClient struct {
 	js                 jetstream.JetStream
 	maxAge             time.Duration
 	maxBytes           int64
-	maxMsgs            int64
 	retention          jetstream.RetentionPolicy
 	allowDirect        bool
 	allowAtomicPublish bool
@@ -117,7 +111,6 @@ func New(ctx context.Context, cfg Config) (*NATSClient, error) {
 		js:                 js,
 		maxAge:             cfg.MaxAge,
 		maxBytes:           cfg.MaxBytes,
-		maxMsgs:            cfg.MaxMsgs,
 		retention:          cfg.Retention,
 		allowDirect:        cfg.AllowDirect,
 		allowAtomicPublish: cfg.AllowAtomicPublish,
@@ -130,13 +123,11 @@ type StreamConfig struct {
 	Subjects []string // if empty, defaults to []string{Name + ".*"}
 	MaxAge   time.Duration
 	MaxBytes int64
-	MaxMsgs  int64
-	Discard  jetstream.DiscardPolicy
 }
 
 // DefaultStreamLimits returns the operator-level default stream limits.
-func (n *NATSClient) DefaultStreamLimits() (time.Duration, int64, int64) {
-	return n.maxAge, n.maxBytes, n.maxMsgs
+func (n *NATSClient) DefaultStreamLimits() (time.Duration, int64) {
+	return n.maxAge, n.maxBytes
 }
 
 // CreateOrUpdateStream creates or updates a NATS stream using the provided StreamConfig.
@@ -154,8 +145,7 @@ func (n *NATSClient) CreateOrUpdateStream(ctx context.Context, cfg StreamConfig)
 
 		MaxAge:   cfg.MaxAge,
 		MaxBytes: cfg.MaxBytes,
-		MaxMsgs:  cfg.MaxMsgs,
-		Discard:  cfg.Discard,
+		Discard:  jetstream.DiscardOld,
 
 		Retention:          n.retention,
 		AllowDirect:        n.allowDirect,

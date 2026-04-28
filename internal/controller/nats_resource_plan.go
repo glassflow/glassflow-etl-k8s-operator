@@ -4,21 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nats-io/nats.go/jetstream"
-
 	etlv1alpha1 "github.com/glassflow/glassflow-etl-k8s-operator/api/v1alpha1"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/pipelinegraph"
 )
-
-// streamLimits bundles the NATS stream capacity parameters that travel together
-// through the plan-building helpers.
-type streamLimits struct {
-	MaxAge   time.Duration
-	MaxBytes int64
-	MaxMsgs  int64
-	Discard  jetstream.DiscardPolicy
-}
 
 type natsJoinKVStorePlan struct {
 	Name string
@@ -47,20 +36,14 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 		}
 	}
 
-	defaultMaxAge, defaultMaxBytes, defaultMaxMsgs := r.NATSClient.DefaultStreamLimits()
-	limits := streamLimits{MaxAge: defaultMaxAge, MaxBytes: defaultMaxBytes, MaxMsgs: defaultMaxMsgs}
+	maxAge, maxBytes := r.NATSClient.DefaultStreamLimits()
 	if p.Spec.Resources != nil && p.Spec.Resources.Nats != nil && p.Spec.Resources.Nats.Stream != nil {
 		s := p.Spec.Resources.Nats.Stream
 		if s.MaxAge.Duration != 0 {
-			limits.MaxAge = s.MaxAge.Duration
+			maxAge = s.MaxAge.Duration
 		}
 		if !s.MaxBytes.IsZero() {
-			limits.MaxBytes = s.MaxBytes.Value()
-		}
-		if s.MaxMsgs != 0 {
-			// 0 is the Go zero-value (field omitted in YAML) — treat as "use operator default".
-			// NATS considers both 0 and -1 unlimited, so any non-zero value here is intentional.
-			limits.MaxMsgs = s.MaxMsgs
+			maxBytes = s.MaxBytes.Value()
 		}
 	}
 
@@ -75,11 +58,10 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 	}
 
 	plan := natsResourcePlan{
-		// DLQ has no capacity limits — it must absorb all failed events regardless of volume.
-		// MaxAge=0, MaxBytes=0, MaxMsgs=0 are all interpreted as unlimited by NATS.
-		// Discard policy is left as the zero value (DiscardOld) but is irrelevant with no limits.
 		DLQStream: nats.StreamConfig{
-			Name: getDLQStreamName(p.Spec.ID),
+			Name:     getDLQStreamName(p.Spec.ID),
+			MaxAge:   maxAge,
+			MaxBytes: maxBytes,
 		},
 		Streams: make([]nats.StreamConfig, 0, len(graphConfig.Nodes)),
 	}
@@ -89,11 +71,9 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 
 		switch node.Type {
 		case pipelinegraph.NodeTypeJoin:
-			nodePlan, err = buildJoinNodePlan(graph, node, p.Spec.Join, limits)
-		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeDedup:
-			nodePlan, err = buildNodePlan(graph, node, limits.withDiscard(jetstream.DiscardNew))
-		case pipelinegraph.NodeTypeOTLPSource:
-			nodePlan, err = buildNodePlan(graph, node, limits.withDiscard(jetstream.DiscardOld))
+			nodePlan, err = buildJoinNodePlan(graph, node, p.Spec.Join, maxAge, maxBytes)
+		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeOTLPSource, pipelinegraph.NodeTypeDedup:
+			nodePlan, err = buildNodePlan(graph, node, maxAge, maxBytes)
 		// sink doesn't have output
 		default:
 			continue
@@ -114,19 +94,19 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 	return plan, nil
 }
 
-func (l streamLimits) withDiscard(d jetstream.DiscardPolicy) streamLimits {
-	l.Discard = d
-	return l
-}
-
-func buildNodePlan(graph *pipelinegraph.Graph, node pipelinegraph.NodeConfig, lim streamLimits) (natsNodePlan, error) {
+func buildNodePlan(
+	graph *pipelinegraph.Graph,
+	node pipelinegraph.NodeConfig,
+	maxAge time.Duration,
+	maxBytes int64,
+) (natsNodePlan, error) {
 	output, err := graph.GetOutput(node.ID)
 	if err != nil {
 		return natsNodePlan{}, fmt.Errorf("resolve output for node %s: %w", node.ID, err)
 	}
 
 	return natsNodePlan{
-		Streams: buildOutputStreams(output, lim),
+		Streams: buildOutputStreams(output, maxAge, maxBytes),
 	}, nil
 }
 
@@ -134,9 +114,10 @@ func buildJoinNodePlan(
 	graph *pipelinegraph.Graph,
 	node pipelinegraph.NodeConfig,
 	join etlv1alpha1.Join,
-	lim streamLimits,
+	maxAge time.Duration,
+	maxBytes int64,
 ) (natsNodePlan, error) {
-	producerPlan, err := buildNodePlan(graph, node, lim.withDiscard(jetstream.DiscardNew))
+	producerPlan, err := buildNodePlan(graph, node, maxAge, maxBytes)
 	if err != nil {
 		return natsNodePlan{}, err
 	}
@@ -171,16 +152,18 @@ func buildJoinNodePlan(
 	}, nil
 }
 
-func buildOutputStreams(output pipelinegraph.OutputBinding, lim streamLimits) []nats.StreamConfig {
+func buildOutputStreams(
+	output pipelinegraph.OutputBinding,
+	maxAge time.Duration,
+	maxBytes int64,
+) []nats.StreamConfig {
 	streams := make([]nats.StreamConfig, 0, len(output.Streams))
 	for _, stream := range output.Streams {
 		streams = append(streams, nats.StreamConfig{
 			Name:     stream.Name,
 			Subjects: stream.Subjects,
-			MaxAge:   lim.MaxAge,
-			MaxBytes: lim.MaxBytes,
-			MaxMsgs:  lim.MaxMsgs,
-			Discard:  lim.Discard,
+			MaxAge:   maxAge,
+			MaxBytes: maxBytes,
 		})
 	}
 	return streams
