@@ -23,3 +23,5 @@ linters:
     - unconvert
     - unparam
     - unused
+
+version: 2
