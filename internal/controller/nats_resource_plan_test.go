@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -63,12 +64,14 @@ func TestBuildNATSResourcePlanJoinless(t *testing.T) {
 			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor-out.0", hash)},
 			MaxAge:   5 * time.Minute,
 			MaxBytes: 42,
+			Discard:  jetstream.DiscardNew,
 		},
 		{
 			Name:     fmt.Sprintf("gfm-%s-ingestor-out_1", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor-out.1", hash)},
 			MaxAge:   5 * time.Minute,
 			MaxBytes: 42,
+			Discard:  jetstream.DiscardNew,
 		},
 	}
 	if !reflect.DeepEqual(plan.Streams, wantStreams) {
@@ -129,6 +132,7 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 				fmt.Sprintf("gfm-%s-ingestor_left-out.0", hash),
 				fmt.Sprintf("gfm-%s-ingestor_left-out.1", hash),
 			},
+			Discard: jetstream.DiscardNew,
 		},
 		{
 			Name: fmt.Sprintf("gfm-%s-ingestor_right-out_0", hash),
@@ -136,10 +140,12 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 				fmt.Sprintf("gfm-%s-ingestor_right-out.0", hash),
 				fmt.Sprintf("gfm-%s-ingestor_right-out.2", hash),
 			},
+			Discard: jetstream.DiscardNew,
 		},
 		{
 			Name:     fmt.Sprintf("gfm-%s-ingestor_right-out_1", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-ingestor_right-out.1", hash)},
+			Discard:  jetstream.DiscardNew,
 		},
 		{
 			Name: fmt.Sprintf("gfm-%s-dedup_right-out_0", hash),
@@ -147,10 +153,12 @@ func TestBuildNATSResourcePlanJoinWithKVStores(t *testing.T) {
 				fmt.Sprintf("gfm-%s-dedup_right-out.0", hash),
 				fmt.Sprintf("gfm-%s-dedup_right-out.1", hash),
 			},
+			Discard: jetstream.DiscardNew,
 		},
 		{
 			Name:     fmt.Sprintf("gfm-%s-join-out_0", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-join-out.0", hash)},
+			Discard:  jetstream.DiscardNew,
 		},
 	}
 	if !reflect.DeepEqual(plan.Streams, wantStreams) {
@@ -246,6 +254,7 @@ func TestBuildNATSResourcePlanOTLPWithDedup(t *testing.T) {
 		{
 			Name:     fmt.Sprintf("gfm-%s-dedup-out_0", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-dedup-out.0", hash)},
+			Discard:  jetstream.DiscardNew,
 		},
 	}
 	if !reflect.DeepEqual(plan.Streams, wantStreams) {
@@ -312,4 +321,82 @@ func TestBuildNATSResourcePlanJoinWithLeftDedupKVStores(t *testing.T) {
 	if !reflect.DeepEqual(plan.JoinKVStores, wantJoinKVStores) {
 		t.Fatalf("plan.JoinKVStores = %#v, want %#v", plan.JoinKVStores, wantJoinKVStores)
 	}
+}
+
+// TestBuildNATSResourcePlanDiscardPolicy verifies that pipeline internal streams are created
+// with DiscardNew, while DLQ and OTLP source streams retain DiscardOld.
+func TestBuildNATSResourcePlanDiscardPolicy(t *testing.T) {
+	t.Parallel()
+
+	reconciler := &PipelineReconciler{NATSClient: &nats.NATSClient{}}
+
+	t.Run("pipeline streams have DiscardNew", func(t *testing.T) {
+		t.Parallel()
+		pipeline := etlv1alpha1.Pipeline{
+			Spec: etlv1alpha1.PipelineSpec{
+				ID: "pipe-discard",
+				Source: etlv1alpha1.Sources{
+					Type: "kafka",
+					Streams: []etlv1alpha1.SourceStream{
+						{TopicName: "events"},
+					},
+				},
+				Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+			},
+		}
+		plan, err := reconciler.buildNATSResourcePlan(pipeline)
+		if err != nil {
+			t.Fatalf("buildNATSResourcePlan() error: %v", err)
+		}
+		for _, s := range plan.Streams {
+			if s.Discard != jetstream.DiscardNew {
+				t.Errorf("stream %s: Discard = %v, want DiscardNew", s.Name, s.Discard)
+			}
+		}
+	})
+
+	t.Run("DLQ stream has DiscardOld", func(t *testing.T) {
+		t.Parallel()
+		pipeline := etlv1alpha1.Pipeline{
+			Spec: etlv1alpha1.PipelineSpec{
+				ID: "pipe-dlq-discard",
+				Source: etlv1alpha1.Sources{
+					Type: "kafka",
+					Streams: []etlv1alpha1.SourceStream{
+						{TopicName: "events"},
+					},
+				},
+				Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+			},
+		}
+		plan, err := reconciler.buildNATSResourcePlan(pipeline)
+		if err != nil {
+			t.Fatalf("buildNATSResourcePlan() error: %v", err)
+		}
+		if plan.DLQStream.Discard != jetstream.DiscardOld {
+			t.Errorf("DLQ stream: Discard = %v, want DiscardOld", plan.DLQStream.Discard)
+		}
+	})
+
+	t.Run("OTLP source streams have DiscardOld", func(t *testing.T) {
+		t.Parallel()
+		pipeline := etlv1alpha1.Pipeline{
+			Spec: etlv1alpha1.PipelineSpec{
+				ID: "pipe-otlp-discard",
+				Source: etlv1alpha1.Sources{
+					Type: etlv1alpha1.SourceTypeOTLPLogs,
+				},
+				Sink: etlv1alpha1.Sink{Type: "clickhouse"},
+			},
+		}
+		plan, err := reconciler.buildNATSResourcePlan(pipeline)
+		if err != nil {
+			t.Fatalf("buildNATSResourcePlan() error: %v", err)
+		}
+		for _, s := range plan.OTLPSourceStreams {
+			if s.Discard != jetstream.DiscardOld {
+				t.Errorf("OTLP source stream %s: Discard = %v, want DiscardOld", s.Name, s.Discard)
+			}
+		}
+	})
 }
