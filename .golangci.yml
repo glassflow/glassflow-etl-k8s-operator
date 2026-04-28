@@ -16,8 +16,9 @@ issues:
       linters:
         - dupl
         - lll
+
 linters:
-  disable-all: true
+  default: none
   enable:
     - dupl
     - errcheck
@@ -27,7 +28,6 @@ linters:
     - gocyclo
     - gofmt
     - goimports
-    - gosimple
     - govet
     - ineffassign
     - lll
@@ -36,12 +36,12 @@ linters:
     - prealloc
     - revive
     - staticcheck
-    - typecheck
     - unconvert
     - unparam
-    - unused
 
 linters-settings:
   revive:
     rules:
       - name: comment-spacings
+
+version: "2"
