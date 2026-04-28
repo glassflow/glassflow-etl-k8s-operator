@@ -8,7 +8,7 @@ require (
 	github.com/avast/retry-go/v4 v4.7.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.0
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/nats-io/nats.go v1.48.0
 	github.com/onsi/ginkgo/v2 v2.21.0
 	github.com/onsi/gomega v1.35.1
