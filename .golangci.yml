@@ -24,4 +24,4 @@ linters:
     - unparam
     - unused
 
-version: 2
+version: "2"
