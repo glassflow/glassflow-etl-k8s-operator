@@ -91,7 +91,7 @@ func TestCleanupDisabledDedupPVCsSkipsEnabledStreams(t *testing.T) {
 
 	// PVC should still exist — dedup is enabled, so it should not be deleted.
 	var remaining v1.PersistentVolumeClaim
-	if err = reconciler.Client.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: pvcName}, &remaining); err != nil {
+	if err = reconciler.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: pvcName}, &remaining); err != nil {
 		t.Fatalf("expected PVC %s to still exist, got: %v", pvcName, err)
 	}
 }
