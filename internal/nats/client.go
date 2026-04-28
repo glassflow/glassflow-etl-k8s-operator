@@ -73,7 +73,7 @@ func New(ctx context.Context, cfg Config) (*NATSClient, error) {
 
 	retryDelay := NATSInitialRetryDelay
 
-	for i := range NATSConnectionRetries {
+	for i := 0; i < NATSConnectionRetries; i++ {
 		select {
 		case <-connCtx.Done():
 			return nil, fmt.Errorf("timeout after %v waiting to connect to NATS at %s", NATSMaxConnectionWait, cfg.URL)
@@ -88,7 +88,7 @@ func New(ctx context.Context, cfg Config) (*NATSClient, error) {
 		if i < NATSConnectionRetries-1 {
 			select {
 			case <-time.After(retryDelay):
-				log.Printf("Retrying connection to NATS to %s in %v...", cfg.URL, retryDelay)
+				log.Printf("Retrying connection to NATS at %s in %v...", cfg.URL, retryDelay)
 				// Continue with retry
 			case <-connCtx.Done():
 				return nil, fmt.Errorf("timeout during retry delay for NATS at %s: %w", cfg.URL, connCtx.Err())
