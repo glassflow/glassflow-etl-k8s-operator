@@ -10,7 +10,6 @@ linters:
     - ginkgolinter
     - goconst
     - gocyclo
-    - gofmt
     - goimports
     - gosimple
     - govet
@@ -24,6 +23,3 @@ linters:
     - unconvert
     - unparam
     - unused
-
-
-version: "2"
