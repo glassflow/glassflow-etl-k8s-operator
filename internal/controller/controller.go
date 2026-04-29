@@ -78,7 +78,9 @@ var pipelineOperationPredicate = predicate.Funcs{
 // PipelineStorage is the subset of postgres.PostgresStorage used by the controller.
 type PipelineStorage interface {
 	DeletePipeline(ctx context.Context, pipelineID string) error
-	UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string, reason string) error
+	UpdatePipelineStatus(
+		ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string, reason string,
+	) error
 }
 
 
@@ -174,7 +176,8 @@ func (r *PipelineReconciler) reconcileCreate(ctx context.Context, log logr.Logge
 	// Check if pipeline is already running
 	if p.Status == etlv1alpha1.PipelineStatus(models.PipelineStatusRunning) {
 		log.Info("pipeline already running", "pipeline_id", p.Spec.ID)
-		r.clearOperationAnnotationAndStatus(ctx, log, &p, constants.PipelineCreateAnnotation, models.PipelineStatusRunning, true)
+		r.clearOperationAnnotationAndStatus(
+			ctx, log, &p, constants.PipelineCreateAnnotation, models.PipelineStatusRunning, true)
 		return ctrl.Result{}, nil
 	}
 
