@@ -68,19 +68,21 @@ func Run(cmd *exec.Cmd) (string, error) {
 }
 
 func InstallNATS() error {
-	cmd := exec.Command("helm", "repo", "add", "nats", natsHelmchartURL)
+	cmd := exec.Command("helm", "repo", "add", "nats", natsHelmchartURL, "--force-update")
 	_, err := Run(cmd)
 	if err != nil {
 		return fmt.Errorf("add nats repo: %w", err)
 	}
 
 	cmd = exec.Command(
-		"helm", "install", "nats", "nats/nats",
+		"helm", "upgrade", "--install", "nats", "nats/nats",
 		"--set", "config.jetstream.enabled=true",
-		"--set", "config.cluster.enabled=true",
+		"--set", "config.cluster.enabled=false",
 		"--set", "service.enabled=true",
 		"--set", "service.ports.nats.enabled=true",
 		"--set", "service.ports.monitor.enabled=false",
+		"--wait",
+		"--timeout", "3m",
 	)
 	_, err = Run(cmd)
 	if err != nil {
@@ -207,7 +209,7 @@ func GetProjectDir() (string, error) {
 
 // InstallPostgres installs PostgreSQL via Helm (bitnami chart) into the default namespace.
 func InstallPostgres() error {
-	cmd := exec.Command("helm", "repo", "add", "bitnami", postgresHelmchartURL)
+	cmd := exec.Command("helm", "repo", "add", "bitnami", postgresHelmchartURL, "--force-update")
 	if _, err := Run(cmd); err != nil {
 		return fmt.Errorf("add bitnami repo: %w", err)
 	}
@@ -218,7 +220,7 @@ func InstallPostgres() error {
 	}
 
 	cmd = exec.Command(
-		"helm", "install", postgresHelmRelease, postgresHelmChart,
+		"helm", "upgrade", "--install", postgresHelmRelease, postgresHelmChart,
 		"--set", fmt.Sprintf("auth.postgresPassword=%s", postgresAdminPassword),
 		"--set", "primary.persistence.enabled=false",
 		"--wait",
