@@ -343,12 +343,13 @@ func (r *PipelineReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 	}
 
 	// Clean up pipeline configuration from PostgreSQL
-	err = r.PostgresStorage.DeletePipeline(ctx, p.Spec.ID)
-	if err != nil {
-		log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID, "error", err)
-		// Don't return error here - we're in force cleanup mode
-	} else {
-		log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID)
+	if r.PostgresStorage != nil {
+		err = r.PostgresStorage.DeletePipeline(ctx, p.Spec.ID)
+		if err != nil {
+			log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID, "error", err)
+		} else {
+			log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", p.Spec.ID)
+		}
 	}
 
 	r.clearOperationAnnotationAndStatus(
@@ -390,10 +391,12 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 		log.Info("pipeline already stopped during helm uninstall", "pipeline_id", pipelineID)
 
 		// Delete pipeline configuration from PostgreSQL for stopped pipelines
-		if err := r.PostgresStorage.DeletePipeline(ctx, pipelineID); err != nil {
-			log.Info("failed to delete stopped pipeline configuration from PostgreSQL", "pipeline_id", pipelineID, "error", err)
-		} else {
-			log.Info("successfully deleted stopped pipeline configuration from PostgreSQL", "pipeline_id", pipelineID)
+		if r.PostgresStorage != nil {
+			if err := r.PostgresStorage.DeletePipeline(ctx, pipelineID); err != nil {
+				log.Info("failed to delete stopped pipeline configuration from PostgreSQL", "pipeline_id", pipelineID, "error", err)
+			} else {
+				log.Info("successfully deleted stopped pipeline configuration from PostgreSQL", "pipeline_id", pipelineID)
+			}
 		}
 
 		// Remove helm uninstall annotation and finalizer to allow cleanup
@@ -435,12 +438,13 @@ func (r *PipelineReconciler) reconcileHelmUninstall(ctx context.Context, log log
 	}
 
 	// Clean up pipeline configuration from PostgreSQL
-	err = r.PostgresStorage.DeletePipeline(ctx, pipelineID)
-	if err != nil {
-		log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", pipelineID, "error", err)
-		// Don't return error here - we're in force cleanup mode
-	} else {
-		log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", pipelineID)
+	if r.PostgresStorage != nil {
+		err = r.PostgresStorage.DeletePipeline(ctx, pipelineID)
+		if err != nil {
+			log.Info("failed to delete pipeline configuration from PostgreSQL", "pipeline_id", pipelineID, "error", err)
+		} else {
+			log.Info("successfully deleted pipeline configuration from PostgreSQL", "pipeline_id", pipelineID)
+		}
 	}
 
 	// Remove all pipeline operation annotations

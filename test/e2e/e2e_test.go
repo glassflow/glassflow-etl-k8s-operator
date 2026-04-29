@@ -19,6 +19,7 @@ package e2e
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -53,8 +54,8 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
-		By("deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
+		By("deploying the controller-manager with e2e overlay (noop component images)")
+		cmd = exec.Command("make", "deploy-e2e", fmt.Sprintf("IMG=%s", projectImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 	})
@@ -145,11 +146,226 @@ var _ = Describe("Manager", Ordered, func() {
 			}
 			Eventually(verifyControllerUp).Should(Succeed())
 		})
+	})
+})
 
-		// +kubebuilder:scaffold:e2e-webhooks-checks
+// pipelineStatus polls the Pipeline CR and returns its .status field.
+func pipelineStatus(name, ns string) func(g Gomega) string { //nolint:unparam
+	return func(g Gomega) string {
+		cmd := exec.Command("kubectl", "get", "pipeline", name,
+			"-n", ns, "-o", "jsonpath={.status}")
+		out, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+		return out
+	}
+}
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by checking the controller logs or resource status.
+// kubectlApplyPipelineCR creates or updates a Pipeline CR from a YAML string.
+func kubectlApplyPipelineCR(yaml string) error {
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(yaml)
+	_, err := utils.Run(cmd)
+	return err
+}
+
+// kubectlAnnotatePipeline adds an annotation to a Pipeline CR.
+func kubectlAnnotatePipeline(name, ns, annotation string) error { //nolint:unparam
+	cmd := exec.Command("kubectl", "annotate", "--overwrite", "pipeline", name,
+		"-n", ns, annotation)
+	_, err := utils.Run(cmd)
+	return err
+}
+
+// simplePipelineYAML returns a minimal Pipeline CR YAML for e2e tests.
+func simplePipelineYAML(name, pipelineID string) string {
+	return fmt.Sprintf(`apiVersion: etl.glassflow.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: %s
+  namespace: default
+  annotations:
+    pipeline.etl.glassflow.io/create: "create"
+spec:
+  pipeline_id: %s
+  config: '{"pipeline_id":"%s","sources":[],"sink":{"type":"clickhouse"}}'
+  sources:
+    type: kafka
+    topics:
+    - topic_name: e2e-topic-%s
+  join:
+    type: ""
+    enabled: false
+  sink:
+    type: clickhouse
+  pipeline_resources:
+    ingestor:
+      base:
+        replicas: 1
+    sink:
+      replicas: 1
+`, name, pipelineID, pipelineID, pipelineID)
+}
+
+func joinPipelineYAML(name, pipelineID string) string {
+	return fmt.Sprintf(`apiVersion: etl.glassflow.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: %s
+  namespace: default
+  annotations:
+    pipeline.etl.glassflow.io/create: "create"
+spec:
+  pipeline_id: %s
+  config: '{"pipeline_id":"%s","sources":[],"sink":{"type":"clickhouse"}}'
+  sources:
+    type: kafka
+    topics:
+    - topic_name: e2e-left-%s
+    - topic_name: e2e-right-%s
+  join:
+    type: temporal
+    enabled: true
+    left_buffer_ttl: 300000000000
+    right_buffer_ttl: 300000000000
+  sink:
+    type: clickhouse
+  pipeline_resources:
+    ingestor:
+      left:
+        replicas: 1
+      right:
+        replicas: 1
+    join:
+      replicas: 1
+    sink:
+      replicas: 1
+`, name, pipelineID, pipelineID, pipelineID, pipelineID)
+}
+
+var _ = Describe("Pipeline", Ordered, func() {
+	SetDefaultEventuallyTimeout(5 * time.Minute)
+	SetDefaultEventuallyPollingInterval(3 * time.Second)
+
+	Context("Simple kafka pipeline lifecycle", func() {
+		const (
+			pipelineName = "e2e-simple"
+			pipelineID   = "e2e-simple"
+			pipelineNS   = "default"
+			componentNS  = "pipeline-" + pipelineID
+		)
+
+		AfterAll(func() {
+			// Force cleanup regardless of test outcome
+			_ = kubectlAnnotatePipeline(pipelineName, pipelineNS, "pipeline.etl.glassflow.io/delete=delete")
+			time.Sleep(5 * time.Second)
+			cmd := exec.Command("kubectl", "delete", "pipeline", pipelineName, "-n", pipelineNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "ns", componentNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should create namespace, StatefulSets, and reach Running status", func() {
+			Expect(kubectlApplyPipelineCR(simplePipelineYAML(pipelineName, pipelineID))).To(Succeed())
+
+			By("waiting for pipeline to reach Running status")
+			Eventually(func(g Gomega) {
+				status := pipelineStatus(pipelineName, pipelineNS)(g)
+				g.Expect(status).To(Equal("Running"))
+			}).Should(Succeed())
+
+			By("verifying pipeline namespace exists")
+			cmd := exec.Command("kubectl", "get", "ns", componentNS)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying sink StatefulSet exists")
+			cmd = exec.Command("kubectl", "get", "statefulset", "sink", "-n", componentNS)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying ingestor StatefulSet exists")
+			cmd = exec.Command("kubectl", "get", "statefulset", "ingestor-0", "-n", componentNS)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying headless services exist")
+			cmd = exec.Command("kubectl", "get", "svc", "sink", "-n", componentNS)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should stop pipeline", func() {
+			Expect(kubectlAnnotatePipeline(pipelineName, pipelineNS, "pipeline.etl.glassflow.io/stop=stop")).To(Succeed())
+
+			By("waiting for pipeline to reach Stopped status")
+			Eventually(func(g Gomega) {
+				status := pipelineStatus(pipelineName, pipelineNS)(g)
+				g.Expect(status).To(Equal("Stopped"))
+			}).Should(Succeed())
+		})
+
+		It("should resume pipeline", func() {
+			Expect(kubectlAnnotatePipeline(pipelineName, pipelineNS, "pipeline.etl.glassflow.io/resume=resume")).To(Succeed())
+
+			By("waiting for pipeline to leave Stopped status")
+			Eventually(func(g Gomega) {
+				status := pipelineStatus(pipelineName, pipelineNS)(g)
+				g.Expect(status).NotTo(Equal("Stopped"))
+			}).Should(Succeed())
+		})
+
+		It("should delete pipeline and clean up namespace", func() {
+			Expect(kubectlAnnotatePipeline(pipelineName, pipelineNS, "pipeline.etl.glassflow.io/delete=delete")).To(Succeed())
+
+			By("waiting for pipeline namespace to be deleted")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "ns", componentNS)
+				_, err := utils.Run(cmd)
+				g.Expect(err).To(HaveOccurred(), "namespace should be gone")
+			}).Should(Succeed())
+		})
+	})
+
+	Context("Join pipeline", func() {
+		const (
+			pipelineName = "e2e-join"
+			pipelineID   = "e2e-join"
+			pipelineNS   = "default"
+			componentNS  = "pipeline-" + pipelineID
+		)
+
+		AfterAll(func() {
+			_ = kubectlAnnotatePipeline(pipelineName, pipelineNS, "pipeline.etl.glassflow.io/delete=delete")
+			time.Sleep(5 * time.Second)
+			cmd := exec.Command("kubectl", "delete", "pipeline", pipelineName, "-n", pipelineNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "ns", componentNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should create 2 ingestors, join, sink and reach Running status", func() {
+			Expect(kubectlApplyPipelineCR(joinPipelineYAML(pipelineName, pipelineID))).To(Succeed())
+
+			By("waiting for pipeline to reach Running status")
+			Eventually(func(g Gomega) {
+				status := pipelineStatus(pipelineName, pipelineNS)(g)
+				g.Expect(status).To(Equal("Running"))
+			}).Should(Succeed())
+
+			By("verifying join StatefulSet exists")
+			cmd := exec.Command("kubectl", "get", "statefulset", "join", "-n", componentNS)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying left ingestor StatefulSet exists")
+			cmd = exec.Command("kubectl", "get", "statefulset", "ingestor-0", "-n", componentNS)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying right ingestor StatefulSet exists")
+			cmd = exec.Command("kubectl", "get", "statefulset", "ingestor-1", "-n", componentNS)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 })

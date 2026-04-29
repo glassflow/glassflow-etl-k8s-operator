@@ -1,0 +1,4 @@
+FROM alpine:3.21
+COPY noop.sh /noop.sh
+RUN chmod +x /noop.sh
+ENTRYPOINT ["/noop.sh"]

@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -572,18 +571,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize PostgreSQL storage (required)
+	// Initialize PostgreSQL storage (optional — omit to run without pipeline-delete persistence)
+	var postgresStorage *postgresstorage.PostgresStorage
 	if postgresDSN == "" {
-		setupLog.Error(errors.New("postgres DSN is required"), "postgres DSN not provided")
-		os.Exit(1)
+		setupLog.Info("postgres DSN not provided — pipeline status will not be persisted; delete operations will skip postgres cleanup")
+	} else {
+		postgresStorage, err = postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
+		if err != nil {
+			setupLog.Error(err, "unable to connect to postgres")
+			os.Exit(1)
+		}
+		setupLog.Info("postgres storage initialized")
 	}
-
-	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
-	if err != nil {
-		setupLog.Error(err, "unable to connect to postgres")
-		os.Exit(1)
-	}
-	setupLog.Info("postgres storage initialized")
 
 	notificationsConfig := opnotifications.DefaultConfig().
 		WithEnabled(notificationsEnabledBool)

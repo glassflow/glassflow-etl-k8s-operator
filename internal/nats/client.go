@@ -363,6 +363,21 @@ func (n *NATSClient) DeleteConsumer(ctx context.Context, streamName, consumerNam
 	return nil
 }
 
+// DeleteAllPipelineStreams deletes all NATS streams belonging to the pipeline (by hash prefix).
+// Best-effort: skips streams that don't exist. Intended for test cleanup.
+func (n *NATSClient) DeleteAllPipelineStreams(ctx context.Context, pipelineHash string) error {
+	names, err := n.ListPipelineStreams(ctx, pipelineHash)
+	if err != nil {
+		return fmt.Errorf("list streams for pipeline %s: %w", pipelineHash, err)
+	}
+	for _, name := range names {
+		if delErr := n.js.DeleteStream(ctx, name); delErr != nil && !errors.Is(delErr, jetstream.ErrStreamNotFound) {
+			return fmt.Errorf("delete stream %s: %w", name, delErr)
+		}
+	}
+	return nil
+}
+
 func (n *NATSClient) Close() error {
 	n.nc.Close()
 	return nil

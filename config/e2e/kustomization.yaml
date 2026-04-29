@@ -1,0 +1,8 @@
+resources:
+- ../default
+
+patches:
+- path: manager_env_patch.yaml
+  target:
+    kind: Deployment
+    name: controller-manager
