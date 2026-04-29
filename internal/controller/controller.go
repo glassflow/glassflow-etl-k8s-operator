@@ -83,7 +83,6 @@ type PipelineStorage interface {
 	) error
 }
 
-
 // -------------------------------------------------------------------------------------------------------------------
 
 // PipelineReconciler reconciles a Pipeline object
