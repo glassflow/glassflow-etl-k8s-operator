@@ -28,6 +28,10 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/test/utils"
 )
 
+// managerNamespace is the namespace where the operator is deployed.
+// Shared between suite setup (BeforeSuite/AfterSuite) and Manager tests.
+const managerNamespace = "glassflow-etl-k8s-operator-system"
+
 var (
 	// Optional Environment Variables:
 	// - CERT_MANAGER_INSTALL_SKIP=true: Skips CertManager installation during test setup.
@@ -112,9 +116,41 @@ var _ = BeforeSuite(func() {
 	} else {
 		_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: PostgreSQL is already installed. Skipping installation...\n")
 	}
+
+	By("creating manager namespace")
+	cmd = exec.Command("kubectl", "create", "ns", managerNamespace)
+	_, _ = utils.Run(cmd) // ignore error if already exists
+
+	By("labeling the namespace to enforce the restricted security policy")
+	cmd = exec.Command("kubectl", "label", "--overwrite", "ns", managerNamespace,
+		"pod-security.kubernetes.io/enforce=restricted")
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
+
+	By("installing CRDs")
+	cmd = exec.Command("make", "install")
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CRDs")
+
+	By("deploying the controller-manager with e2e overlay (noop component images)")
+	cmd = exec.Command("make", "deploy-e2e", fmt.Sprintf("IMG=%s", projectImage))
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 })
 
 var _ = AfterSuite(func() {
+	By("undeploying the controller-manager")
+	cmd := exec.Command("make", "undeploy")
+	_, _ = utils.Run(cmd)
+
+	By("uninstalling CRDs")
+	cmd = exec.Command("make", "uninstall")
+	_, _ = utils.Run(cmd)
+
+	By("removing manager namespace")
+	cmd = exec.Command("kubectl", "delete", "ns", managerNamespace, "--ignore-not-found")
+	_, _ = utils.Run(cmd)
+
 	// Teardown CertManager after the suite if not skipped and if it was not already installed
 	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
