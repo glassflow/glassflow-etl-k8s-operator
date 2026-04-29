@@ -146,6 +146,7 @@ spec:
     type: kafka
     topics:
     - topic_name: e2e-topic-%s
+      dedup_window: 0
   join:
     type: ""
     enabled: false
@@ -175,7 +176,9 @@ spec:
     type: kafka
     topics:
     - topic_name: e2e-left-%s
+      dedup_window: 0
     - topic_name: e2e-right-%s
+      dedup_window: 0
   join:
     type: temporal
     enabled: true
