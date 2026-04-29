@@ -227,6 +227,13 @@ var _ = Describe("Pipeline", Ordered, func() {
 			By("waiting for pipeline to reach Running status")
 			Eventually(func(g Gomega) {
 				status := pipelineStatus(pipelineName, pipelineNS)(g)
+				if status != "Running" {
+					cmd := exec.Command("kubectl", "logs", "-l", "control-plane=controller-manager",
+						"-n", managerNamespace, "--tail=20")
+					if logs, err := utils.Run(cmd); err == nil {
+						_, _ = fmt.Fprintf(GinkgoWriter, "operator logs:\n%s\n", logs)
+					}
+				}
 				g.Expect(status).To(Equal("Running"))
 			}).Should(Succeed())
 
