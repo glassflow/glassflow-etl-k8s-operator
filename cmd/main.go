@@ -52,6 +52,15 @@ import (
 )
 
 // getEnvOrDefault returns the value of the environment variable if set, otherwise returns the default value
+// nilStorage converts a *postgresstorage.PostgresStorage to the controller's pipelineStorage
+// interface, returning a true nil interface when s is nil to avoid the nil-pointer-in-interface trap.
+func nilStorage(s *postgresstorage.PostgresStorage) controller.PipelineStorage {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
 func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -702,7 +711,7 @@ func main() {
 		Scheme:           mgr.GetScheme(),
 		Meter:            meter,
 		NATSClient:       natsClient,
-		PostgresStorage:  postgresStorage,
+		PostgresStorage:  nilStorage(postgresStorage),
 		Config:           reconcilerConfig,
 		UsageStatsClient: usageStatsClient,
 	}).SetupWithManager(mgr); err != nil {

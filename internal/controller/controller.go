@@ -75,11 +75,12 @@ var pipelineOperationPredicate = predicate.Funcs{
 	},
 }
 
-// pipelineStorage is the subset of postgres.PostgresStorage used by the controller.
-type pipelineStorage interface {
+// PipelineStorage is the subset of postgres.PostgresStorage used by the controller.
+type PipelineStorage interface {
 	DeletePipeline(ctx context.Context, pipelineID string) error
 	UpdatePipelineStatus(ctx context.Context, pipelineID string, status models.PipelineStatus, errors []string, reason string) error
 }
+
 
 // -------------------------------------------------------------------------------------------------------------------
 
@@ -89,7 +90,7 @@ type PipelineReconciler struct {
 	Scheme           *runtime.Scheme
 	Meter            *observability.Meter
 	NATSClient       *nats.NATSClient
-	PostgresStorage  pipelineStorage
+	PostgresStorage  PipelineStorage
 	Config           ReconcilerConfig
 	UsageStatsClient *usagestats.Client
 }
@@ -116,7 +117,7 @@ func (r *PipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups="apps",resources=deployments,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="apps",resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;delete
 
 // For more details, check Reconcile and its Result here:

@@ -36,7 +36,7 @@ spec:
         - name: PIPELINES_NAMESPACE_AUTO
           value: "true"
         - name: RECONCILE_TIMEOUT
-          value: "3m"
+          value: "10m"
         - name: OBSERVABILITY_LOGS_ENABLED
           value: "false"
         - name: OBSERVABILITY_METRICS_ENABLED

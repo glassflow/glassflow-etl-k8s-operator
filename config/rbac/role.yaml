@@ -38,12 +38,14 @@ rules:
 - apiGroups:
   - apps
   resources:
-  - deployments
+  - statefulsets
   verbs:
   - create
   - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - etl.glassflow.io
