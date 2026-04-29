@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        env:
+        - name: INGESTOR_IMAGE
+          value: "glassflow-noop-component:test"
+        - name: JOIN_IMAGE
+          value: "glassflow-noop-component:test"
+        - name: SINK_IMAGE
+          value: "glassflow-noop-component:test"
+        - name: DEDUP_IMAGE
+          value: "glassflow-noop-component:test"
+        - name: INGESTOR_PULL_POLICY
+          value: "Never"
+        - name: JOIN_PULL_POLICY
+          value: "Never"
+        - name: SINK_PULL_POLICY
+          value: "Never"
+        - name: DEDUP_PULL_POLICY
+          value: "Never"
+        - name: NATS_ADDR
+          value: "nats://nats.default.svc.cluster.local:4222"
+        - name: NATS_OP_ADDR
+          value: "nats://nats.default.svc.cluster.local:4222"
+        - name: NATS_MAX_STREAM_AGE
+          value: "24h"
+        - name: NATS_MAX_STREAM_BYTES
+          value: "1073741824"
+        - name: PIPELINES_NAMESPACE_AUTO
+          value: "true"
+        - name: RECONCILE_TIMEOUT
+          value: "10m"
+        - name: OBSERVABILITY_LOGS_ENABLED
+          value: "false"
+        - name: OBSERVABILITY_METRICS_ENABLED
+          value: "false"
+        - name: NOTIFICATIONS_ENABLED
+          value: "false"

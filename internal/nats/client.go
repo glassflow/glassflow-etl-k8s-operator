@@ -217,7 +217,11 @@ func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamNam
 
 	consumer, err := stream.Consumer(infoCtx, consumerName)
 	if err != nil {
-		// Consumer doesn't exist - fail with error as requested
+		var apiErr *jetstream.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode == 10014 {
+			// Consumer not found — treat as no pending messages (safe to proceed with stop)
+			return false, 0, 0, nil
+		}
 		return false, 0, 0, fmt.Errorf("consumer %s does not exist in stream %s: %w", consumerName, streamName, err)
 	}
 
@@ -359,6 +363,21 @@ func (n *NATSClient) DeleteConsumer(ctx context.Context, streamName, consumerNam
 	err = stream.DeleteConsumer(ctx, consumerName)
 	if err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
 		return fmt.Errorf("delete consumer %s from stream %s: %w", consumerName, streamName, err)
+	}
+	return nil
+}
+
+// DeleteAllPipelineStreams deletes all NATS streams belonging to the pipeline (by hash prefix).
+// Best-effort: skips streams that don't exist. Intended for test cleanup.
+func (n *NATSClient) DeleteAllPipelineStreams(ctx context.Context, pipelineHash string) error {
+	names, err := n.ListPipelineStreams(ctx, pipelineHash)
+	if err != nil {
+		return fmt.Errorf("list streams for pipeline %s: %w", pipelineHash, err)
+	}
+	for _, name := range names {
+		if delErr := n.js.DeleteStream(ctx, name); delErr != nil && !errors.Is(delErr, jetstream.ErrStreamNotFound) {
+			return fmt.Errorf("delete stream %s: %w", name, delErr)
+		}
 	}
 	return nil
 }
