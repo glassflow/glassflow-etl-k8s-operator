@@ -217,7 +217,11 @@ func (n *NATSClient) CheckConsumerPendingMessages(ctx context.Context, streamNam
 
 	consumer, err := stream.Consumer(infoCtx, consumerName)
 	if err != nil {
-		// Consumer doesn't exist - fail with error as requested
+		var apiErr *jetstream.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode == 10014 {
+			// Consumer not found — treat as no pending messages (safe to proceed with stop)
+			return false, 0, 0, nil
+		}
 		return false, 0, 0, fmt.Errorf("consumer %s does not exist in stream %s: %w", consumerName, streamName, err)
 	}
 
