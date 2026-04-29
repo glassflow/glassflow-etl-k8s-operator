@@ -107,8 +107,8 @@ func joinPipeline(id string, leftReplicas, rightReplicas, joinReplicas, sinkRepl
 				},
 			},
 			Join: etlv1alpha1.Join{
-				Type:         "temporal",
-				Enabled:      true,
+				Type:           "temporal",
+				Enabled:        true,
 				LeftBufferTTL:  5 * time.Minute,
 				RightBufferTTL: 5 * time.Minute,
 			},

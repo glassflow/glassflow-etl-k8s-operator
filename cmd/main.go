@@ -574,7 +574,8 @@ func main() {
 	// Initialize PostgreSQL storage (optional — omit to run without pipeline-delete persistence)
 	var postgresStorage *postgresstorage.PostgresStorage
 	if postgresDSN == "" {
-		setupLog.Info("postgres DSN not provided — pipeline status will not be persisted; delete operations will skip postgres cleanup")
+		setupLog.Info("postgres DSN not provided — pipeline status will not be persisted;" +
+			" delete operations will skip postgres cleanup")
 	} else {
 		postgresStorage, err = postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
 		if err != nil {
