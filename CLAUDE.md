@@ -85,21 +85,20 @@ make deploy             # Deploy operator to cluster
 
 ## Local dev
 
-```bash
-# Run operator locally (uses current kubeconfig)
-make run
+The operator runs in a Kubernetes cluster via its Helm chart — not via the CLI. The CLI (`glassflow up`) is demo-only and uses the chart under the hood.
 
-# Install CRDs into a local Kind cluster
+```bash
+# Install CRDs into a cluster
 make install
+
+# Deploy operator via Helm (see charts/)
+helm install glassflow-operator charts/ -n glassflow
+
+# Run controller locally against current kubeconfig (dev shortcut)
+make run
 
 # Run unit + integration tests
 make test-integration
-```
-
-The operator is typically run via the CLI in local dev:
-
-```bash
-glassflow up    # starts Kind cluster + all services including operator
 ```
 
 ## Git & PR conventions
