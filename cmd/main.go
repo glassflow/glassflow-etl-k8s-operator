@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -53,6 +52,15 @@ import (
 )
 
 // getEnvOrDefault returns the value of the environment variable if set, otherwise returns the default value
+// nilStorage converts a *postgresstorage.PostgresStorage to the controller's pipelineStorage
+// interface, returning a true nil interface when s is nil to avoid the nil-pointer-in-interface trap.
+func nilStorage(s *postgresstorage.PostgresStorage) controller.PipelineStorage {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
 func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -572,18 +580,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize PostgreSQL storage (required)
+	// Initialize PostgreSQL storage (optional — omit to run without pipeline-delete persistence)
+	var postgresStorage *postgresstorage.PostgresStorage
 	if postgresDSN == "" {
-		setupLog.Error(errors.New("postgres DSN is required"), "postgres DSN not provided")
-		os.Exit(1)
+		setupLog.Info("postgres DSN not provided — pipeline status will not be persisted;" +
+			" delete operations will skip postgres cleanup")
+	} else {
+		postgresStorage, err = postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
+		if err != nil {
+			setupLog.Error(err, "unable to connect to postgres")
+			os.Exit(1)
+		}
+		setupLog.Info("postgres storage initialized")
 	}
-
-	postgresStorage, err := postgresstorage.NewPostgres(ctx, postgresOperatorDSN, logger)
-	if err != nil {
-		setupLog.Error(err, "unable to connect to postgres")
-		os.Exit(1)
-	}
-	setupLog.Info("postgres storage initialized")
 
 	notificationsConfig := opnotifications.DefaultConfig().
 		WithEnabled(notificationsEnabledBool)
@@ -702,7 +711,7 @@ func main() {
 		Scheme:           mgr.GetScheme(),
 		Meter:            meter,
 		NATSClient:       natsClient,
-		PostgresStorage:  postgresStorage,
+		PostgresStorage:  nilStorage(postgresStorage),
 		Config:           reconcilerConfig,
 		UsageStatsClient: usageStatsClient,
 	}).SetupWithManager(mgr); err != nil {
