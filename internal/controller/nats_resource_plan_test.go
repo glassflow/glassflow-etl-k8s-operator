@@ -201,6 +201,7 @@ func TestBuildNATSResourcePlanOTLPSinkOnly(t *testing.T) {
 		{
 			Name:     fmt.Sprintf("gfm-%s-otlp-out_0", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-otlp-out.0", hash)},
+			Discard:  jetstream.DiscardNew,
 		},
 	}
 	if !reflect.DeepEqual(plan.OTLPSourceStreams, wantOTLPStreams) {
@@ -242,6 +243,7 @@ func TestBuildNATSResourcePlanOTLPWithDedup(t *testing.T) {
 		{
 			Name:     fmt.Sprintf("gfm-%s-otlp-out_0", hash),
 			Subjects: []string{fmt.Sprintf("gfm-%s-otlp-out.0", hash)},
+			Discard:  jetstream.DiscardNew,
 		},
 	}
 	if !reflect.DeepEqual(plan.OTLPSourceStreams, wantOTLPStreams) {
@@ -320,8 +322,8 @@ func TestBuildNATSResourcePlanJoinWithLeftDedupKVStores(t *testing.T) {
 	}
 }
 
-// TestBuildNATSResourcePlanDiscardPolicy verifies that pipeline internal streams are created
-// with DiscardNew, while DLQ and OTLP source streams retain DiscardOld.
+// TestBuildNATSResourcePlanDiscardPolicy verifies that pipeline internal streams and OTLP source
+// streams use DiscardNew, while the DLQ retains the DiscardOld default.
 func TestBuildNATSResourcePlanDiscardPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -377,7 +379,7 @@ func TestBuildNATSResourcePlanDiscardPolicy(t *testing.T) {
 		}
 	})
 
-	t.Run("OTLP source streams have DiscardOld", func(t *testing.T) {
+	t.Run("OTLP source streams have DiscardNew", func(t *testing.T) {
 		t.Parallel()
 		pipeline := etlv1alpha1.Pipeline{
 			Spec: etlv1alpha1.PipelineSpec{
@@ -393,8 +395,8 @@ func TestBuildNATSResourcePlanDiscardPolicy(t *testing.T) {
 			t.Fatalf("buildNATSResourcePlan() error: %v", err)
 		}
 		for _, s := range plan.OTLPSourceStreams {
-			if s.Discard != jetstream.DiscardOld {
-				t.Errorf("OTLP source stream %s: Discard = %v, want DiscardOld", s.Name, s.Discard)
+			if s.Discard != jetstream.DiscardNew {
+				t.Errorf("OTLP source stream %s: Discard = %v, want DiscardNew", s.Name, s.Discard)
 			}
 		}
 	})
