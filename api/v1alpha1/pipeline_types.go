@@ -170,6 +170,20 @@ type ResolvedPipeline struct {
 	Nodes []ResolvedNode `json:"nodes,omitempty"`
 }
 
+// FindNode returns a pointer to the node with the given ID, or nil if no
+// such node exists. Safe to call on a nil ResolvedPipeline.
+func (r *ResolvedPipeline) FindNode(id string) *ResolvedNode {
+	if r == nil {
+		return nil
+	}
+	for i := range r.Nodes {
+		if r.Nodes[i].ID == id {
+			return &r.Nodes[i]
+		}
+	}
+	return nil
+}
+
 // ResolvedNode is one node in the resolved pipeline graph.
 type ResolvedNode struct {
 	// ID matches pipelinegraph node IDs (e.g. "ingestor", "ingestor_left",

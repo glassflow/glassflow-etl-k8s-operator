@@ -205,41 +205,45 @@ func (r *PipelineReconciler) sweepMessage(
 // (e.g. "gfm-abc-ingestor-0-out" → "dedup"). Used to label orphan DLQ envelopes with the
 // component that would have processed each message.
 func buildConsumerComponentMap(p etlv1alpha1.Pipeline) (map[string]string, error) {
-	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	resolved, err := ensureResolved(p.Spec)
 	if err != nil {
-		return nil, fmt.Errorf("build pipeline graph: %w", err)
+		return nil, err
 	}
 
 	out := make(map[string]string)
 
-	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
-	if err != nil {
-		return nil, fmt.Errorf("resolve sink input: %w", err)
+	sink := resolved.FindNode(pipelinegraph.SinkNodeID())
+	if sink == nil {
+		return nil, fmt.Errorf("resolved spec missing sink node")
 	}
-	for _, s := range sinkInput.Streams {
-		out[s.Name] = "sink"
+	if sink.Input != nil {
+		for _, s := range sink.Input.Streams {
+			out[s.Name] = "sink"
+		}
 	}
 
 	if p.Spec.Join.Enabled {
-		joinInputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
-		if err != nil {
-			return nil, fmt.Errorf("resolve join input: %w", err)
+		join := resolved.FindNode(pipelinegraph.JoinNodeID())
+		if join == nil || join.JoinInput == nil {
+			return nil, fmt.Errorf("resolved spec missing join node or its inputs")
 		}
-		for _, s := range joinInputs.Left.Streams {
+		for _, s := range join.JoinInput.Left.Streams {
 			out[s.Name] = "join"
 		}
-		for _, s := range joinInputs.Right.Streams {
+		for _, s := range join.JoinInput.Right.Streams {
 			out[s.Name] = "join"
 		}
 	}
 
 	for _, i := range dedupStreamIndices(p) {
-		dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, i))
-		if err != nil {
-			return nil, fmt.Errorf("resolve dedup input %d: %w", i, err)
+		dedup := resolved.FindNode(pipelinegraph.DedupNodeID(p.Spec, i))
+		if dedup == nil {
+			return nil, fmt.Errorf("resolved spec missing dedup node for index %d", i)
 		}
-		for _, s := range dedupInput.Streams {
-			out[s.Name] = "dedup"
+		if dedup.Input != nil {
+			for _, s := range dedup.Input.Streams {
+				out[s.Name] = "dedup"
+			}
 		}
 	}
 
