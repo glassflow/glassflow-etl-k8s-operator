@@ -632,6 +632,14 @@ func (r *PipelineReconciler) reconcileStop(ctx context.Context, log logr.Logger,
 		return ctrl.Result{}, nil
 	}
 
+	// Sweep orphaned messages out of internal streams into the DLQ. Drain alone cannot empty
+	// streams when consumers have hit their MaxDeliver cap — those messages stay in the stream
+	// indefinitely and would otherwise be lost when cleanup deletes the streams below.
+	err = r.sweepMessagesToDLQ(ctx, log, p)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("sweep orphaned messages for stop: %w", err)
+	}
+
 	// Remove NATS streams/KV stores for this pipeline before marking it Stopped, while preserving DLQ.
 	err = r.cleanupNATSPipelineResourcesKeepDLQ(ctx, log, p)
 	if err != nil {
