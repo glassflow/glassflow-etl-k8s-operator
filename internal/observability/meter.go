@@ -24,6 +24,10 @@ type Meter struct {
 
 	// NATS operation metrics
 	NATSOperationsTotal metric.Int64Counter
+
+	// sweep metrics — recorded by reconcileStop's pre-cleanup sweep step.
+	SweepedMessagesTotal metric.Int64Counter
+	SweepDurationSeconds metric.Float64Histogram
 }
 
 const GfmOperatorMetricPrefix = "gfm_operator"
@@ -82,6 +86,11 @@ func NewMeter() *Meter {
 			"Total number of pipeline status transitions"),
 		NATSOperationsTotal: mustCreateCounter(meter, GfmOperatorMetricPrefix+"_nats_operations_total",
 			"Total number of NATS operations"),
+		SweepedMessagesTotal: mustCreateCounter(meter, GfmOperatorMetricPrefix+"_sweeped_messages_total",
+			"Total number of orphaned messages handled by the stop-time sweep, by outcome"),
+		SweepDurationSeconds: mustCreateHistogram(meter, GfmOperatorMetricPrefix+"_sweep_duration_seconds",
+			"Duration of the stop-time orphan sweep per pipeline",
+			0.1, 1, 5, 10, 30, 60, 300, 600),
 	}
 }
 
@@ -98,4 +107,20 @@ func mustCreateCounter(meter metric.Meter, name, description string) metric.Int6
 		panic("failed to create counter " + name + ": " + err.Error())
 	}
 	return counter
+}
+
+func mustCreateHistogram(meter metric.Meter, name, description string, buckets ...float64) metric.Float64Histogram {
+	opts := []metric.Float64HistogramOption{
+		metric.WithDescription(description),
+		metric.WithUnit("s"),
+	}
+	if len(buckets) > 0 {
+		opts = append(opts, metric.WithExplicitBucketBoundaries(buckets...))
+	}
+	histogram, err := meter.Float64Histogram(name, opts...)
+	if err != nil {
+		slog.Error("Failed to create histogram", "name", name, "error", err)
+		panic("failed to create histogram " + name + ": " + err.Error())
+	}
+	return histogram
 }
