@@ -48,9 +48,12 @@ func (r *PipelineReconciler) checkConsumerPendingMessages(ctx context.Context, s
 
 func (r *PipelineReconciler) checkInputBindingPendingMessages(
 	ctx context.Context,
-	binding pipelinegraph.InputBinding,
+	binding *etlv1alpha1.NodeInput,
 	consumerName string,
 ) error {
+	if binding == nil {
+		return nil
+	}
 	for _, stream := range binding.Streams {
 		if err := r.checkConsumerPendingMessages(ctx, stream.Name, consumerName); err != nil {
 			return err
@@ -61,7 +64,10 @@ func (r *PipelineReconciler) checkInputBindingPendingMessages(
 }
 
 // countInputBindingPending returns the total pending + unacknowledged count across all streams in a binding.
-func (r *PipelineReconciler) countInputBindingPending(ctx context.Context, binding pipelinegraph.InputBinding, consumerName string) (int, error) {
+func (r *PipelineReconciler) countInputBindingPending(ctx context.Context, binding *etlv1alpha1.NodeInput, consumerName string) (int, error) {
+	if binding == nil {
+		return 0, nil
+	}
 	total := 0
 	for _, stream := range binding.Streams {
 		_, pending, unack, err := r.NATSClient.CheckConsumerPendingMessages(ctx, stream.Name, consumerName)
@@ -76,19 +82,19 @@ func (r *PipelineReconciler) countInputBindingPending(ctx context.Context, bindi
 // getTotalPendingCount returns the total pending + unacknowledged message count across all
 // consumers for a pipeline (sink, join left/right, dedup per stream).
 func (r *PipelineReconciler) getTotalPendingCount(ctx context.Context, p etlv1alpha1.Pipeline) (int, error) {
-	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	resolved, err := ensureResolved(p.Spec)
 	if err != nil {
-		return 0, fmt.Errorf("build pipeline graph: %w", err)
+		return 0, err
 	}
 
 	total := 0
 
 	// Sink
-	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
-	if err != nil {
-		return 0, fmt.Errorf("resolve sink input: %w", err)
+	sink := resolved.FindNode(pipelinegraph.SinkNodeID())
+	if sink == nil {
+		return 0, fmt.Errorf("resolved spec missing sink node")
 	}
-	n, err := r.countInputBindingPending(ctx, sinkInput, getNATSSinkConsumerName(p.Spec.ID))
+	n, err := r.countInputBindingPending(ctx, sink.Input, getNATSSinkConsumerName(p.Spec.ID))
 	if err != nil {
 		return 0, err
 	}
@@ -96,16 +102,16 @@ func (r *PipelineReconciler) getTotalPendingCount(ctx context.Context, p etlv1al
 
 	// Join (if enabled)
 	if p.Spec.Join.Enabled {
-		inputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
-		if err != nil {
-			return 0, fmt.Errorf("resolve join input: %w", err)
+		join := resolved.FindNode(pipelinegraph.JoinNodeID())
+		if join == nil || join.JoinInput == nil {
+			return 0, fmt.Errorf("resolved spec missing join node or its inputs")
 		}
-		leftN, err := r.countInputBindingPending(ctx, inputs.Left, getNATSJoinLeftConsumerName(p.Spec.ID))
+		leftN, err := r.countInputBindingPending(ctx, &join.JoinInput.Left, getNATSJoinLeftConsumerName(p.Spec.ID))
 		if err != nil {
 			return 0, err
 		}
 		total += leftN
-		rightN, err := r.countInputBindingPending(ctx, inputs.Right, getNATSJoinRightConsumerName(p.Spec.ID))
+		rightN, err := r.countInputBindingPending(ctx, &join.JoinInput.Right, getNATSJoinRightConsumerName(p.Spec.ID))
 		if err != nil {
 			return 0, err
 		}
@@ -114,11 +120,11 @@ func (r *PipelineReconciler) getTotalPendingCount(ctx context.Context, p etlv1al
 
 	// Dedup (if enabled)
 	for _, i := range dedupStreamIndices(p) {
-		dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, i))
-		if err != nil {
-			return 0, fmt.Errorf("resolve dedup input for index %d: %w", i, err)
+		dedup := resolved.FindNode(pipelinegraph.DedupNodeID(p.Spec, i))
+		if dedup == nil {
+			return 0, fmt.Errorf("resolved spec missing dedup node for index %d", i)
 		}
-		n, err := r.countInputBindingPending(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
+		n, err := r.countInputBindingPending(ctx, dedup.Input, getNATSDedupConsumerName(p.Spec.ID))
 		if err != nil {
 			return 0, err
 		}
@@ -134,24 +140,24 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 		return nil // No join, nothing to check
 	}
 
-	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	resolved, err := ensureResolved(p.Spec)
 	if err != nil {
-		return fmt.Errorf("build pipeline graph for join checks: %w", err)
+		return fmt.Errorf("resolve pipeline for join checks: %w", err)
 	}
-	inputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
-	if err != nil {
-		return fmt.Errorf("resolve join input: %w", err)
+	join := resolved.FindNode(pipelinegraph.JoinNodeID())
+	if join == nil || join.JoinInput == nil {
+		return fmt.Errorf("resolved spec missing join node or its inputs")
 	}
 
 	// Consumer names are generated from pipeline ID (aligned with glassflow-api).
 	leftConsumerName := getNATSJoinLeftConsumerName(p.Spec.ID)
 	rightConsumerName := getNATSJoinRightConsumerName(p.Spec.ID)
 
-	if err := r.checkInputBindingPendingMessages(ctx, inputs.Left, leftConsumerName); err != nil {
+	if err := r.checkInputBindingPendingMessages(ctx, &join.JoinInput.Left, leftConsumerName); err != nil {
 		return err
 	}
 
-	if err := r.checkInputBindingPendingMessages(ctx, inputs.Right, rightConsumerName); err != nil {
+	if err := r.checkInputBindingPendingMessages(ctx, &join.JoinInput.Right, rightConsumerName); err != nil {
 		return err
 	}
 
@@ -161,31 +167,31 @@ func (r *PipelineReconciler) checkJoinPendingMessages(ctx context.Context, p etl
 // checkSinkPendingMessages checks if sink consumer(s) have pending messages.
 func (r *PipelineReconciler) checkSinkPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline) error {
 	baseConsumerName := getNATSSinkConsumerName(p.Spec.ID)
-	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	resolved, err := ensureResolved(p.Spec)
 	if err != nil {
-		return fmt.Errorf("build pipeline graph for sink checks: %w", err)
+		return fmt.Errorf("resolve pipeline for sink checks: %w", err)
 	}
-	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
-	if err != nil {
-		return fmt.Errorf("resolve sink input: %w", err)
+	sink := resolved.FindNode(pipelinegraph.SinkNodeID())
+	if sink == nil {
+		return fmt.Errorf("resolved spec missing sink node")
 	}
 
-	return r.checkInputBindingPendingMessages(ctx, sinkInput, baseConsumerName)
+	return r.checkInputBindingPendingMessages(ctx, sink.Input, baseConsumerName)
 }
 
 // checkDedupPendingMessages checks if a specific dedup consumer has pending messages.
 // Only called for indices returned by dedupStreamIndices, so dedup is guaranteed enabled.
 func (r *PipelineReconciler) checkDedupPendingMessages(ctx context.Context, p etlv1alpha1.Pipeline, streamIndex int) error {
-	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
+	resolved, err := ensureResolved(p.Spec)
 	if err != nil {
-		return fmt.Errorf("build pipeline graph for dedup checks: %w", err)
+		return fmt.Errorf("resolve pipeline for dedup checks: %w", err)
 	}
-	dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, streamIndex))
-	if err != nil {
-		return fmt.Errorf("resolve dedup input for index %d: %w", streamIndex, err)
+	dedup := resolved.FindNode(pipelinegraph.DedupNodeID(p.Spec, streamIndex))
+	if dedup == nil {
+		return fmt.Errorf("resolved spec missing dedup node for index %d", streamIndex)
 	}
 
-	return r.checkInputBindingPendingMessages(ctx, dedupInput, getNATSDedupConsumerName(p.Spec.ID))
+	return r.checkInputBindingPendingMessages(ctx, dedup.Input, getNATSDedupConsumerName(p.Spec.ID))
 }
 
 // discoverStaleStreams finds NATS streams that belong to this pipeline but are not in the
