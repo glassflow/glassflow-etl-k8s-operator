@@ -83,6 +83,16 @@ func clearOperationAnnotation(annotations map[string]string, operation string) {
 	}
 }
 
+// operationTimeoutFor returns the active timeout for the given operation. Stop uses a
+// shorter ceiling than the other operations because "stop" is intent-clear and shouldn't
+// wait as long as create/edit, which need minutes for StatefulSet rollouts.
+func operationTimeoutFor(annotations map[string]string) time.Duration {
+	if getPipelineOperationFromAnnotations(annotations) == constants.OperationStop {
+		return constants.StopReconcileTimeout
+	}
+	return constants.ReconcileTimeout
+}
+
 // checkOperationTimeout checks if an operation has exceeded the timeout duration
 // Returns true if timed out, false otherwise, and the elapsed duration
 func (r *PipelineReconciler) checkOperationTimeout(log logr.Logger, p *etlv1alpha1.Pipeline) (bool, time.Duration) {
@@ -104,9 +114,10 @@ func (r *PipelineReconciler) checkOperationTimeout(log logr.Logger, p *etlv1alph
 		return false, 0
 	}
 
+	timeout := operationTimeoutFor(annotations)
 	elapsed := time.Since(startTime)
-	if elapsed > constants.ReconcileTimeout {
-		log.Info("operation timed out", "pipeline_id", p.Spec.ID, "elapsed", elapsed, "timeout", constants.ReconcileTimeout)
+	if elapsed > timeout {
+		log.Info("operation timed out", "pipeline_id", p.Spec.ID, "elapsed", elapsed, "timeout", timeout)
 		return true, elapsed
 	}
 
@@ -140,7 +151,11 @@ func (r *PipelineReconciler) clearOperationStartTime(p *etlv1alpha1.Pipeline) {
 	}
 }
 
-// handleOperationTimeout handles a timed-out operation by updating status to Failed and clearing annotations
+// handleOperationTimeout handles a timed-out operation. Non-stop operations terminate
+// components and end in Failed. Stop is special: after force-terminating components we
+// also sweep orphaned messages to the DLQ and clean up internal NATS streams, then end
+// in Stopped — so a user's stop intent is honoured even when consumers couldn't drain.
+// Sweep or cleanup failures keep the pipeline in Failed so the incident remains visible.
 func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log logr.Logger, p *etlv1alpha1.Pipeline) (ctrl.Result, error) {
 	pipelineID := p.Spec.ID
 	operation := getPipelineOperationFromAnnotations(p.GetAnnotations())
@@ -149,14 +164,17 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 		operation = "unknown"
 	}
 
-	log.Error(fmt.Errorf("operation timed out after %v", constants.ReconcileTimeout), "operation timed out", "pipeline_id", pipelineID, "operation", operation)
+	timeout := operationTimeoutFor(p.GetAnnotations())
+	log.Error(fmt.Errorf("operation timed out after %v", timeout), "operation timed out", "pipeline_id", pipelineID, "operation", operation)
 
-	// Update status to Failed with error message
-	errorMsg := fmt.Sprintf("operation timed out after %v", constants.ReconcileTimeout)
-	err := r.updatePipelineStatus(ctx, log, p, models.PipelineStatusFailed, []string{errorMsg}, "timeout")
-	if err != nil {
-		log.Error(err, "failed to update pipeline status to Failed", "pipeline_id", pipelineID)
-		// Continue anyway to clear annotations
+	errorMsg := fmt.Sprintf("operation timed out after %v", timeout)
+	// For stop we defer the terminal status until we know whether the forced sweep + cleanup
+	// succeed, to avoid briefly publishing Failed before flipping back to Stopped.
+	if operation != constants.OperationStop {
+		if err := r.updatePipelineStatus(ctx, log, p, models.PipelineStatusFailed, []string{errorMsg}, "timeout"); err != nil {
+			log.Error(err, "failed to update pipeline status to Failed", "pipeline_id", pipelineID)
+			// Continue anyway to clear annotations
+		}
 	}
 
 	// Clear operation start time
@@ -174,10 +192,34 @@ func (r *PipelineReconciler) handleOperationTimeout(ctx context.Context, log log
 			return result, err
 		}
 
-		p.Status = etlv1alpha1.PipelineStatus(models.PipelineStatusFailed)
-		err = r.Update(ctx, p)
-		if err != nil {
+		finalStatus := models.PipelineStatusFailed
+		var stopErrors []string
+		if operation == constants.OperationStop {
+			if sweepErr := r.sweepMessagesToDLQ(ctx, log, *p); sweepErr != nil {
+				log.Error(sweepErr, "forced stop: sweep orphaned messages failed", "pipeline_id", pipelineID)
+				stopErrors = []string{fmt.Sprintf("forced stop sweep failed: %v", sweepErr)}
+			} else if cleanupErr := r.cleanupNATSPipelineResourcesKeepDLQ(ctx, log, *p); cleanupErr != nil {
+				log.Error(cleanupErr, "forced stop: cleanup NATS resources failed", "pipeline_id", pipelineID)
+				stopErrors = []string{fmt.Sprintf("forced stop cleanup failed: %v", cleanupErr)}
+			} else {
+				finalStatus = models.PipelineStatusStopped
+				r.clearStopLastPendingCount(p)
+			}
+		}
+
+		// Persist annotation clears (and the in-memory status flip) before pushing the
+		// terminal status through updatePipelineStatus. updatePipelineStatus uses the
+		// Status subresource, which intentionally does not carry metadata changes —
+		// so the metadata Update must land first to avoid losing the annotation clears.
+		p.Status = etlv1alpha1.PipelineStatus(finalStatus)
+		if err := r.Update(ctx, p); err != nil {
 			log.Error(err, "failed to clear operation annotation after timeout", "pipeline_id", pipelineID)
+		}
+
+		if operation == constants.OperationStop {
+			if err := r.updatePipelineStatus(ctx, log, p, finalStatus, stopErrors, "timeout"); err != nil {
+				log.Error(err, "failed to update pipeline final status after forced stop", "pipeline_id", pipelineID)
+			}
 		}
 	}
 
