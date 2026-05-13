@@ -11,6 +11,50 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/constants"
 )
 
+func TestOperationTimeoutFor(t *testing.T) {
+	t.Parallel()
+
+	// Save and restore the package-level timeouts so this test stays isolated.
+	prevReconcile, prevStop := constants.ReconcileTimeout, constants.StopReconcileTimeout
+	constants.ReconcileTimeout = 17 * time.Minute
+	constants.StopReconcileTimeout = 3 * time.Minute
+	t.Cleanup(func() {
+		constants.ReconcileTimeout = prevReconcile
+		constants.StopReconcileTimeout = prevStop
+	})
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		want        time.Duration
+	}{
+		{
+			name:        "stop op uses StopReconcileTimeout",
+			annotations: map[string]string{constants.PipelineStopAnnotation: "true"},
+			want:        3 * time.Minute,
+		},
+		{
+			name:        "non-stop op uses ReconcileTimeout",
+			annotations: map[string]string{constants.PipelineEditAnnotation: "true"},
+			want:        17 * time.Minute,
+		},
+		{
+			name:        "no operation annotation defaults to ReconcileTimeout",
+			annotations: nil,
+			want:        17 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := operationTimeoutFor(tt.annotations); got != tt.want {
+				t.Fatalf("operationTimeoutFor() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGetPipelineOperationFromAnnotations(t *testing.T) {
 	t.Parallel()
 

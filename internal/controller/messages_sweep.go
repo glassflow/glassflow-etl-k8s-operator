@@ -30,7 +30,7 @@ const (
 	// responsive on a large backlog.
 	sweepCtxCheckEvery = 100
 
-	// outcome values for gfm_operator_orphan_sweep_total.
+	// outcome values for gfm_operator_sweeped_messages_total.
 	streamOutcomeSwept          = "swept"
 	streamOutcomeSweepFailed    = "sweep_failed"
 	streamOutcomeStreamEmpty    = "stream_empty"
