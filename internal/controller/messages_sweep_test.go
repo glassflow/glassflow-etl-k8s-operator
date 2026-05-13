@@ -100,7 +100,7 @@ func TestDLQMessage_RoundTrip(t *testing.T) {
 
 	original := models.DLQMessage{
 		Component:       "sink",
-		Reason:          models.DLQReasonRetryExhaustedOnStop,
+		Error:           models.DLQReasonRetryExhaustedOnStop,
 		OriginalMessage: `{"id":42}`,
 	}
 	encoded, err := original.ToJSON()
@@ -118,20 +118,21 @@ func TestDLQMessage_RoundTrip(t *testing.T) {
 	if wire["component"] != "sink" {
 		t.Errorf("component = %v, want sink", wire["component"])
 	}
-	if wire["reason"] != "retry_exhausted_on_stop" {
-		t.Errorf("reason = %v, want retry_exhausted_on_stop", wire["reason"])
+	if wire["error"] != "retry_exhausted_on_stop" {
+		t.Errorf("error = %v, want retry_exhausted_on_stop", wire["error"])
 	}
 	if wire["original_message"] != `{"id":42}` {
 		t.Errorf("original_message = %v, want {\"id\":42}", wire["original_message"])
 	}
 	// Empty optional fields must not appear in the JSON (omitempty).
-	if _, present := wire["error"]; present {
-		t.Errorf("expected %q to be omitted, got %v", "error", wire["error"])
+	if _, present := wire["reason"]; present {
+		t.Errorf("expected %q to be omitted, got %v", "reason", wire["reason"])
 	}
 }
 
-// TestDLQWireContractsStable guards the wire contracts shared with glassflow-api: the reason
-// label and the per-stream DLQ subject suffix. Both must change in lockstep with
+// TestDLQWireContractsStable guards the wire contracts shared with glassflow-api: the
+// retry-exhausted-on-stop label (carried in the DLQ envelope's error field) and the
+// per-stream DLQ subject suffix. Both must change in lockstep with
 // glassflow-api/internal/models/dlq.go and internal/constants.go.
 func TestDLQWireContractsStable(t *testing.T) {
 	t.Parallel()
