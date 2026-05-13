@@ -175,7 +175,7 @@ func (r *PipelineReconciler) sweepMessage(
 
 	envelope := models.DLQMessage{
 		Component:       component,
-		Reason:          models.DLQReasonRetryExhaustedOnStop,
+		Error:           models.DLQReasonRetryExhaustedOnStop,
 		OriginalMessage: string(msg.Data),
 	}
 	payload, err := envelope.ToJSON()
