@@ -93,7 +93,7 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeDedup:
 			nodePlan, err = buildNodePlan(graph, node, limits.withDiscard(jetstream.DiscardNew))
 		case pipelinegraph.NodeTypeOTLPSource:
-			nodePlan, err = buildNodePlan(graph, node, limits.withDiscard(jetstream.DiscardOld))
+			nodePlan, err = buildNodePlan(graph, node, limits.withDiscard(jetstream.DiscardNew))
 		// sink doesn't have output
 		default:
 			continue

@@ -1,6 +1,8 @@
 apiVersion: v2
 name: glassflow-operator
-description: GlassFlow Operator chart
+description: Kubernetes operator for managing GlassFlow ETL pipelines — reconciles Pipeline CRs into per-pipeline data-plane workloads
+home: https://www.glassflow.dev
+icon: https://charts.glassflow.dev/logo.svg
 # A chart can be either an 'application' or a 'library' chart.
 #
 # Application charts are a collection of templates that can be packaged into versioned archives
@@ -13,12 +15,12 @@ type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.8.0
+version: 0.8.2
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
-appVersion: "2.2.0"
+appVersion: "3.1.0"
 maintainers:
   - name: Glassflow
     email: help@glassflow.dev

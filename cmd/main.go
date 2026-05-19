@@ -360,6 +360,11 @@ func main() {
 		"RECONCILE_TIMEOUT", constants.DefaultReconcileTimeout.String()),
 		"Maximum duration a reconcile operation can run before timing out (e.g. 15m, 1h)")
 
+	var stopReconcileTimeout string
+	flag.StringVar(&stopReconcileTimeout, "stop-reconcile-timeout", getEnvOrDefault(
+		"STOP_RECONCILE_TIMEOUT", constants.DefaultStopReconcileTimeout.String()),
+		"Maximum duration a stop reconcile can run before timing out (e.g. 5m, 10m)")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -373,6 +378,14 @@ func main() {
 		parsedReconcileTimeout = constants.DefaultReconcileTimeout
 	}
 	constants.ReconcileTimeout = parsedReconcileTimeout
+
+	parsedStopReconcileTimeout, err := time.ParseDuration(stopReconcileTimeout)
+	if err != nil {
+		setupLog.Error(err, "unable to parse stop reconcile timeout, using default",
+			"value", stopReconcileTimeout, "default", constants.DefaultStopReconcileTimeout.String())
+		parsedStopReconcileTimeout = constants.DefaultStopReconcileTimeout
+	}
+	constants.StopReconcileTimeout = parsedStopReconcileTimeout
 
 	// Get pod identity - use POD_NAME env var if set, otherwise fallback to hostname
 	podName := os.Getenv("POD_NAME")

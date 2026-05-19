@@ -40,12 +40,22 @@ const (
 	// DefaultReconcileTimeout is the default maximum duration a reconcile operation can run before timing out
 	DefaultReconcileTimeout = 15 * time.Minute
 
+	// DefaultStopReconcileTimeout is the default maximum duration a stop reconcile can run before
+	// timing out. Stop is intent-clear ("get this off") and benefits from a shorter ceiling than
+	// create/edit, which legitimately need minutes for StatefulSet rollouts.
+	DefaultStopReconcileTimeout = 5 * time.Minute
+
 	DefaultMinReplicas = 1
 )
 
 var (
-	// ReconcileTimeout is the maximum duration a reconcile operation can run before timing out
+	// ReconcileTimeout is the maximum duration a non-stop reconcile operation can run before timing out
 	ReconcileTimeout = DefaultReconcileTimeout
+
+	// StopReconcileTimeout is the maximum duration a stop reconcile can run before timing out.
+	// tryExtendStopTimeout still grants one extension when pending messages are decreasing, so the
+	// effective worst-case wait for a truly stuck pipeline is roughly 2× this value.
+	StopReconcileTimeout = DefaultStopReconcileTimeout
 )
 
 // Pipeline operation type constants

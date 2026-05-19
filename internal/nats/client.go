@@ -350,6 +350,97 @@ func (n *NATSClient) GetStreamMessageCount(ctx context.Context, streamName strin
 	return info.State.Msgs, nil
 }
 
+// StreamSeqRange holds the lowest and highest sequence numbers currently present in a stream
+// along with the message count. firstSeq > lastSeq when the stream is empty (NATS convention).
+type StreamSeqRange struct {
+	FirstSeq uint64
+	LastSeq  uint64
+	Msgs     uint64
+}
+
+// StreamMessage is a stored message read directly from a stream (no consumer involved).
+type StreamMessage struct {
+	Sequence uint64
+	Subject  string
+	Data     []byte
+	Time     time.Time
+}
+
+// StreamView is a cached handle to a JetStream stream. Construct once per stream then issue
+// many GetMessage / DeleteMessage calls without re-doing the stream-info lookup each time —
+// matters for the orphan sweep where backlog can be large.
+type StreamView struct {
+	name   string
+	stream jetstream.Stream
+}
+
+// StreamView resolves the named stream once and returns a reusable handle. Returns
+// (nil, nil) when the stream does not exist (caller can treat as "nothing to do").
+func (n *NATSClient) StreamView(ctx context.Context, streamName string) (*StreamView, error) {
+	s, err := n.js.Stream(ctx, streamName)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrStreamNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get stream %s: %w", streamName, err)
+	}
+	return &StreamView{name: streamName, stream: s}, nil
+}
+
+// Name returns the underlying stream name.
+func (v *StreamView) Name() string { return v.name }
+
+// SeqRange returns the current first/last sequence and message count for the stream.
+func (v *StreamView) SeqRange(ctx context.Context) (StreamSeqRange, error) {
+	info, err := v.stream.Info(ctx)
+	if err != nil {
+		return StreamSeqRange{}, fmt.Errorf("get stream info %s: %w", v.name, err)
+	}
+	return StreamSeqRange{
+		FirstSeq: info.State.FirstSeq,
+		LastSeq:  info.State.LastSeq,
+		Msgs:     info.State.Msgs,
+	}, nil
+}
+
+// GetMessage fetches a single stored message by sequence. Returns (nil, nil) if the sequence
+// has been deleted (compacted, purged, or swept by a prior reconcile).
+func (v *StreamView) GetMessage(ctx context.Context, seq uint64) (*StreamMessage, error) {
+	raw, err := v.stream.GetMsg(ctx, seq)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get message seq=%d in stream %s: %w", seq, v.name, err)
+	}
+	return &StreamMessage{
+		Sequence: raw.Sequence,
+		Subject:  raw.Subject,
+		Data:     raw.Data,
+		Time:     raw.Time,
+	}, nil
+}
+
+// DeleteMessage removes a single message by sequence. Idempotent — already-deleted
+// sequences return nil, so a re-run after a crashed sweep does not error.
+func (v *StreamView) DeleteMessage(ctx context.Context, seq uint64) error {
+	if err := v.stream.DeleteMsg(ctx, seq); err != nil {
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
+			return nil
+		}
+		return fmt.Errorf("delete message seq=%d in stream %s: %w", seq, v.name, err)
+	}
+	return nil
+}
+
+// PublishMessage publishes a payload to a JetStream subject (synchronous, ack-confirmed).
+func (n *NATSClient) PublishMessage(ctx context.Context, subject string, data []byte) error {
+	if _, err := n.js.Publish(ctx, subject, data); err != nil {
+		return fmt.Errorf("publish to %s: %w", subject, err)
+	}
+	return nil
+}
+
 // DeleteConsumer deletes a consumer from a stream. Best-effort — returns nil if
 // the consumer or stream does not exist.
 func (n *NATSClient) DeleteConsumer(ctx context.Context, streamName, consumerName string) error {
