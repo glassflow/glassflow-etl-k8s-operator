@@ -106,6 +106,18 @@ make test-integration
 - Branch naming follows Linear ticket ID: `ETL-XYZ` or `username/ETL-XYZ-description`
 - No `Co-Authored-By: Claude` or AI attribution in commits/PRs
 
+### Starting work on a new ticket
+
+**Always branch from `main`.** Before creating a branch, run:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b username/ETL-XYZ-short-description
+```
+
+Never start a ticket branch from another feature branch. If the current working directory is on a non-main branch when a ticket is requested, check out main and pull before creating the new branch. Skipping this causes the PR to include unrelated commits from the prior branch.
+
 ## After modifying CRD types
 
 Always run `make manifests generate` after editing `api/v1alpha1/pipeline_types.go` — this regenerates the CRD YAML and DeepCopy methods.
