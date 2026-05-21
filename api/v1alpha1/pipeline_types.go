@@ -43,16 +43,6 @@ type PipelineSpec struct {
 	Config string `json:"config,omitempty"`
 	// +optional
 	Resources *PipelineResources `json:"pipeline_resources,omitempty"`
-
-	// Resolved holds API-computed allocation decisions: graph topology and
-	// per-node stream bindings (stream names, subjects). Populated by the
-	// API on CR create/update once ETL-1064 lands. Empty on CRs created
-	// before that — operator falls back to its legacy pipelinegraph resolver.
-	//
-	// After ETL-1065 strips the operator resolver, these fields become
-	// authoritative.
-	// +optional
-	Resolved *ResolvedPipeline `json:"resolved,omitempty"`
 }
 
 const (
@@ -159,76 +149,6 @@ type ResourceQuantities struct {
 // StorageSpec defines persistent storage size for StatefulSets.
 type StorageSpec struct {
 	Size resource.Quantity `json:"size,omitempty"`
-}
-
-// ResolvedPipeline holds the API-computed allocation for a pipeline.
-// Mirrors the operator's pipelinegraph output so call sites in the operator
-// can swap a resolver call for a direct read from spec.
-type ResolvedPipeline struct {
-	// Nodes is the resolved set of graph nodes (ingestor, dedup, join, sink, otlp).
-	// +optional
-	Nodes []ResolvedNode `json:"nodes,omitempty"`
-}
-
-// FindNode returns a pointer to the node with the given ID, or nil if no
-// such node exists. Safe to call on a nil ResolvedPipeline.
-func (r *ResolvedPipeline) FindNode(id string) *ResolvedNode {
-	if r == nil {
-		return nil
-	}
-	for i := range r.Nodes {
-		if r.Nodes[i].ID == id {
-			return &r.Nodes[i]
-		}
-	}
-	return nil
-}
-
-// ResolvedNode is one node in the resolved pipeline graph.
-type ResolvedNode struct {
-	// ID matches pipelinegraph node IDs (e.g. "ingestor", "ingestor_left",
-	// "dedup_right", "join", "sink", "otlp").
-	ID string `json:"id"`
-	// Type is the node role (ingestor, otlp, dedup, join, sink).
-	Type string `json:"type"`
-	// Replicas resolved from pipeline_resources / defaults.
-	// +optional
-	Replicas int32 `json:"replicas,omitempty"`
-	// Output is set on nodes that produce streams (ingestor, otlp, dedup).
-	// +optional
-	Output *NodeOutput `json:"output,omitempty"`
-	// Input is set on nodes that consume a single stream (dedup, sink).
-	// +optional
-	Input *NodeInput `json:"input,omitempty"`
-	// JoinInput is set only on the join node and carries its two inputs.
-	// +optional
-	JoinInput *NodeJoinInput `json:"joinInput,omitempty"`
-}
-
-// NodeOutput describes the streams a node produces.
-type NodeOutput struct {
-	StreamPrefix      string           `json:"streamPrefix"`
-	SubjectPrefix     string           `json:"subjectPrefix"`
-	Streams           []ResolvedStream `json:"streams"`
-	TotalSubjectCount int32            `json:"totalSubjectCount"`
-}
-
-// NodeInput describes the stream a node consumes.
-type NodeInput struct {
-	StreamPrefix string           `json:"streamPrefix"`
-	Streams      []ResolvedStream `json:"streams"`
-}
-
-// NodeJoinInput is the join node's pair of inputs.
-type NodeJoinInput struct {
-	Left  NodeInput `json:"left"`
-	Right NodeInput `json:"right"`
-}
-
-// ResolvedStream is one resolved JetStream stream — name plus the subjects it covers.
-type ResolvedStream struct {
-	Name     string   `json:"name"`
-	Subjects []string `json:"subjects"`
 }
 
 // PipelineStatus defines the observed state of Pipeline.
