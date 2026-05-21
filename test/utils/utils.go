@@ -32,6 +32,15 @@ const (
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
 
 	natsHelmchartURL = "https://nats-io.github.io/k8s/helm/charts/"
+
+	postgresHelmchartURL  = "https://charts.bitnami.com/bitnami"
+	postgresHelmRelease   = "postgresql"
+	postgresHelmChart     = "bitnami/postgresql"
+	postgresAdminPassword = "testpass"
+
+	// NoopComponentImage is the test image built from test/docker/Dockerfile.noop.
+	// Components use this image so pods start and become Ready without real Kafka/ClickHouse.
+	NoopComponentImage = "glassflow-noop-component:test"
 )
 
 func warnError(err error) {
@@ -59,19 +68,21 @@ func Run(cmd *exec.Cmd) (string, error) {
 }
 
 func InstallNATS() error {
-	cmd := exec.Command("helm", "repo", "add", "nats", natsHelmchartURL)
+	cmd := exec.Command("helm", "repo", "add", "nats", natsHelmchartURL, "--force-update")
 	_, err := Run(cmd)
 	if err != nil {
 		return fmt.Errorf("add nats repo: %w", err)
 	}
 
 	cmd = exec.Command(
-		"helm", "install", "nats", "nats/nats",
+		"helm", "upgrade", "--install", "nats", "nats/nats",
 		"--set", "config.jetstream.enabled=true",
-		"--set", "config.cluster.enabled=true",
+		"--set", "config.cluster.enabled=false",
 		"--set", "service.enabled=true",
 		"--set", "service.ports.nats.enabled=true",
 		"--set", "service.ports.monitor.enabled=false",
+		"--wait",
+		"--timeout", "3m",
 	)
 	_, err = Run(cmd)
 	if err != nil {
@@ -194,6 +205,88 @@ func GetProjectDir() (string, error) {
 	}
 	wd = strings.ReplaceAll(wd, "/test/e2e", "")
 	return wd, nil
+}
+
+// InstallPostgres installs PostgreSQL via Helm (bitnami chart) into the default namespace.
+func InstallPostgres() error {
+	cmd := exec.Command("helm", "repo", "add", "bitnami", postgresHelmchartURL, "--force-update")
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("add bitnami repo: %w", err)
+	}
+
+	cmd = exec.Command("helm", "repo", "update")
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("update helm repos: %w", err)
+	}
+
+	cmd = exec.Command(
+		"helm", "upgrade", "--install", postgresHelmRelease, postgresHelmChart,
+		"--set", fmt.Sprintf("auth.postgresPassword=%s", postgresAdminPassword),
+		"--set", "primary.persistence.enabled=false",
+		"--wait",
+		"--timeout", "5m",
+	)
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("install postgresql: %w", err)
+	}
+	return nil
+}
+
+// IsPostgresInstalled checks whether the postgresql helm release exists and is healthy.
+func IsPostgresInstalled() bool {
+	cmd := exec.Command("helm", "status", postgresHelmRelease)
+	output, err := Run(cmd)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(output, "deployed")
+}
+
+// UninstallPostgres removes the postgresql helm release.
+func UninstallPostgres() {
+	cmd := exec.Command("helm", "delete", postgresHelmRelease)
+	if _, err := Run(cmd); err != nil {
+		warnError(fmt.Errorf("uninstall postgresql: %w", err))
+	}
+}
+
+// BuildNoopImage builds the no-op component Docker image used in e2e tests.
+func BuildNoopImage() error {
+	dir, _ := GetProjectDir()
+	cmd := exec.Command("docker", "build",
+		"-t", NoopComponentImage,
+		"-f", "test/docker/Dockerfile.noop",
+		".",
+	)
+	cmd.Dir = dir
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("build noop image: %w", err)
+	}
+	return nil
+}
+
+// ListNATSStreams returns stream names from NATS that start with the given prefix,
+// by running nats stream ls inside the nats-box pod.
+func ListNATSStreams(prefix string) ([]string, error) {
+	cmd := exec.Command("kubectl", "exec", "-n", "default", "deploy/nats-box", "--",
+		"nats", "stream", "ls", "--json",
+	)
+	output, err := Run(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("list NATS streams: %w", err)
+	}
+
+	var allStreams []string
+	for _, line := range GetNonEmptyLines(output) {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "\"") || strings.HasPrefix(line, prefix) {
+			name := strings.Trim(line, `",`)
+			if strings.HasPrefix(name, prefix) {
+				allStreams = append(allStreams, name)
+			}
+		}
+	}
+	return allStreams, nil
 }
 
 // UncommentCode searches for target in the file and remove the comment prefix
