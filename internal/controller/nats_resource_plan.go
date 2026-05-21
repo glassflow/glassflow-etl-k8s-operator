@@ -64,14 +64,9 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 		}
 	}
 
-	graphConfig, err := pipelinegraph.ConfigFromPipelineSpec(p.Spec)
+	resolved, err := ensureResolved(p.Spec)
 	if err != nil {
-		return natsResourcePlan{}, fmt.Errorf("build pipeline graph graphConfig: %w", err)
-	}
-
-	graph, err := pipelinegraph.New(graphConfig)
-	if err != nil {
-		return natsResourcePlan{}, fmt.Errorf("build pipeline graph: %w", err)
+		return natsResourcePlan{}, err
 	}
 
 	plan := natsResourcePlan{
@@ -81,19 +76,19 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 		DLQStream: nats.StreamConfig{
 			Name: getDLQStreamName(p.Spec.ID),
 		},
-		Streams: make([]nats.StreamConfig, 0, len(graphConfig.Nodes)),
+		Streams: make([]nats.StreamConfig, 0, len(resolved.Nodes)),
 	}
 
-	for _, node := range graphConfig.Nodes {
+	for _, node := range resolved.Nodes {
 		var nodePlan natsNodePlan
 
 		switch node.Type {
-		case pipelinegraph.NodeTypeJoin:
-			nodePlan, err = buildJoinNodePlan(graph, node, p.Spec.Join, limits)
-		case pipelinegraph.NodeTypeIngestor, pipelinegraph.NodeTypeDedup:
-			nodePlan, err = buildNodePlan(graph, node, limits.withDiscard(jetstream.DiscardNew))
-		case pipelinegraph.NodeTypeOTLPSource:
-			nodePlan, err = buildNodePlan(graph, node, limits.withDiscard(jetstream.DiscardNew))
+		case string(pipelinegraph.NodeTypeJoin):
+			nodePlan, err = buildJoinNodePlan(node, p.Spec.Join, limits)
+		case string(pipelinegraph.NodeTypeIngestor), string(pipelinegraph.NodeTypeDedup):
+			nodePlan, err = buildNodePlan(node, limits.withDiscard(jetstream.DiscardNew))
+		case string(pipelinegraph.NodeTypeOTLPSource):
+			nodePlan, err = buildNodePlan(node, limits.withDiscard(jetstream.DiscardNew))
 		// sink doesn't have output
 		default:
 			continue
@@ -103,7 +98,7 @@ func (r *PipelineReconciler) buildNATSResourcePlan(p etlv1alpha1.Pipeline) (nats
 			return natsResourcePlan{}, err
 		}
 
-		if node.Type == pipelinegraph.NodeTypeOTLPSource {
+		if node.Type == string(pipelinegraph.NodeTypeOTLPSource) {
 			plan.OTLPSourceStreams = append(plan.OTLPSourceStreams, nodePlan.Streams...)
 		} else {
 			plan.Streams = append(plan.Streams, nodePlan.Streams...)
@@ -119,39 +114,35 @@ func (l streamLimits) withDiscard(d jetstream.DiscardPolicy) streamLimits {
 	return l
 }
 
-func buildNodePlan(graph *pipelinegraph.Graph, node pipelinegraph.NodeConfig, lim streamLimits) (natsNodePlan, error) {
-	output, err := graph.GetOutput(node.ID)
-	if err != nil {
-		return natsNodePlan{}, fmt.Errorf("resolve output for node %s: %w", node.ID, err)
+func buildNodePlan(node etlv1alpha1.ResolvedNode, lim streamLimits) (natsNodePlan, error) {
+	if node.Output == nil {
+		return natsNodePlan{}, fmt.Errorf("resolved spec missing output for node %s", node.ID)
 	}
-
 	return natsNodePlan{
-		Streams: buildOutputStreams(output, lim),
+		Streams: buildOutputStreams(node.Output, lim),
 	}, nil
 }
 
 func buildJoinNodePlan(
-	graph *pipelinegraph.Graph,
-	node pipelinegraph.NodeConfig,
+	node etlv1alpha1.ResolvedNode,
 	join etlv1alpha1.Join,
 	lim streamLimits,
 ) (natsNodePlan, error) {
-	producerPlan, err := buildNodePlan(graph, node, lim.withDiscard(jetstream.DiscardNew))
+	producerPlan, err := buildNodePlan(node, lim.withDiscard(jetstream.DiscardNew))
 	if err != nil {
 		return natsNodePlan{}, err
 	}
 
-	inputs, err := graph.GetJoinInput(node.ID)
-	if err != nil {
-		return natsNodePlan{}, fmt.Errorf("resolve join inputs for node %s: %w", node.ID, err)
+	if node.JoinInput == nil {
+		return natsNodePlan{}, fmt.Errorf("resolved spec missing join inputs for node %s", node.ID)
 	}
 
-	leftStore, err := inputBindingStoreName(inputs.Left)
+	leftStore, err := inputBindingStoreName(&node.JoinInput.Left)
 	if err != nil {
 		return natsNodePlan{}, fmt.Errorf("resolve left join input store name: %w", err)
 	}
 
-	rightStore, err := inputBindingStoreName(inputs.Right)
+	rightStore, err := inputBindingStoreName(&node.JoinInput.Right)
 	if err != nil {
 		return natsNodePlan{}, fmt.Errorf("resolve right join input store name: %w", err)
 	}
@@ -171,7 +162,7 @@ func buildJoinNodePlan(
 	}, nil
 }
 
-func buildOutputStreams(output pipelinegraph.OutputBinding, lim streamLimits) []nats.StreamConfig {
+func buildOutputStreams(output *etlv1alpha1.NodeOutput, lim streamLimits) []nats.StreamConfig {
 	streams := make([]nats.StreamConfig, 0, len(output.Streams))
 	for _, stream := range output.Streams {
 		streams = append(streams, nats.StreamConfig{
@@ -204,8 +195,8 @@ func staleStreamNames(existingNames []string, newPlan natsResourcePlan) []string
 	return stale
 }
 
-func inputBindingStoreName(binding pipelinegraph.InputBinding) (string, error) {
-	if len(binding.Streams) == 0 {
+func inputBindingStoreName(binding *etlv1alpha1.NodeInput) (string, error) {
+	if binding == nil || len(binding.Streams) == 0 {
 		return "", fmt.Errorf("input binding has no streams")
 	}
 
