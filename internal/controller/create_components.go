@@ -102,9 +102,9 @@ func (r *PipelineReconciler) createPipelineComponents(
 // createIngestors creates ingestor deployments for the pipeline
 func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
 	ing := p.Spec.Source
-	resolved, err := ensureResolved(p.Spec)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
-		return fmt.Errorf("resolve pipeline for ingestors: %w", err)
+		return fmt.Errorf("build pipeline graph for ingestors: %w", err)
 	}
 
 	for i, t := range ing.Streams {
@@ -140,13 +140,12 @@ func (r *PipelineReconciler) createIngestors(ctx context.Context, _ logr.Logger,
 			}
 		}
 
-		ingestorNode := resolved.FindNode(pipelinegraph.IngestorNodeID(p.Spec, i))
-		if ingestorNode == nil || ingestorNode.Output == nil {
-			return fmt.Errorf("resolved spec missing ingestor output for stream %d", i)
+		outputBinding, err := graph.GetOutput(pipelinegraph.IngestorNodeID(p.Spec, i))
+		if err != nil {
+			return fmt.Errorf("resolve ingestor output for stream %d: %w", i, err)
 		}
-		outputBinding := ingestorNode.Output
 
-		subjectCountEnvVars := ingestorNATSSubjectCountEnvVars(t, int(outputBinding.TotalSubjectCount))
+		subjectCountEnvVars := ingestorNATSSubjectCountEnvVars(t, outputBinding.TotalSubjectCount)
 
 		err = r.createHeadlessService(ctx, ns.GetName(), resourceRef, ingestorLabels)
 		if err != nil {
@@ -226,9 +225,9 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		return fmt.Errorf("join requires at least 2 source streams")
 	}
 
-	resolved, err := ensureResolved(p.Spec)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
-		return fmt.Errorf("resolve pipeline for join: %w", err)
+		return fmt.Errorf("build pipeline graph for join: %w", err)
 	}
 
 	resourceRef := r.getStatefulSetResourceName(p, constants.JoinComponent)
@@ -253,21 +252,20 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 		}
 	}
 
-	joinNode := resolved.FindNode(pipelinegraph.JoinNodeID())
-	if joinNode == nil || joinNode.JoinInput == nil {
-		return fmt.Errorf("resolved spec missing join node or its inputs")
+	joinInputs, err := graph.GetJoinInput(pipelinegraph.JoinNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve join input: %w", err)
 	}
-	joinInputs := joinNode.JoinInput
 	if len(joinInputs.Left.Streams) == 0 {
 		return fmt.Errorf("resolve join input: left input has no streams")
 	}
 	if len(joinInputs.Right.Streams) == 0 {
 		return fmt.Errorf("resolve join input: right input has no streams")
 	}
-	if joinNode.Output == nil {
-		return fmt.Errorf("resolved spec missing join output")
+	joinOutput, err := graph.GetOutput(pipelinegraph.JoinNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve join output: %w", err)
 	}
-	joinOutput := joinNode.Output
 
 	err = r.createHeadlessService(ctx, namespace, resourceRef, joinLabels)
 	if err != nil {
@@ -343,9 +341,9 @@ func (r *PipelineReconciler) createJoin(ctx context.Context, ns v1.Namespace, la
 
 // createSink creates a sink StatefulSet (and headless Service) for the pipeline.
 func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, labels map[string]string, secret v1.Secret, p etlv1alpha1.Pipeline) error {
-	resolved, err := ensureResolved(p.Spec)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
-		return fmt.Errorf("resolve pipeline for sink: %w", err)
+		return fmt.Errorf("build pipeline graph for sink: %w", err)
 	}
 
 	resourceRef := r.getStatefulSetResourceName(p, constants.SinkComponent)
@@ -369,11 +367,10 @@ func (r *PipelineReconciler) createSink(ctx context.Context, ns v1.Namespace, la
 		}
 	}
 
-	sinkNode := resolved.FindNode(pipelinegraph.SinkNodeID())
-	if sinkNode == nil || sinkNode.Input == nil {
-		return fmt.Errorf("resolved spec missing sink node or its input")
+	sinkInput, err := graph.GetInput(pipelinegraph.SinkNodeID())
+	if err != nil {
+		return fmt.Errorf("resolve sink input: %w", err)
 	}
-	sinkInput := sinkNode.Input
 
 	err = r.createHeadlessService(ctx, namespace, resourceRef, sinkLabels)
 	if err != nil {
@@ -452,9 +449,9 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 		return nil
 	}
 
-	resolved, err := ensureResolved(p.Spec)
+	graph, err := pipelinegraph.NewFromPipelineSpec(p.Spec)
 	if err != nil {
-		return fmt.Errorf("resolve pipeline for dedups: %w", err)
+		return fmt.Errorf("build pipeline graph for dedups: %w", err)
 	}
 
 	for _, i := range indices {
@@ -486,7 +483,7 @@ func (r *PipelineReconciler) createDedups(ctx context.Context, _ logr.Logger, ns
 			}
 		}
 
-		if err := r.createSingleDedup(ctx, ns, labels, secret, p, resolved, i, topicName, storageSize, storageClass, extraEnv); err != nil {
+		if err := r.createSingleDedup(ctx, ns, labels, secret, p, graph, i, topicName, storageSize, storageClass, extraEnv); err != nil {
 			return fmt.Errorf("create dedup-%d statefulset: %w", i, err)
 		}
 	}
@@ -502,7 +499,7 @@ func (r *PipelineReconciler) createSingleDedup(
 	labels map[string]string,
 	secret v1.Secret,
 	p etlv1alpha1.Pipeline,
-	resolved etlv1alpha1.ResolvedPipeline,
+	graph *pipelinegraph.Graph,
 	index int,
 	topicName string,
 	storageSize string,
@@ -529,14 +526,16 @@ func (r *PipelineReconciler) createSingleDedup(
 		}
 	}
 
-	dedupNode := resolved.FindNode(pipelinegraph.DedupNodeID(p.Spec, index))
-	if dedupNode == nil || dedupNode.Input == nil || dedupNode.Output == nil {
-		return fmt.Errorf("resolved spec missing dedup node or its bindings for index %d", index)
+	dedupInput, err := graph.GetInput(pipelinegraph.DedupNodeID(p.Spec, index))
+	if err != nil {
+		return fmt.Errorf("resolve dedup input for index %d: %w", index, err)
 	}
-	dedupInput := dedupNode.Input
-	dedupOutput := dedupNode.Output
+	dedupOutput, err := graph.GetOutput(pipelinegraph.DedupNodeID(p.Spec, index))
+	if err != nil {
+		return fmt.Errorf("resolve dedup output for index %d: %w", index, err)
+	}
 
-	if err := r.createHeadlessService(ctx, ns.GetName(), resourceRef, dedupLabels); err != nil {
+	if err = r.createHeadlessService(ctx, ns.GetName(), resourceRef, dedupLabels); err != nil {
 		return fmt.Errorf("create dedup headless service %s: %w", resourceRef, err)
 	}
 
