@@ -17,6 +17,7 @@ import (
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/errs"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/models"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/nats"
+	"github.com/glassflow/glassflow-etl-k8s-operator/internal/notifications"
 	"github.com/glassflow/glassflow-etl-k8s-operator/internal/storage/postgres"
 )
 
@@ -93,16 +94,23 @@ func (c *ComponentSignalsConsumer) handleMessage(ctx context.Context, msg jetstr
 	}
 
 	c.log.Info(
-		"stopping pipeline",
-		"pipeline_id",
-		message.PipelineID,
-		"reason",
-		message.Reason,
-		"text",
-		message.Text,
-		"component",
-		message.Component,
+		"received component signal",
+		"pipeline_id", message.PipelineID,
+		"reason", message.Reason,
+		"text", message.Text,
+		"component", message.Component,
 	)
+
+	if message.Reason == constants.ReasonBackpressure {
+		notif := notifications.NewPipelineBackpressureNotification(message.PipelineID, nil)
+		if err := notifications.Publish(ctx, notif); err != nil {
+			c.log.Error(err, "failed to publish backpressure notification", "pipeline_id", message.PipelineID)
+		}
+		if err := msg.Ack(); err != nil {
+			c.log.Error(err, "failed to ack message")
+		}
+		return
+	}
 
 	err = c.stopPipeline(ctx, message)
 	if err != nil {

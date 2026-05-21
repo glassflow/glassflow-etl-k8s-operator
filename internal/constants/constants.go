@@ -84,6 +84,11 @@ const (
 	OperatorConsumer       = "operator-consumer"
 )
 
+// Component signal reason constants
+const (
+	ReasonBackpressure = "stream back-pressure"
+)
+
 // Component secrets created in pipeline namespace (same DB/encryption as API)
 const (
 	ComponentDatabaseSecretName   = "glassflow-component-database-url"

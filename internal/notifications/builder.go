@@ -161,3 +161,16 @@ func NewPipelineFailedNotification(pipelineID, title, message string, metadata m
 
 	return notification
 }
+
+// NewPipelineBackpressureNotification creates a notification for a pipeline back-pressure event.
+func NewPipelineBackpressureNotification(pipelineID string, metadata map[string]interface{}) *Notification {
+	return newPipelineNotification(
+		pipelineID,
+		SeverityWarning,
+		EventTypePipelineBackpressure,
+		"Pipeline Back-Pressure Detected",
+		"Your OTLP pipeline is under back-pressure — the stream buffer is full. Scale up your sink to resume normal ingestion.",
+		[]string{"backpressure"},
+		metadata,
+	)
+}

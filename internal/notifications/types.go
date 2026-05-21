@@ -32,6 +32,8 @@ const (
 	EventTypePipelineDeleted EventType = "pipeline_deleted"
 	// EventTypePipelineFailed indicates a pipeline failed
 	EventTypePipelineFailed EventType = "pipeline_failed"
+	// EventTypePipelineBackpressure indicates a pipeline is experiencing back-pressure
+	EventTypePipelineBackpressure EventType = "pipeline_backpressure"
 )
 
 // Metadata contains additional metadata for a notification
